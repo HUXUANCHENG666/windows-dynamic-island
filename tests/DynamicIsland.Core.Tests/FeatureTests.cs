@@ -413,6 +413,8 @@ public class FeatureTests
         {
             Stealth = true,
             TranslateDirection = "zh-en",
+            NotificationCenter = true,
+            NotificationCenterExplained = true,
             HideProcesses = new List<string> { "powerpnt", "vlc" },
             Docks = new List<MonitorDock>
             {
@@ -422,9 +424,14 @@ public class FeatureTests
         var loaded = SettingsJson.Deserialize(SettingsJson.Serialize(settings));
         Assert.True(loaded.Stealth);
         Assert.Equal("zh-en", loaded.TranslateDirection);
+        Assert.True(loaded.NotificationCenter);
+        Assert.True(loaded.NotificationCenterExplained);
         Assert.Equal(new[] { "powerpnt", "vlc" }, loaded.HideProcesses);
         Assert.Equal("LeftCenter", Assert.Single(loaded.Docks).Anchor);
         Assert.False(SettingsJson.Deserialize("{}").Stealth);
+        Assert.False(SettingsJson.Deserialize("{}").NotificationCenter);
+        Assert.False(SettingsJson.Deserialize("{}").NotificationCenterExplained);
+        Assert.False(new AppSettings().NotificationCenter);
         Assert.NotNull(SettingsJson.Deserialize("{}").HideProcesses);
     }
 }

@@ -17,9 +17,11 @@ public partial class NoticeView : UserControl
         var ui = new FontFamily(IslandFonts.Ui);
         Title.FontFamily = ui;
         Detail.FontFamily = ui;
+        AppName.FontFamily = ui;
         Percent.FontFamily = ui;
         Title.Foreground = Theme.Title;
         Detail.Foreground = Theme.Artist;
+        AppName.Foreground = Theme.Quiet;
         Percent.Foreground = Theme.Title;
         BarTrack.Background = Theme.Track;
         BarFill.Background = Theme.Title;
@@ -45,6 +47,7 @@ public partial class NoticeView : UserControl
 
     public void SetVolume(VolumeReading reading)
     {
+        HideApp();
         ShowIcon(speaker: true, battery: false, bell: false);
         SpeakerSlash.Visibility = reading.Muted ? Visibility.Visible : Visibility.Collapsed;
         SpeakerWave.Visibility = reading.Muted ? Visibility.Collapsed : Visibility.Visible;
@@ -58,6 +61,7 @@ public partial class NoticeView : UserControl
 
     public void SetBattery(PowerAnnouncement announcement)
     {
+        HideApp();
         ShowIcon(speaker: false, battery: true, bell: false);
         Battery.Set(announcement.Percent, announcement.Charging);
         Ui.Text(Title, announcement.Title);
@@ -67,14 +71,21 @@ public partial class NoticeView : UserControl
         BarHost.Visibility = Visibility.Collapsed;
     }
 
-    public void SetToast(string title, string body)
+    public void SetToast(string title, string body) => SetIncoming("", title, body);
+
+    public void SetIncoming(string app, string title, string summary)
     {
         ShowIcon(speaker: false, battery: false, bell: true);
+        bool hasApp = !string.IsNullOrWhiteSpace(app);
+        AppName.Visibility = hasApp ? Visibility.Visible : Visibility.Collapsed;
+        if (hasApp)
+            Ui.Text(AppName, app);
         Ui.Text(Title, string.IsNullOrWhiteSpace(title) ? "通知" : title);
-        Ui.Text(Detail, body);
+        Ui.Text(Detail, summary);
         Percent.Text = "";
-        Detail.Visibility = string.IsNullOrWhiteSpace(body) ? Visibility.Collapsed : Visibility.Visible;
+        Detail.Visibility = string.IsNullOrWhiteSpace(summary) ? Visibility.Collapsed : Visibility.Visible;
         BarHost.Visibility = Visibility.Collapsed;
+        _volumeLevel = -1;
     }
 
     public void SetVertical(bool vertical)
@@ -94,6 +105,9 @@ public partial class NoticeView : UserControl
             Copy.HorizontalAlignment = HorizontalAlignment.Stretch;
             Title.TextAlignment = TextAlignment.Center;
             Detail.TextAlignment = TextAlignment.Center;
+            AppName.TextAlignment = TextAlignment.Center;
+            AppName.HorizontalAlignment = HorizontalAlignment.Center;
+            Detail.MaxHeight = 96;
             Title.HorizontalAlignment = HorizontalAlignment.Center;
             Grid.SetColumn(Percent, 0);
             Grid.SetRow(Percent, 1);
@@ -115,12 +129,17 @@ public partial class NoticeView : UserControl
         Copy.HorizontalAlignment = HorizontalAlignment.Stretch;
         Title.TextAlignment = TextAlignment.Left;
         Detail.TextAlignment = TextAlignment.Left;
+        AppName.TextAlignment = TextAlignment.Left;
+        AppName.HorizontalAlignment = HorizontalAlignment.Stretch;
+        Detail.MaxHeight = 54;
         Title.HorizontalAlignment = HorizontalAlignment.Stretch;
         Grid.SetColumn(Percent, 1);
         Grid.SetRow(Percent, 0);
         Percent.Margin = new Thickness(10, 0, 0, 0);
         Percent.HorizontalAlignment = HorizontalAlignment.Right;
     }
+
+    void HideApp() => AppName.Visibility = Visibility.Collapsed;
 
     void ShowIcon(bool speaker, bool battery, bool bell)
     {

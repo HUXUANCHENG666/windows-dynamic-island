@@ -39,8 +39,8 @@ public static class IslandMetrics
     public const double BatteryW = 316;
     public const double BatteryH = 76;
 
-    public const double ToastW = 372;
-    public const double ToastH = 96;
+    public const double ToastW = 400;
+    public const double ToastH = 120;
 
     public const double TranslateW = 400;
     public const double TranslateH = 176;
@@ -72,8 +72,8 @@ public static class IslandMetrics
     public const double VBatteryW = 176;
     public const double VBatteryH = 196;
 
-    public const double VToastW = 210;
-    public const double VToastH = 220;
+    public const double VToastW = 220;
+    public const double VToastH = 268;
 
     public const double VTranslateW = 236;
     public const double VTranslateH = 340;

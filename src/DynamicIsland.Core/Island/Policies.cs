@@ -25,6 +25,7 @@ public static class NoticePolicy
     public static readonly TimeSpan VolumeHold = TimeSpan.FromMilliseconds(1700);
     public static readonly TimeSpan BatteryHold = TimeSpan.FromMilliseconds(2500);
     public static readonly TimeSpan ToastHold = TimeSpan.FromMilliseconds(3200);
+    public static readonly TimeSpan GuidanceHold = TimeSpan.FromSeconds(8);
     public static readonly TimeSpan TranslateHold = TimeSpan.FromMilliseconds(8000);
     public static readonly TimeSpan VolumeQueueLife = TimeSpan.FromSeconds(2.5);
     public static readonly TimeSpan BatteryQueueLife = TimeSpan.FromSeconds(12);

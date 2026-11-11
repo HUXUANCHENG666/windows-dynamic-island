@@ -22,8 +22,11 @@ public sealed class IslandDirector
     /// <summary>全屏或隐身时收成小点。提示弹出来的那一会儿不是小点。</summary>
     public bool ShowAsDot => Occluded && !Expanded;
 
-    /// <summary>用户打开的预览还在。鼠标离开、拖动吸附都不能把它收起来。</summary>
-    public bool CameraSession => CameraOpen && Mode == IslandMode.Camera;
+    /// <summary>
+    /// 用户打开的预览还在。鼠标离开、拖动吸附都不能把它收起来。
+    /// 音量或通知短暂盖住预览时，设备也继续开着，提示结束再回到摄像头。
+    /// </summary>
+    public bool CameraSession => CameraOpen && (Mode == IslandMode.Camera || _notice is not null);
 
     /// <summary>还有一条没被关掉的译文。</summary>
     public bool HasTranslation => !string.IsNullOrWhiteSpace(LastTranslation);
@@ -38,12 +41,14 @@ public sealed class IslandDirector
     DateTime _noticeUntil;
     IslandMode? _queued;
     DateTime _queuedAt;
+    TimeSpan? _queuedHold;
     DateTime? _expandAt;
     DateTime? _collapseAt;
     bool _translationOpen;
     bool _selectionHold;
     bool _dropTranslationOnCollapse;
     bool _reopenTranslation;
+    bool _resumeTranslation;
 
     public bool HasScheduledWork =>
         _expandAt != null || _collapseAt != null || _notice != null || _queued != null;
@@ -285,27 +290,29 @@ public sealed class IslandDirector
             _collapseAt = now + TimeSpan.FromSeconds(5);
     }
 
-    public void PushNotice(IslandMode mode, DateTime now)
+    public void PushNotice(IslandMode mode, DateTime now, TimeSpan? hold = null)
     {
         if (mode is not (IslandMode.Volume or IslandMode.Battery or IslandMode.Toast or IslandMode.Translate))
             throw new ArgumentOutOfRangeException(nameof(mode));
 
         if (_notice == mode)
         {
-            _noticeUntil = now + NoticePolicy.Hold(mode);
+            _noticeUntil = now + (hold ?? NoticePolicy.Hold(mode));
             return;
         }
 
+        // 摄像头不算“正在读内容”。提示马上盖上去，结束再回到预览，设备不因此关掉。
         bool interacting = !Occluded && PointerInside && Expanded && _notice is null
-            && Mode is IslandMode.Media or IslandMode.Timer or IslandMode.Idle or IslandMode.Camera;
+            && Mode is IslandMode.Media or IslandMode.Timer or IslandMode.Idle;
         if (interacting)
         {
             _queued = mode;
             _queuedAt = now;
+            _queuedHold = hold;
             return;
         }
 
-        Present(mode, now);
+        Present(mode, now, hold);
     }
 
     public void Tick(DateTime now)
@@ -325,20 +332,7 @@ public sealed class IslandDirector
         }
 
         if (_notice is not null && now >= _noticeUntil)
-        {
-            _notice = null;
-            Mode = Map(Ambient);
-            if (Occluded || !PointerInside)
-            {
-                Expanded = false;
-                _collapseAt = null;
-                PromoteQueue(now);
-            }
-            else
-            {
-                Expanded = true;
-            }
-        }
+            EndNotice(now);
 
         if (CameraSession || TranslationGesture.ShouldHoldAgainstPointerLeave(
                 IsShowingTranslation, TranslationCopied, _selectionHold))
@@ -361,8 +355,8 @@ public sealed class IslandDirector
             _dropTranslationOnCollapse = false;
             if (_notice != null)
             {
-                _notice = null;
-                Mode = Map(Ambient);
+                EndNotice(now);
+                return;
             }
             else if (Mode == IslandMode.Translate)
             {
@@ -376,6 +370,8 @@ public sealed class IslandDirector
 
     void OpenStoredTranslation()
     {
+        CameraOpen = false;
+        _resumeTranslation = false;
         _translationOpen = true;
         _notice = null;
         _dropTranslationOnCollapse = false;
@@ -397,11 +393,45 @@ public sealed class IslandDirector
         ? TimeSpan.FromMilliseconds(240)
         : NoticePolicy.HoverCollapseDelay;
 
-    void Present(IslandMode mode, DateTime now)
+    void EndNotice(DateTime now)
     {
+        _notice = null;
+        if (CameraOpen && !Occluded)
+        {
+            _resumeTranslation = false;
+            Mode = IslandMode.Camera;
+            Expanded = true;
+            _expandAt = null;
+            _collapseAt = null;
+            return;
+        }
+
+        if (_resumeTranslation && HasTranslation && !Occluded && PointerInside)
+        {
+            OpenStoredTranslation();
+            return;
+        }
+
+        _resumeTranslation = false;
+        Mode = Map(Ambient);
+        if (Occluded || !PointerInside)
+        {
+            Expanded = false;
+            _collapseAt = null;
+            PromoteQueue(now);
+        }
+        else
+        {
+            Expanded = true;
+        }
+    }
+
+    void Present(IslandMode mode, DateTime now, TimeSpan? hold = null)
+    {
+        _resumeTranslation = IsShowingTranslation && mode != IslandMode.Translate;
         ParkTranslation();
         _notice = mode;
-        _noticeUntil = now + NoticePolicy.Hold(mode);
+        _noticeUntil = now + (hold ?? NoticePolicy.Hold(mode));
         Mode = mode;
         Expanded = true;
         _expandAt = null;
@@ -414,10 +444,12 @@ public sealed class IslandDirector
             return;
 
         var age = now - _queuedAt;
+        var hold = _queuedHold;
         _queued = null;
+        _queuedHold = null;
         if (age > NoticePolicy.QueueLife(queued))
             return;
 
-        Present(queued, now);
+        Present(queued, now, hold);
     }
 }

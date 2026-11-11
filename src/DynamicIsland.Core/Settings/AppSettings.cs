@@ -27,6 +27,12 @@ public sealed class AppSettings
     public List<string> HideProcesses { get; set; } = new();
     public List<MonitorDock> Docks { get; set; } = new();
     public string TranslateDirection { get; set; } = "auto";
+
+    /// <summary>用户希望在岛上显示通知中心。默认关，允许之后才会去读。</summary>
+    public bool NotificationCenter { get; set; }
+
+    /// <summary>第一次打开时已经在岛上说明过权限。拒绝之后不再重复那句介绍。</summary>
+    public bool NotificationCenterExplained { get; set; }
 }
 
 public static class SettingsJson
