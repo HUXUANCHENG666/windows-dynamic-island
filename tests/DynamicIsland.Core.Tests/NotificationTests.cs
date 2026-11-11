@@ -21,7 +21,9 @@ public class NotificationTests
         Assert.False(NotificationAccessPolicy.MayListen(true, NotificationAccess.Unknown));
         Assert.False(NotificationAccessPolicy.MayListen(true, NotificationAccess.Unavailable));
         Assert.True(NotificationAccessPolicy.MayListen(true, NotificationAccess.Allowed));
-        Assert.InRange(NotificationPolicy.PollInterval.TotalMilliseconds, 500, 2000);
+        // 轮询只是事件订阅不可用时的兜底，通知堆得多时每次都要跨进程重读，
+        // 所以不再要求亚秒级；上限放宽到 8 秒，避免有人把它改回 1 秒。
+        Assert.InRange(NotificationPolicy.PollInterval.TotalMilliseconds, 1000, 8000);
     }
 
     [Fact]

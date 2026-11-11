@@ -62,6 +62,13 @@ public partial class IslandWindow : Window
     double _throwOffsetX;
     double _throwOffsetY;
     TimeSpan _lastThrowTick;
+    bool _gliding;
+    double _glideFromX;
+    double _glideFromY;
+    double _glideToX;
+    double _glideToY;
+    double _glideElapsed;
+    TimeSpan _glideLastTick;
     bool _eatClick;
     NotificationCard? _toastCard;
     IslandMode _trackedMode = IslandMode.Idle;
@@ -468,6 +475,7 @@ public partial class IslandWindow : Window
                 NativeMethods.RemoveClipboardFormatListener(hwnd);
             _clipboardHooked = false;
         }
+        Log.Close();
         base.OnClosed(e);
         Application.Current?.Shutdown();
     }
@@ -1306,9 +1314,28 @@ public partial class IslandWindow : Window
         DockStore.Remember(Settings.Docks, monitor.DeviceName, anchor);
         Settings.MonitorDeviceName = monitor.IsPrimary ? null : monitor.DeviceName;
         SettingsStore.Save(Settings);
-        _placed = default;
         _dragging = false;
+
+        var hwnd = new WindowInteropHelper(this).Handle;
+        NativeMethods.RECT from = default;
+        bool glide = hwnd != IntPtr.Zero && NativeMethods.GetWindowRect(hwnd, out from);
+        _placed = default;
         Position();
+        if (!glide || hwnd == IntPtr.Zero)
+        {
+            EvaluateHide();
+            return;
+        }
+
+        NativeMethods.GetWindowRect(hwnd, out var to);
+        if (to.Left != from.Left || to.Top != from.Top)
+        {
+            // Position 已经直接放到目标位置，先挪回原处，再从那滑过去，免得瞬移。
+            NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, from.Left, from.Top, 0, 0,
+                NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+            BeginGlide(from.Left, from.Top, to.Left, to.Top);
+        }
+
         EvaluateHide();
     }
 
@@ -1370,6 +1397,12 @@ public partial class IslandWindow : Window
 
     void OnDragTick(object? sender, EventArgs e)
     {
+        if (_gliding)
+        {
+            StepGlide();
+            return;
+        }
+
         if (_throwActive)
         {
             StepThrow();
@@ -1445,9 +1478,49 @@ public partial class IslandWindow : Window
     void StopThrow()
     {
         _throwActive = false;
+        _gliding = false;
         _lastThrowTick = TimeSpan.Zero;
         if (!_dragArmed)
             StopDragLoop();
+    }
+
+    void BeginGlide(int fromX, int fromY, int toX, int toY)
+    {
+        _gliding = true;
+        _glideFromX = fromX;
+        _glideFromY = fromY;
+        _glideToX = toX;
+        _glideToY = toY;
+        _glideElapsed = 0;
+        _glideLastTick = _dragClock.Elapsed;
+        StartDragLoop();
+    }
+
+    void StepGlide()
+    {
+        var now = _dragClock.Elapsed;
+        double dt = Math.Clamp((now - _glideLastTick).TotalSeconds, 0.004, 0.05);
+        _glideLastTick = now;
+        _glideElapsed += dt;
+
+        const double duration = 0.26;
+        double t = Math.Clamp(_glideElapsed / duration, 0, 1);
+        double eased = 1 - Math.Pow(1 - t, 3);
+
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd != IntPtr.Zero)
+        {
+            int x = (int)Math.Round(_glideFromX + (_glideToX - _glideFromX) * eased);
+            int y = (int)Math.Round(_glideFromY + (_glideToY - _glideFromY) * eased);
+            NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, x, y, 0, 0,
+                NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+        }
+
+        if (t < 1)
+            return;
+
+        _gliding = false;
+        StopDragLoop();
     }
 
     static void ApplyChrome(IntPtr hwnd)

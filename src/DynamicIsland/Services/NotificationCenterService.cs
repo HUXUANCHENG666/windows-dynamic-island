@@ -17,6 +17,7 @@ sealed class NotificationCenterService : IDisposable
     readonly Dispatcher _dispatcher;
     readonly NotificationFeed _feed = new();
     readonly Dictionary<uint, AppInfo> _apps = new();
+    readonly Dictionary<uint, NotificationSource> _parsed = new();
     UserNotificationListener? _listener;
     TypedEventHandler<UserNotificationListener, UserNotificationChangedEventArgs>? _handler;
     DispatcherTimer? _poll;
@@ -86,6 +87,7 @@ sealed class NotificationCenterService : IDisposable
         Detach();
         _feed.Reset();
         _apps.Clear();
+        _parsed.Clear();
         if (was)
             Log.Info(NotificationLog.Line(NotificationLogEvent.Stopped));
     }
@@ -173,27 +175,40 @@ sealed class NotificationCenterService : IDisposable
             if (listener == null)
                 return;
 
-            var list = await listener.GetNotificationsAsync(NotificationKinds.Toast);
-            var sources = new List<NotificationSource>(list.Count);
-            var apps = new List<(uint Id, AppInfo? Info)>(list.Count);
-            foreach (var item in list)
+            // 取列表和解析正文都要跨进程，放到线程池去做，别占 UI 线程。
+            // 已经解析过的编号只报回来，正文和来源应用沿用上一次的结果，
+            // 这样通知中心里堆着几十条时，稳态下不再重复解析。
+            var known = new HashSet<uint>(_parsed.Keys);
+            var (fresh, apps, seen) = await Task.Run(async () =>
             {
-                try
+                var list = await listener.GetNotificationsAsync(NotificationKinds.Toast);
+                var found = new List<NotificationSource>(list.Count);
+                var appInfo = new List<(uint Id, AppInfo? Info)>(list.Count);
+                var ids = new HashSet<uint>(list.Count);
+                foreach (var item in list)
                 {
-                    if (!TryMap(item, out var source))
+                    ids.Add(item.Id);
+                    if (known.Contains(item.Id))
                         continue;
-                    sources.Add(source);
-                    AppInfo? info = null;
-                    try { info = item.AppInfo; } catch { /* 有的来源没有应用信息。 */ }
-                    apps.Add((item.Id, info));
+                    try
+                    {
+                        if (!TryMap(item, out var source))
+                            continue;
+                        found.Add(source);
+                        AppInfo? info = null;
+                        try { info = item.AppInfo; } catch { /* 有的来源没有应用信息。 */ }
+                        appInfo.Add((item.Id, info));
+                    }
+                    catch
+                    {
+                        // 单条坏了不影响其余通知。不要把正文带进异常日志。
+                    }
                 }
-                catch
-                {
-                    // 单条坏了不影响其余通知。不要把正文带进异常日志。
-                }
-            }
 
-            await _dispatcher.InvokeAsync(() => Deliver(sources, apps));
+                return (found, appInfo, ids);
+            });
+
+            await _dispatcher.InvokeAsync(() => Deliver(fresh, apps, seen));
             _lastFailure = 0;
         }
         catch (Exception ex)
@@ -210,19 +225,45 @@ sealed class NotificationCenterService : IDisposable
         }
     }
 
-    void Deliver(List<NotificationSource> sources, List<(uint Id, AppInfo? Info)> apps)
+    void Deliver(List<NotificationSource> fresh, List<(uint Id, AppInfo? Info)> apps, HashSet<uint> seen)
     {
         if (!_running)
             return;
 
-        bool seeded = _feed.IsSeeded;
-        var cards = NotificationSession.Ingest(_feed, true, NotificationAccess.Allowed, sources, DateTime.UtcNow);
-        _apps.Clear();
+        foreach (var source in fresh)
+            _parsed[source.Id] = source;
+
+        if (_parsed.Count != seen.Count)
+        {
+            var stale = new List<uint>();
+            foreach (var id in _parsed.Keys)
+            {
+                if (!seen.Contains(id))
+                    stale.Add(id);
+            }
+
+            foreach (var id in stale)
+            {
+                _parsed.Remove(id);
+                _apps.Remove(id);
+            }
+        }
+
         foreach (var (id, info) in apps)
         {
             if (info != null)
                 _apps[id] = info;
         }
+
+        var sources = new List<NotificationSource>(seen.Count);
+        foreach (var id in seen)
+        {
+            if (_parsed.TryGetValue(id, out var source))
+                sources.Add(source);
+        }
+
+        bool seeded = _feed.IsSeeded;
+        var cards = NotificationSession.Ingest(_feed, true, NotificationAccess.Allowed, sources, DateTime.UtcNow);
 
         if (!seeded && _feed.IsSeeded)
         {

@@ -7,16 +7,16 @@ namespace DynamicIsland.Core.Island;
 public static class ThrowMath
 {
     /// <summary>松手速度低于这个值时不做抛掷，直接吸附，免得轻轻一放就滑走。</summary>
-    public const double LaunchSpeed = 320;
+    public const double LaunchSpeed = 280;
 
     /// <summary>速度低于这个值认为已经停下。</summary>
-    public const double RestSpeed = 150;
+    public const double RestSpeed = 80;
 
     /// <summary>撞边后保留的速度比例。</summary>
     public const double Restitution = 0.55;
 
     /// <summary>每秒的空气阻尼系数，越大停得越快。</summary>
-    public const double Damping = 2.4;
+    public const double Damping = 1.3;
 
     /// <summary>速度上限，避免极快的甩动把岛扔出很远。</summary>
     public const double MaxSpeed = 5200;

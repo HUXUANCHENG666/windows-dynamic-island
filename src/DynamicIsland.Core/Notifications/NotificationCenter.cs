@@ -66,7 +66,7 @@ public static class NotificationAccessPolicy
 
 public static class NotificationPolicy
 {
-    public static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
+    public static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(3);
     public static readonly TimeSpan RepeatWindow = TimeSpan.FromMilliseconds(800);
 }
 
