@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>DynamicIsland.Core</RootNamespace>
+    <AssemblyName>DynamicIsland.Core</AssemblyName>
+    <Description>Motion, shape, and state logic for the Dynamic Island widget. No Windows dependencies, so it can be tested anywhere.</Description>
+  </PropertyGroup>
+</Project>

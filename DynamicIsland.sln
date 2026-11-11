@@ -1,0 +1,52 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{E7FBEECC-376A-4C85-93B6-C70C2E6B13A5}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DynamicIsland.Core", "src\DynamicIsland.Core\DynamicIsland.Core.csproj", "{6A44083A-6269-4064-BEA6-11C12890D45F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DynamicIsland", "src\DynamicIsland\DynamicIsland.csproj", "{4C038585-1EB1-4E7D-ABB0-F232FBDCE145}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0CCEEC04-5491-49E5-9F90-B0299E866CB1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DynamicIsland.Core.Tests", "tests\DynamicIsland.Core.Tests\DynamicIsland.Core.Tests.csproj", "{FE5F84D3-F278-4851-A881-89B77CFA19D3}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{A0A80BDE-2C61-4E0D-A323-2C0F4683A7F9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RenderMock", "tools\RenderMock\RenderMock.csproj", "{B72CC0E5-571D-4BFB-92B7-25008E4719C2}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{6A44083A-6269-4064-BEA6-11C12890D45F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6A44083A-6269-4064-BEA6-11C12890D45F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6A44083A-6269-4064-BEA6-11C12890D45F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6A44083A-6269-4064-BEA6-11C12890D45F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4C038585-1EB1-4E7D-ABB0-F232FBDCE145}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4C038585-1EB1-4E7D-ABB0-F232FBDCE145}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4C038585-1EB1-4E7D-ABB0-F232FBDCE145}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4C038585-1EB1-4E7D-ABB0-F232FBDCE145}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FE5F84D3-F278-4851-A881-89B77CFA19D3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FE5F84D3-F278-4851-A881-89B77CFA19D3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FE5F84D3-F278-4851-A881-89B77CFA19D3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FE5F84D3-F278-4851-A881-89B77CFA19D3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B72CC0E5-571D-4BFB-92B7-25008E4719C2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B72CC0E5-571D-4BFB-92B7-25008E4719C2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B72CC0E5-571D-4BFB-92B7-25008E4719C2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B72CC0E5-571D-4BFB-92B7-25008E4719C2}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{6A44083A-6269-4064-BEA6-11C12890D45F} = {E7FBEECC-376A-4C85-93B6-C70C2E6B13A5}
+		{4C038585-1EB1-4E7D-ABB0-F232FBDCE145} = {E7FBEECC-376A-4C85-93B6-C70C2E6B13A5}
+		{FE5F84D3-F278-4851-A881-89B77CFA19D3} = {0CCEEC04-5491-49E5-9F90-B0299E866CB1}
+		{B72CC0E5-571D-4BFB-92B7-25008E4719C2} = {A0A80BDE-2C61-4E0D-A323-2C0F4683A7F9}
+	EndGlobalSection
+EndGlobal

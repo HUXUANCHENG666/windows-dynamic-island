@@ -1,0 +1,52 @@
+name: Build Windows package
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Test motion, shape, and state logic
+        run: dotnet test tests/DynamicIsland.Core.Tests/DynamicIsland.Core.Tests.csproj -c Release
+
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Publish self-contained exe
+        shell: bash
+        run: ./build/publish.sh "${{ runner.temp }}/publish"
+      - name: Zip
+        shell: pwsh
+        run: |
+          Copy-Item packaging/使用说明.txt "${{ runner.temp }}/publish/readme.txt"
+          Compress-Archive -Path "${{ runner.temp }}/publish/DynamicIsland.exe","${{ runner.temp }}/publish/readme.txt" -DestinationPath DynamicIsland-win-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DynamicIsland-win-x64
+          path: DynamicIsland-win-x64.zip
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: DynamicIsland-win-x64
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: DynamicIsland-win-x64.zip
