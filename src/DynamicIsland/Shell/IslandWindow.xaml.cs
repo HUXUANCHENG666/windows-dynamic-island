@@ -409,8 +409,8 @@ public partial class IslandWindow : Window
         _topmost.Tick += (_, _) => ReassertTopmost();
         _topmost.Start();
         // 兜底扫描：F11、独占全屏、DPI 变化、显示器热插拔都不一定产生上面那四类 WinEvent，
-        // 只靠钩子会漏。一秒一次足够快；EvaluateHide 在状态没变时是幂等的，常驻期间 Nudge 也不触发重绘。
-        _hideSweep = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        // 只靠钩子会漏。半秒一次比钩子慢不了多少；EvaluateHide 在状态没变时是幂等的，常驻期间 Nudge 也不触发重绘。
+        _hideSweep = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _hideSweep.Tick += (_, _) => EvaluateHide();
         _hideSweep.Start();
         _renderLive = true;
