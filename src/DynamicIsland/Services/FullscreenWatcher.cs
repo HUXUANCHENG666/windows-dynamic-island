@@ -40,13 +40,17 @@ sealed class FullscreenWatcher : IDisposable
     {
         if (eventType == NativeMethods.EVENT_OBJECT_LOCATIONCHANGE)
         {
-            if (idObject != 0 || idChild != 0 || hwnd != _foreground || unchecked(time - _lastLocation) < 250)
+            var root = NativeMethods.GetAncestor(hwnd, NativeMethods.GA_ROOT);
+            if (root == IntPtr.Zero)
+                root = hwnd;
+            if (idObject != 0 || idChild != 0 || (hwnd != _foreground && root != _foreground) || unchecked(time - _lastLocation) < 250)
                 return;
             _lastLocation = time;
         }
         else if (eventType == NativeMethods.EVENT_SYSTEM_FOREGROUND)
         {
-            _foreground = hwnd;
+            var root = NativeMethods.GetAncestor(hwnd, NativeMethods.GA_ROOT);
+            _foreground = root != IntPtr.Zero ? root : hwnd;
         }
         else if (eventType is not (NativeMethods.EVENT_SYSTEM_MOVESIZEEND or NativeMethods.EVENT_SYSTEM_MINIMIZEEND))
         {

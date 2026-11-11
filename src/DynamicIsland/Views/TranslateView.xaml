@@ -5,12 +5,22 @@
     <Grid Margin="18,12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <TextBlock x:Name="Source" FontSize="13" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="40"/>
-        <TextBlock x:Name="Result" Grid.Row="1" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap"
-                   TextTrimming="CharacterEllipsis" Margin="0,6,0,0" MaxHeight="72"/>
+        <TextBox x:Name="Result" Grid.Row="1" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap"
+                 AcceptsReturn="True" IsReadOnly="True" IsReadOnlyCaretVisible="True"
+                 BorderThickness="0" Background="Transparent" Padding="0" Margin="0,6,0,0"
+                 Focusable="False" FocusVisualStyle="{x:Null}" Cursor="Arrow"
+                 IsHitTestVisible="False" VerticalScrollBarVisibility="Auto"
+                 HorizontalScrollBarVisibility="Disabled">
+            <TextBox.ContextMenu>
+                <ContextMenu>
+                    <MenuItem Header="复制" Command="ApplicationCommands.Copy"/>
+                </ContextMenu>
+            </TextBox.ContextMenu>
+        </TextBox>
         <StackPanel x:Name="Actions" Grid.Row="2" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,8,0,0">
             <Border x:Name="Go" Height="30" CornerRadius="15" Padding="14,0">
                 <TextBlock x:Name="GoText" Text="翻译" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"/>
@@ -23,6 +33,12 @@
             </Border>
             <Border x:Name="EnZh" Height="30" CornerRadius="15" Padding="10,0" Margin="6,0,0,0">
                 <TextBlock x:Name="EnZhText" Text="英→中" FontSize="12" VerticalAlignment="Center"/>
+            </Border>
+            <Border x:Name="Copy" Height="30" CornerRadius="15" Padding="12,0" Margin="6,0,0,0" Visibility="Collapsed">
+                <TextBlock x:Name="CopyText" Text="复制" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            </Border>
+            <Border x:Name="Close" Height="30" CornerRadius="15" Padding="12,0" Margin="6,0,0,0" Visibility="Collapsed">
+                <TextBlock x:Name="CloseText" Text="关闭" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"/>
             </Border>
         </StackPanel>
     </Grid>

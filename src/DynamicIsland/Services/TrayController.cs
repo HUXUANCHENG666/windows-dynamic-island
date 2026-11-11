@@ -16,6 +16,7 @@ sealed class TrayController : IDisposable
     const int IdLog = 6;
     const int IdStealth = 7;
     const int IdTranslate = 8;
+    const int IdRecall = 11;
     const int IdCamera = 9;
     const int IdHideCurrent = 10;
     const int IdMonitorBase = 100;
@@ -130,6 +131,8 @@ sealed class TrayController : IDisposable
 
             NativeMethods.AppendMenu(menu, NativeMethods.MF_SEPARATOR, IntPtr.Zero, null);
             NativeMethods.AppendMenu(menu, NativeMethods.MF_STRING, (IntPtr)IdTranslate, "翻译剪贴板");
+            uint recall = NativeMethods.MF_STRING | (_window.HasStoredTranslation ? 0 : NativeMethods.MF_GRAYED);
+            NativeMethods.AppendMenu(menu, recall, (IntPtr)IdRecall, "翻译结果");
             uint camera = NativeMethods.MF_STRING | (_window.CameraIsOpen ? NativeMethods.MF_CHECKED : 0);
             NativeMethods.AppendMenu(menu, camera, (IntPtr)IdCamera, "摄像头画中画");
             NativeMethods.AppendMenu(menu, NativeMethods.MF_SEPARATOR, IntPtr.Zero, null);
@@ -194,6 +197,9 @@ sealed class TrayController : IDisposable
                 break;
             case IdTranslate:
                 _window.TranslateClipboard();
+                break;
+            case IdRecall:
+                _window.ShowStoredTranslation();
                 break;
             case IdCamera:
                 _window.ToggleCamera();

@@ -14,9 +14,14 @@ public partial class ExpandedMediaView : UserControl
     public event EventHandler? PlayPauseClicked;
     public event EventHandler? NextClicked;
     public event EventHandler? PreviousClicked;
+    public event EventHandler? PreviousSessionClicked;
+    public event EventHandler? NextSessionClicked;
     TimeSpan _position;
     TimeSpan _duration;
     bool _hasTimeline;
+    ImageSource? _art;
+    ImageSource? _painted;
+    double _slot = MediaArtLayout.HorizontalSize;
 
     public ExpandedMediaView()
     {
@@ -48,6 +53,30 @@ public partial class ExpandedMediaView : UserControl
         Play.MouseLeftButtonUp += (_, e) => Raise(PlayPauseClicked, e);
         Play.Cursor = Cursors.Hand;
         Play.Focusable = false;
+        PrevSessionIcon.Data = Geometry.Parse(Glyphs.ChevronLeft);
+        NextSessionIcon.Data = Geometry.Parse(Glyphs.ChevronRight);
+        PrevSessionIcon.Stroke = Theme.Title;
+        NextSessionIcon.Stroke = Theme.Title;
+        SessionCountText.FontFamily = ui;
+        SessionCountText.Foreground = Theme.Title;
+        var veil = new SolidColorBrush(Color.FromArgb(150, 0, 0, 0));
+        veil.Freeze();
+        PrevSession.Background = veil;
+        NextSession.Background = veil;
+        SessionBadge.Background = veil;
+        PrevSession.Cursor = Cursors.Hand;
+        NextSession.Cursor = Cursors.Hand;
+        PrevSession.Focusable = false;
+        NextSession.Focusable = false;
+        PrevSession.MouseLeftButtonUp += (_, e) => Raise(PreviousSessionClicked, e);
+        NextSession.MouseLeftButtonUp += (_, e) => Raise(NextSessionClicked, e);
+        PreviewMouseWheel += (_, e) =>
+        {
+            if (Switcher.Visibility != Visibility.Visible)
+                return;
+            e.Handled = true;
+            Raise(e.Delta > 0 ? PreviousSessionClicked : NextSessionClicked, e);
+        };
         Track.SizeChanged += (_, _) => ApplyProgress();
         AutomationProperties.SetName(Play, "播放或暂停");
         AutomationProperties.SetName(Previous, "上一首");
@@ -62,17 +91,33 @@ public partial class ExpandedMediaView : UserControl
         SetEnabled(Previous, now.CanPrevious);
         SetEnabled(Next, now.CanNext);
         SetEnabled(Play, now.CanToggle || now.IsOpen);
-        if (now.Art == null)
+        _art = now.Art;
+        PaintArt();
+        bool several = now.SessionCount > 1 && now.SessionIndex > 0;
+        Switcher.Visibility = several ? Visibility.Visible : Visibility.Collapsed;
+        if (several)
+            Ui.Text(SessionCountText, now.SessionIndex + "/" + now.SessionCount);
+    }
+
+    void PaintArt()
+    {
+        if (_art == null)
         {
+            _painted = null;
             Art.Fill = Theme.Placeholder;
             Note.Visibility = Visibility.Visible;
+            return;
         }
-        else
+
+        if (ReferenceEquals(_art, _painted))
         {
-            Art.Fill = new ImageBrush(now.Art) { Stretch = Stretch.UniformToFill };
-            RenderOptions.SetBitmapScalingMode(Art, BitmapScalingMode.HighQuality);
             Note.Visibility = Visibility.Collapsed;
+            return;
         }
+
+        _painted = _art;
+        Art.Fill = ArtBrush.Create(_art, _slot, _slot);
+        Note.Visibility = Visibility.Collapsed;
     }
 
     public void SetProgress(TimeSpan position, TimeSpan duration, bool hasTimeline)
@@ -104,6 +149,9 @@ public partial class ExpandedMediaView : UserControl
 
     public void SetVertical(bool vertical)
     {
+        var spec = MediaArtLayout.For(vertical ? IslandOrientation.Vertical : IslandOrientation.Horizontal);
+        _slot = spec.ArtSize;
+        _painted = null;
         if (vertical)
         {
             TopRow.Height = new GridLength(1, GridUnitType.Star);
@@ -111,40 +159,44 @@ public partial class ExpandedMediaView : UserControl
             Head.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             Head.RowDefinitions.Add(new RowDefinition { Height = new GridLength(10) });
             Head.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            ArtCol.Width = new GridLength(1, GridUnitType.Star);
-            GapCol.Width = new GridLength(0);
-            Grid.SetColumn(ArtHost, 0);
-            Grid.SetRow(ArtHost, 0);
-            Grid.SetColumn(Meta, 0);
-            Grid.SetRow(Meta, 2);
-            ArtHost.Width = 132;
-            ArtHost.Height = 132;
-            ArtHost.HorizontalAlignment = HorizontalAlignment.Center;
-            Title.TextAlignment = TextAlignment.Center;
-            Artist.TextAlignment = TextAlignment.Center;
-            Title.HorizontalAlignment = HorizontalAlignment.Center;
-            Artist.HorizontalAlignment = HorizontalAlignment.Center;
-            return;
+        }
+        else
+        {
+            TopRow.Height = new GridLength(spec.ArtSize);
+            Head.RowDefinitions.Clear();
         }
 
-        TopRow.Height = new GridLength(104);
-        Head.RowDefinitions.Clear();
-        ArtCol.Width = new GridLength(104);
-        GapCol.Width = new GridLength(14);
-        Grid.SetColumn(ArtHost, 0);
-        Grid.SetRow(ArtHost, 0);
-        Grid.SetColumn(Meta, 2);
-        Grid.SetRow(Meta, 0);
-        ArtHost.Width = 104;
-        ArtHost.Height = 104;
-        ArtHost.HorizontalAlignment = HorizontalAlignment.Stretch;
-        Title.TextAlignment = TextAlignment.Left;
-        Artist.TextAlignment = TextAlignment.Left;
-        Title.HorizontalAlignment = HorizontalAlignment.Stretch;
-        Artist.HorizontalAlignment = HorizontalAlignment.Stretch;
+        ArtCol.Width = spec.CenterArt
+            ? new GridLength(1, GridUnitType.Star)
+            : new GridLength(spec.ArtSize);
+        GapCol.Width = spec.TrailingColumnCollapsed ? new GridLength(0) : new GridLength(14);
+        MetaCol.Width = spec.TrailingColumnCollapsed
+            ? new GridLength(0)
+            : new GridLength(1, GridUnitType.Star);
+        Grid.SetColumn(ArtHost, spec.ArtColumn);
+        Grid.SetColumnSpan(ArtHost, spec.ArtSpan);
+        Grid.SetRow(ArtHost, spec.ArtRow);
+        Grid.SetColumn(Meta, spec.MetaColumn);
+        Grid.SetColumnSpan(Meta, spec.MetaSpan);
+        Grid.SetRow(Meta, spec.MetaRow);
+        ArtHost.Width = spec.ArtSize;
+        ArtHost.Height = spec.ArtSize;
+        ArtHost.HorizontalAlignment = spec.CenterArt ? HorizontalAlignment.Center : HorizontalAlignment.Left;
+        ArtHost.VerticalAlignment = spec.CenterArt ? VerticalAlignment.Center : VerticalAlignment.Top;
+        Title.TextAlignment = spec.CenterArt ? TextAlignment.Center : TextAlignment.Left;
+        Artist.TextAlignment = spec.CenterArt ? TextAlignment.Center : TextAlignment.Left;
+        Title.HorizontalAlignment = spec.CenterArt ? HorizontalAlignment.Center : HorizontalAlignment.Stretch;
+        Artist.HorizontalAlignment = spec.CenterArt ? HorizontalAlignment.Center : HorizontalAlignment.Stretch;
+        PaintArt();
     }
 
     static void Raise(EventHandler? handler, MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        handler?.Invoke(null, EventArgs.Empty);
+    }
+
+    static void Raise(EventHandler? handler, MouseWheelEventArgs e)
     {
         e.Handled = true;
         handler?.Invoke(null, EventArgs.Empty);
