@@ -12,9 +12,11 @@
             <Ellipse x:Name="Dot" Width="12" Height="12" VerticalAlignment="Center"/>
             <TextBlock x:Name="LiveText" Text="摄像头" FontSize="13" FontWeight="SemiBold" Margin="8,0,0,0" VerticalAlignment="Center"/>
         </StackPanel>
-        <Border x:Name="FrameHost" Grid.Row="1" CornerRadius="18" ClipToBounds="True">
+        <Border x:Name="FrameHost" Grid.Row="1" CornerRadius="18" ClipToBounds="True" SizeChanged="FrameHost_SizeChanged">
             <Grid>
-                <Image x:Name="Preview" Stretch="UniformToFill"/>
+                <Canvas x:Name="FrameCanvas" ClipToBounds="True" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                    <Image x:Name="Preview" Stretch="Uniform" IsHitTestVisible="False"/>
+                </Canvas>
                 <TextBlock x:Name="Message" TextWrapping="Wrap" TextAlignment="Center"
                            HorizontalAlignment="Center" VerticalAlignment="Center" Margin="16"
                            FontSize="13"/>

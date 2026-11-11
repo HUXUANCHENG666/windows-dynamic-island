@@ -484,7 +484,12 @@ public partial class IslandWindow : Window
         CheckPointer();
         var now = DateTime.UtcNow;
         _director.Tick(now);
-        if (_deviceOpen && !CameraPolicy.ShouldKeepDevice(true, _director.Expanded, _director.Mode == IslandMode.Camera))
+        var cameraReason = CameraPolicy.Classify(
+            _director.CameraSession,
+            _director.Expanded,
+            _director.Occluded,
+            _dragging || _dragArmed);
+        if (_deviceOpen && CameraPolicy.ShouldRelease(cameraReason))
             ReleaseCamera(collapseUi: false);
         if (_timer.ConsumeCompletion())
         {
@@ -580,6 +585,8 @@ public partial class IslandWindow : Window
 
     void CheckPointer()
     {
+        if (_dragging || _dragArmed)
+            return;
         if (!_director.PointerInside || !NativeMethods.GetCursorPos(out var point))
             return;
         try
@@ -646,6 +653,8 @@ public partial class IslandWindow : Window
                 break;
             case NativeMethods.WM_MOUSELEAVE:
                 _trackingLeave = false;
+                if (_dragging || _dragArmed)
+                    break;
                 _director.PointerExited(DateTime.UtcNow);
                 if (!_renderLive)
                     SyncLoops();

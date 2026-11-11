@@ -17,6 +17,9 @@ public sealed class IslandDirector
     /// <summary>全屏或隐身时收成小点。提示弹出来的那一会儿不是小点。</summary>
     public bool ShowAsDot => Occluded && !Expanded;
 
+    /// <summary>用户打开的预览还在。鼠标离开、拖动吸附都不能把它收起来。</summary>
+    public bool CameraSession => CameraOpen && Mode == IslandMode.Camera;
+
     IslandMode? _notice;
     DateTime _noticeUntil;
     IslandMode? _queued;
@@ -107,8 +110,12 @@ public sealed class IslandDirector
     {
         PointerInside = false;
         _expandAt = null;
-        if (!Expanded)
+        if (!Expanded || CameraSession)
+        {
+            _collapseAt = null;
             return;
+        }
+
         _collapseAt = now + (Occluded
             ? TimeSpan.FromMilliseconds(240)
             : NoticePolicy.HoverCollapseDelay);
@@ -131,6 +138,9 @@ public sealed class IslandDirector
     /// </summary>
     public void TrayClick(DateTime now)
     {
+        if (CameraSession)
+            return;
+
         if (Expanded && !PointerInside)
         {
             _collapseAt = now;
@@ -190,6 +200,9 @@ public sealed class IslandDirector
                 Expanded = true;
             }
         }
+
+        if (CameraSession)
+            _collapseAt = null;
 
         if (_collapseAt is DateTime collapseAt && now >= collapseAt && !PointerInside)
         {

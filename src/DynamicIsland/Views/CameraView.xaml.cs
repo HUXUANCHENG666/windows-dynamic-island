@@ -2,12 +2,16 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using DynamicIsland.Core.Camera;
 using DynamicIsland.Visuals;
 
 namespace DynamicIsland.Views;
 
 public partial class CameraView : UserControl
 {
+    int _sourceWidth;
+    int _sourceHeight;
+
     public CameraView()
     {
         InitializeComponent();
@@ -17,6 +21,7 @@ public partial class CameraView : UserControl
         Message.Foreground = Theme.Title;
         Dot.Fill = Theme.Danger;
         FrameHost.Background = Theme.Placeholder;
+        RenderOptions.SetBitmapScalingMode(Preview, BitmapScalingMode.HighQuality);
         SetLive(false);
     }
 
@@ -24,6 +29,7 @@ public partial class CameraView : UserControl
     {
         LiveRow.HorizontalAlignment = vertical ? HorizontalAlignment.Center : HorizontalAlignment.Left;
         Message.TextAlignment = TextAlignment.Center;
+        Reframe();
     }
 
     public void ShowWaiting()
@@ -55,9 +61,27 @@ public partial class CameraView : UserControl
         bitmap.WritePixels(new Int32Rect(0, 0, width, height), bgra, width * 4, 0);
         bitmap.Freeze();
         Preview.Source = bitmap;
+        _sourceWidth = width;
+        _sourceHeight = height;
         if (Message.Visibility != Visibility.Collapsed)
             Message.Visibility = Visibility.Collapsed;
         if (LiveRow.Visibility != Visibility.Visible)
             SetLive(true);
+        Reframe();
+    }
+
+    void FrameHost_SizeChanged(object sender, SizeChangedEventArgs e) => Reframe();
+
+    void Reframe()
+    {
+        double destW = FrameHost.ActualWidth;
+        double destH = FrameHost.ActualHeight;
+        var fit = CameraFraming.Cover(_sourceWidth, _sourceHeight, destW, destH);
+        if (fit.Scale <= 0)
+            return;
+        Preview.Width = fit.Width;
+        Preview.Height = fit.Height;
+        Canvas.SetLeft(Preview, fit.X);
+        Canvas.SetTop(Preview, fit.Y);
     }
 }

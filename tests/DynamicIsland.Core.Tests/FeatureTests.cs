@@ -316,6 +316,83 @@ public class FeatureTests
     }
 
     [Fact]
+    public void Camera_DragSnapAndLeave_KeepTheSessionAndTheDevice()
+    {
+        var director = new IslandDirector();
+        director.SetCamera(true);
+        director.PointerEntered(T(0));
+        director.PointerExited(T(20));
+        director.Tick(T(5000));
+        Assert.True(director.CameraSession);
+        Assert.True(director.Expanded);
+        Assert.Equal(IslandMode.Camera, director.Mode);
+        Assert.False(director.HasScheduledWork);
+
+        director.TrayClick(T(5000));
+        director.Tick(T(6000));
+        Assert.True(director.CameraSession);
+        Assert.True(director.Expanded);
+
+        Assert.False(CameraPolicy.ShouldRelease(CameraLifetime.Drag));
+        Assert.False(CameraPolicy.ShouldRelease(CameraLifetime.Snap));
+        Assert.False(CameraPolicy.ShouldRelease(CameraLifetime.Layout));
+        Assert.False(CameraPolicy.ShouldRelease(CameraLifetime.Rebind));
+        Assert.False(CameraPolicy.ShouldRelease(CameraLifetime.PointerLeave));
+        Assert.False(CameraPolicy.ShouldRelease(CameraLifetime.Showing));
+        Assert.True(CameraPolicy.ShouldRelease(CameraLifetime.Collapse));
+        Assert.True(CameraPolicy.ShouldRelease(CameraLifetime.UserOff));
+        Assert.True(CameraPolicy.ShouldRelease(CameraLifetime.Occlusion));
+        Assert.True(CameraPolicy.ShouldRelease(CameraLifetime.Exit));
+
+        Assert.Equal(CameraLifetime.Drag, CameraPolicy.Classify(sessionActive: true, expanded: true, occluded: false, dragging: true));
+        Assert.Equal(CameraLifetime.Showing, CameraPolicy.Classify(sessionActive: true, expanded: true, occluded: false, dragging: false));
+        Assert.Equal(CameraLifetime.Occlusion, CameraPolicy.Classify(sessionActive: true, expanded: true, occluded: true, dragging: true));
+        Assert.Equal(CameraLifetime.Collapse, CameraPolicy.Classify(sessionActive: false, expanded: false, occluded: false, dragging: false));
+        Assert.False(CameraPolicy.ShouldRelease(CameraPolicy.Classify(true, true, false, dragging: true)));
+        Assert.True(CameraPolicy.ShouldRelease(CameraPolicy.Classify(true, true, occluded: true, dragging: false)));
+    }
+
+    [Fact]
+    public void Camera_Cover_KeepsAspectAndCenterCropsEveryDock()
+    {
+        var sourceW = 1920.0;
+        var sourceH = 1080.0;
+        var horizontal = CameraFraming.Cover(sourceW, sourceH, 392, 248);
+        var vertical = CameraFraming.Cover(sourceW, sourceH, 248, 420);
+        var square = CameraFraming.Cover(100, 100, 80, 80);
+
+        Assert.Equal(0, square.X, 3);
+        Assert.Equal(0, square.Y, 3);
+        Assert.Equal(80, square.Width, 3);
+        Assert.Equal(80, square.Height, 3);
+
+        AssertCover(horizontal, sourceW, sourceH, 392, 248);
+        AssertCover(vertical, sourceW, sourceH, 248, 420);
+        Assert.True(horizontal.Width >= 392 - 0.01);
+        Assert.True(vertical.Height >= 420 - 0.01);
+        Assert.Equal(0, CameraFraming.Cover(0, 1080, 100, 100).Scale);
+    }
+
+    static void AssertCover(CameraFraming.CoverFit fit, double sourceW, double sourceH, double destW, double destH)
+    {
+        Assert.True(fit.Scale > 0);
+        Assert.Equal(sourceW / sourceH, fit.Width / fit.Height, 6);
+        Assert.Equal((destW - fit.Width) / 2.0, fit.X, 6);
+        Assert.Equal((destH - fit.Height) / 2.0, fit.Y, 6);
+        Assert.True(fit.Width + 0.01 >= destW);
+        Assert.True(fit.Height + 0.01 >= destH);
+        double cropW = destW / fit.Scale;
+        double cropH = destH / fit.Scale;
+        double cropX = -fit.X / fit.Scale;
+        double cropY = -fit.Y / fit.Scale;
+        Assert.Equal(destW / destH, cropW / cropH, 5);
+        Assert.InRange(cropX, -0.01, sourceW);
+        Assert.InRange(cropY, -0.01, sourceH);
+        Assert.Equal(sourceW / 2.0, cropX + cropW / 2.0, 4);
+        Assert.Equal(sourceH / 2.0, cropY + cropH / 2.0, 4);
+    }
+
+    [Fact]
     public void Camera_IsOffByDefault_AndMustReleaseWhenCollapsed()
     {
         Assert.False(CameraPolicy.EnabledByDefault);
