@@ -53,7 +53,6 @@ public partial class IslandWindow : Window
     bool _dragging;
     readonly List<ThrowMath.DragSample> _dragSamples = new();
     readonly Stopwatch _dragClock = Stopwatch.StartNew();
-    DispatcherTimer? _dragLoop;
     bool _throwActive;
     ThrowMath.Body _throwBody;
     PixelRect _throwWork;
@@ -61,14 +60,12 @@ public partial class IslandWindow : Window
     double _throwHalfH;
     double _throwOffsetX;
     double _throwOffsetY;
-    TimeSpan _lastThrowTick;
     bool _gliding;
     double _glideFromX;
     double _glideFromY;
     double _glideToX;
     double _glideToY;
     double _glideElapsed;
-    TimeSpan _glideLastTick;
     bool _eatClick;
     NotificationCard? _toastCard;
     IslandMode _trackedMode = IslandMode.Idle;
@@ -461,7 +458,6 @@ public partial class IslandWindow : Window
         _slow?.Stop();
         _topmost?.Stop();
         _hideSweep?.Stop();
-        _dragLoop?.Stop();
         SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
         _translateCts?.Cancel();
         _notifications.Dispose();
@@ -625,6 +621,13 @@ public partial class IslandWindow : Window
 
     void PulseCore(double dt)
     {
+        if (_gliding)
+            StepGlide(dt);
+        else if (_throwActive)
+            StepThrow(dt);
+        else if (_dragging)
+            MoveWhileDragging();
+
         CheckPointer();
         var now = DateTime.UtcNow;
         _director.Tick(now);
@@ -701,7 +704,9 @@ public partial class IslandWindow : Window
         bool clock = _director.Mode == IslandMode.Idle && _director.Expanded;
         bool transitioning = !_animator.IsSettled;
         bool expanded = _director.Expanded && !_director.ShowAsDot;
-        bool animate = EffectsPolicy.UseHighFrameRate(expanded, transitioning, waveform);
+        // 拖拽、甩出、归位都要每帧挪窗口，必须走渲染循环，不能靠定时器（会漂帧）。
+        bool motion = _dragging || _throwActive || _gliding;
+        bool animate = motion || EffectsPolicy.UseHighFrameRate(expanded, transitioning, waveform);
         if (animate && !_renderLive)
         {
             _renderLive = true;
@@ -1207,7 +1212,7 @@ public partial class IslandWindow : Window
         // 拖得快时窗口跟不上指针，指针会跑出窗口，WM_MOUSEMOVE 就断了。
         // 抓住鼠标以后，移动和松手都还能送到这里。
         NativeMethods.SetCapture(hwnd);
-        StartDragLoop();
+        SyncLoops();
     }
 
     void MoveWhileDragging()
@@ -1243,7 +1248,7 @@ public partial class IslandWindow : Window
         NativeMethods.ReleaseCapture();
         if (!dragged)
         {
-            StopDragLoop();
+            SyncLoops();
             if (NativeMethods.GetCursorPos(out var point))
             {
                 try
@@ -1277,7 +1282,6 @@ public partial class IslandWindow : Window
         var (vx, vy) = ThrowMath.Velocity(_dragSamples);
         if (ThrowMath.ShouldLaunch(vx, vy) && BeginThrow(vx, vy))
             return;
-        StopDragLoop();
         SnapFromCursor();
     }
 
@@ -1324,6 +1328,7 @@ public partial class IslandWindow : Window
         if (!glide || hwnd == IntPtr.Zero)
         {
             EvaluateHide();
+            SyncLoops();
             return;
         }
 
@@ -1337,6 +1342,7 @@ public partial class IslandWindow : Window
         }
 
         EvaluateHide();
+        SyncLoops();
     }
 
     (int X, int Y) IslandCenter(NativeMethods.RECT rect)
@@ -1379,45 +1385,6 @@ public partial class IslandWindow : Window
     static PixelRect WorkAreaExcluded(PixelRect monitorRect, PixelRect reported) =>
         WorkAreaMath.ExcludeBars(monitorRect, reported, TaskbarBounds.Query());
 
-    void StartDragLoop()
-    {
-        _dragLoop ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
-        _dragLoop.Tick -= OnDragTick;
-        _dragLoop.Tick += OnDragTick;
-        _dragLoop.Start();
-    }
-
-    void StopDragLoop()
-    {
-        if (_dragLoop == null)
-            return;
-        _dragLoop.Stop();
-        _dragLoop.Tick -= OnDragTick;
-    }
-
-    void OnDragTick(object? sender, EventArgs e)
-    {
-        if (_gliding)
-        {
-            StepGlide();
-            return;
-        }
-
-        if (_throwActive)
-        {
-            StepThrow();
-            return;
-        }
-
-        if (!_dragArmed)
-        {
-            StopDragLoop();
-            return;
-        }
-
-        MoveWhileDragging();
-    }
-
     bool BeginThrow(double vx, double vy)
     {
         var hwnd = new WindowInteropHelper(this).Handle;
@@ -1441,20 +1408,16 @@ public partial class IslandWindow : Window
             ClampAxis(center.Y, _throwWork.Y + halfH, _throwWork.Bottom - halfH),
             vx,
             vy);
-        _lastThrowTick = _dragClock.Elapsed;
         _throwActive = true;
-        StartDragLoop();
+        SyncLoops();
         return true;
     }
 
     static double ClampAxis(double value, double min, double max) =>
         max < min ? (min + max) / 2.0 : Math.Clamp(value, min, max);
 
-    void StepThrow()
+    void StepThrow(double dt)
     {
-        var now = _dragClock.Elapsed;
-        double dt = Math.Clamp((now - _lastThrowTick).TotalSeconds, 0.004, 0.05);
-        _lastThrowTick = now;
         _throwBody = ThrowMath.Step(_throwBody, dt, _throwWork, _throwHalfW, _throwHalfH);
 
         var hwnd = new WindowInteropHelper(this).Handle;
@@ -1479,9 +1442,7 @@ public partial class IslandWindow : Window
     {
         _throwActive = false;
         _gliding = false;
-        _lastThrowTick = TimeSpan.Zero;
-        if (!_dragArmed)
-            StopDragLoop();
+        SyncLoops();
     }
 
     void BeginGlide(int fromX, int fromY, int toX, int toY)
@@ -1492,15 +1453,11 @@ public partial class IslandWindow : Window
         _glideToX = toX;
         _glideToY = toY;
         _glideElapsed = 0;
-        _glideLastTick = _dragClock.Elapsed;
-        StartDragLoop();
+        SyncLoops();
     }
 
-    void StepGlide()
+    void StepGlide(double dt)
     {
-        var now = _dragClock.Elapsed;
-        double dt = Math.Clamp((now - _glideLastTick).TotalSeconds, 0.004, 0.05);
-        _glideLastTick = now;
         _glideElapsed += dt;
 
         const double duration = 0.26;
@@ -1520,7 +1477,7 @@ public partial class IslandWindow : Window
             return;
 
         _gliding = false;
-        StopDragLoop();
+        SyncLoops();
     }
 
     static void ApplyChrome(IntPtr hwnd)
