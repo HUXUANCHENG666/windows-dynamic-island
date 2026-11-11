@@ -30,6 +30,8 @@
                 <views:NoticeView x:Name="VolumeNotice"/>
                 <views:NoticeView x:Name="BatteryNotice"/>
                 <views:NoticeView x:Name="ToastNotice"/>
+                <views:TranslateView x:Name="TranslateNotice"/>
+                <views:CameraView x:Name="CameraNotice"/>
             </Grid>
         </Grid>
     </Canvas>

@@ -3,12 +3,16 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:views="clr-namespace:DynamicIsland.Views"
              IsHitTestVisible="False" Focusable="False">
-    <Grid Margin="28,0,26,0" VerticalAlignment="Center">
+    <Grid x:Name="Root" Margin="22,0" VerticalAlignment="Center">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="40"/>
-            <ColumnDefinition Width="*"/>
+            <ColumnDefinition x:Name="IconCol" Width="40"/>
+            <ColumnDefinition x:Name="TextCol" Width="*"/>
         </Grid.ColumnDefinitions>
-        <Grid Width="34" Height="28" VerticalAlignment="Center">
+        <Grid.RowDefinitions>
+            <RowDefinition x:Name="IconRow" Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Grid x:Name="IconHost" Width="34" Height="28" VerticalAlignment="Center" HorizontalAlignment="Center">
             <Grid x:Name="Speaker">
                 <Viewbox Width="22" Height="22">
                     <Grid>
@@ -23,12 +27,16 @@
                 <Path x:Name="BellPath"/>
             </Viewbox>
         </Grid>
-        <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="8,0,0,0">
-            <Grid>
+        <StackPanel x:Name="Copy" Grid.Column="1" VerticalAlignment="Center" Margin="8,0,0,0">
+            <Grid x:Name="TitleLine">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
                 <TextBlock x:Name="Title" FontSize="15" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
                 <TextBlock x:Name="Percent" Grid.Column="1" FontSize="15" FontWeight="SemiBold" Margin="10,0,0,0"
                            Typography.NumeralAlignment="Tabular"/>

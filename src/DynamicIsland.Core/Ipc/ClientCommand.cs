@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DynamicIsland.Core.Island;
 
 namespace DynamicIsland.Core.Ipc;
 
@@ -41,10 +42,18 @@ public sealed class ClientCommand
 
     public static ClientCommand ParseArgs(IReadOnlyList<string> args)
     {
-        if (args.Count == 0)
+        var filtered = new List<string>(args.Count);
+        foreach (var arg in args)
+        {
+            if (!StartupDelay.IsFlag(arg))
+                filtered.Add(arg);
+        }
+
+        if (filtered.Count == 0)
             return new ClientCommand { Cmd = "show" };
 
-        string head = args[0].Trim().TrimStart('-').ToLowerInvariant();
+        string head = filtered[0].Trim().TrimStart('-').ToLowerInvariant();
+        args = filtered;
         return head switch
         {
             "toast" => new ClientCommand

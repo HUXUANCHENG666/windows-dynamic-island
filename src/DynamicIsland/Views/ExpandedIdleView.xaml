@@ -6,7 +6,7 @@
         <TextBlock x:Name="Clock" FontSize="42" FontWeight="SemiBold" HorizontalAlignment="Center"
                    Typography.NumeralAlignment="Tabular" Typography.NumeralStyle="Lining"/>
         <TextBlock x:Name="Date" FontSize="13" HorizontalAlignment="Center" Margin="0,1,0,12"/>
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+        <StackPanel x:Name="Actions" Orientation="Horizontal" HorizontalAlignment="Center">
             <Border x:Name="Stopwatch" Height="32" CornerRadius="16" Padding="14,0" Margin="0,0,8,0">
                 <TextBlock x:Name="StopwatchText" Text="秒表" FontSize="13" VerticalAlignment="Center"/>
             </Border>

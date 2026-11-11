@@ -2,7 +2,15 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              IsHitTestVisible="False" Focusable="False">
-    <TextBlock x:Name="Time" FontSize="16" FontWeight="SemiBold"
-               HorizontalAlignment="Center" VerticalAlignment="Center"
-               Typography.NumeralAlignment="Tabular" Typography.NumeralStyle="Lining"/>
+    <Grid>
+        <TextBlock x:Name="Time" FontSize="16" FontWeight="SemiBold"
+                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                   Typography.NumeralAlignment="Tabular" Typography.NumeralStyle="Lining"/>
+        <StackPanel x:Name="Stacked" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center">
+            <TextBlock x:Name="Upper" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center"
+                       Typography.NumeralAlignment="Tabular"/>
+            <TextBlock x:Name="Lower" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,1,0,0"
+                       Typography.NumeralAlignment="Tabular"/>
+        </StackPanel>
+    </Grid>
 </UserControl>

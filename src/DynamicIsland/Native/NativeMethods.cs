@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace DynamicIsland.Native;
 
@@ -19,7 +20,10 @@ static class NativeMethods
     public const uint SWP_FRAMECHANGED = 0x0020;
 
     public const int WM_NCHITTEST = 0x0084;
+    public const int WM_LBUTTONDOWN = 0x0201;
     public const int WM_MOUSEMOVE = 0x0200;
+    public const int WM_CLIPBOARDUPDATE = 0x031D;
+    public const int WM_APP_CHECKHIDE = 0x8000 + 41;
     public const int WM_MOUSELEAVE = 0x02A3;
     public const int WM_MOUSEACTIVATE = 0x0021;
     public const int WM_LBUTTONUP = 0x0202;
@@ -49,6 +53,23 @@ static class NativeMethods
     public const uint NIF_ICON = 0x00000002;
     public const uint NIF_TIP = 0x00000004;
     public const int WM_TRAY = 0x8000 + 20;
+
+    public const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
+    public const uint EVENT_SYSTEM_MOVESIZEEND = 0x000B;
+    public const uint EVENT_SYSTEM_MINIMIZEEND = 0x0017;
+    public const uint EVENT_OBJECT_LOCATIONCHANGE = 0x800B;
+    public const uint WINEVENT_OUTOFCONTEXT = 0x0000;
+    public const uint WINEVENT_SKIPOWNPROCESS = 0x0002;
+    public const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+
+    public delegate void WinEventProc(
+        IntPtr hWinEventHook,
+        uint eventType,
+        IntPtr hwnd,
+        int idObject,
+        int idChild,
+        uint eventThread,
+        uint eventTime);
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
     public static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
@@ -164,6 +185,52 @@ static class NativeMethods
         public Guid guidItem;
         public IntPtr hBalloonIcon;
     }
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr SetWinEventHook(
+        uint eventMin,
+        uint eventMax,
+        IntPtr module,
+        WinEventProc callback,
+        uint process,
+        uint thread,
+        uint flags);
+
+    [DllImport("user32.dll")]
+    public static extern bool UnhookWinEvent(IntPtr hook);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetClassName(IntPtr hwnd, StringBuilder name, int capacity);
+
+    [DllImport("user32.dll")]
+    public static extern bool AddClipboardFormatListener(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool RemoveClipboardFormatListener(IntPtr hwnd);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern IntPtr FindWindow(string? className, string? windowName);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string? className, string? windowName);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern IntPtr OpenProcess(uint access, bool inherit, uint processId);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern bool QueryFullProcessImageName(IntPtr process, int flags, StringBuilder name, ref int size);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool CloseHandle(IntPtr handle);
 
     public static int SignedLow(IntPtr value) => unchecked((short)(value.ToInt64() & 0xFFFF));
     public static int SignedHigh(IntPtr value) => unchecked((short)((value.ToInt64() >> 16) & 0xFFFF));

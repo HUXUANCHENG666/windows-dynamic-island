@@ -1,3 +1,4 @@
+using DynamicIsland.Core.Island;
 using Microsoft.Win32;
 
 namespace DynamicIsland.Services;
@@ -28,6 +29,16 @@ static class StartupRegistration
         var path = Environment.ProcessPath;
         if (string.IsNullOrWhiteSpace(path))
             throw new InvalidOperationException("找不到自己的 exe 路径，没法写入开机启动。");
-        key.SetValue(ValueName, $"\"{path}\"");
+        key.SetValue(ValueName, StartupDelay.LogonCommand(path));
+    }
+
+    public static void EnsureDelayedLogon()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(KeyPath, writable: false);
+        if (key?.GetValue(ValueName) is not string value || string.IsNullOrWhiteSpace(value))
+            return;
+        if (value.Contains(StartupDelay.Flag, StringComparison.OrdinalIgnoreCase))
+            return;
+        SetEnabled(true);
     }
 }

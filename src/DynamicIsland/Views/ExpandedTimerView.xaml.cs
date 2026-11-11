@@ -64,6 +64,21 @@ public partial class ExpandedTimerView : UserControl
         CountdownMode.Background = countdown ? Theme.Chip : Brushes.Transparent;
     }
 
+    public void SetVertical(bool vertical)
+    {
+        Controls.Orientation = vertical ? Orientation.Vertical : Orientation.Horizontal;
+        Modes.Orientation = vertical ? Orientation.Vertical : Orientation.Horizontal;
+        var gap = vertical ? new Thickness(0, 0, 0, 8) : new Thickness(0, 0, 8, 0);
+        Minus.Margin = gap;
+        Toggle.Margin = gap;
+        Reset.Margin = gap;
+        Plus.Margin = new Thickness(0);
+        StopwatchMode.Margin = vertical ? new Thickness(0, 0, 0, 6) : new Thickness(0, 0, 6, 0);
+        Time.FontSize = vertical ? 36 : 44;
+        Controls.HorizontalAlignment = HorizontalAlignment.Center;
+        Modes.HorizontalAlignment = HorizontalAlignment.Center;
+    }
+
     static void PaintChip(Border border)
     {
         if (border.Child is TextBlock text)

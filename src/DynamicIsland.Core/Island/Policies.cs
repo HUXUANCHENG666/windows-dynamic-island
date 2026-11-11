@@ -25,14 +25,17 @@ public static class NoticePolicy
     public static readonly TimeSpan VolumeHold = TimeSpan.FromMilliseconds(1700);
     public static readonly TimeSpan BatteryHold = TimeSpan.FromMilliseconds(2500);
     public static readonly TimeSpan ToastHold = TimeSpan.FromMilliseconds(3200);
+    public static readonly TimeSpan TranslateHold = TimeSpan.FromMilliseconds(8000);
     public static readonly TimeSpan VolumeQueueLife = TimeSpan.FromSeconds(2.5);
     public static readonly TimeSpan BatteryQueueLife = TimeSpan.FromSeconds(12);
     public static readonly TimeSpan ToastQueueLife = TimeSpan.FromSeconds(8);
+    public static readonly TimeSpan TranslateQueueLife = TimeSpan.FromSeconds(12);
 
     public static TimeSpan Hold(IslandMode mode) => mode switch
     {
         IslandMode.Volume => VolumeHold,
         IslandMode.Battery => BatteryHold,
+        IslandMode.Translate => TranslateHold,
         IslandMode.Toast => ToastHold,
         _ => ToastHold
     };
@@ -41,6 +44,7 @@ public static class NoticePolicy
     {
         IslandMode.Volume => VolumeQueueLife,
         IslandMode.Battery => BatteryQueueLife,
+        IslandMode.Translate => TranslateQueueLife,
         _ => ToastQueueLife
     };
 

@@ -14,11 +14,17 @@ sealed class TrayController : IDisposable
     const int IdFocus = 4;
     const int IdToast = 5;
     const int IdLog = 6;
+    const int IdStealth = 7;
+    const int IdTranslate = 8;
+    const int IdCamera = 9;
+    const int IdHideCurrent = 10;
     const int IdMonitorBase = 100;
+    const int IdHideBase = 300;
 
     readonly IslandWindow _window;
     readonly HwndSource _source;
     readonly List<MonitorDesc> _monitors = new();
+    readonly List<string> _hideSnapshot = new();
     IntPtr _icon;
     bool _added;
 
@@ -97,6 +103,35 @@ sealed class TrayController : IDisposable
 
             uint startup = NativeMethods.MF_STRING | (StartupRegistration.IsEnabled() ? NativeMethods.MF_CHECKED : 0);
             NativeMethods.AppendMenu(menu, startup, (IntPtr)IdStartup, "开机时启动");
+            uint stealth = NativeMethods.MF_STRING | (_window.Settings.Stealth ? NativeMethods.MF_CHECKED : 0);
+            NativeMethods.AppendMenu(menu, stealth, (IntPtr)IdStealth, "隐身");
+            string? foreign = _window.ForeignProcess;
+            if (!string.IsNullOrWhiteSpace(foreign))
+            {
+                _window.Settings.HideProcesses ??= new();
+                bool listed = DynamicIsland.Core.Island.HidePolicy.IsListed(_window.Settings.HideProcesses, foreign);
+                string hideLabel = listed ? $"把 {foreign} 移出隐身名单" : $"{foreign} 聚焦时隐藏";
+                NativeMethods.AppendMenu(menu, NativeMethods.MF_STRING, (IntPtr)IdHideCurrent, hideLabel);
+            }
+
+            _hideSnapshot.Clear();
+            if (_window.Settings.HideProcesses is { Count: > 0 } hideProcesses)
+            {
+                IntPtr hideMenu = NativeMethods.CreatePopupMenu();
+                int count = Math.Min(hideProcesses.Count, 12);
+                for (int i = 0; i < count; i++)
+                {
+                    _hideSnapshot.Add(hideProcesses[i]);
+                    NativeMethods.AppendMenu(hideMenu, NativeMethods.MF_STRING, (IntPtr)(IdHideBase + i), "移出 " + hideProcesses[i]);
+                }
+
+                NativeMethods.AppendMenu(menu, NativeMethods.MF_POPUP, hideMenu, "隐身名单");
+            }
+
+            NativeMethods.AppendMenu(menu, NativeMethods.MF_SEPARATOR, IntPtr.Zero, null);
+            NativeMethods.AppendMenu(menu, NativeMethods.MF_STRING, (IntPtr)IdTranslate, "翻译剪贴板");
+            uint camera = NativeMethods.MF_STRING | (_window.CameraIsOpen ? NativeMethods.MF_CHECKED : 0);
+            NativeMethods.AppendMenu(menu, camera, (IntPtr)IdCamera, "摄像头画中画");
             NativeMethods.AppendMenu(menu, NativeMethods.MF_SEPARATOR, IntPtr.Zero, null);
             NativeMethods.AppendMenu(menu, NativeMethods.MF_STRING, (IntPtr)IdStopwatch, "打开秒表");
             NativeMethods.AppendMenu(menu, NativeMethods.MF_STRING, (IntPtr)IdFocus, "开始 25 分钟专注");
@@ -154,7 +189,25 @@ sealed class TrayController : IDisposable
             case IdLog:
                 OpenLog();
                 break;
+            case IdStealth:
+                _window.ToggleStealth();
+                break;
+            case IdTranslate:
+                _window.TranslateClipboard();
+                break;
+            case IdCamera:
+                _window.ToggleCamera();
+                break;
+            case IdHideCurrent:
+                _window.ToggleListedProcess(_window.ForeignProcess);
+                break;
             default:
+                if (command >= IdHideBase && command - IdHideBase < _hideSnapshot.Count)
+                {
+                    _window.ToggleListedProcess(_hideSnapshot[command - IdHideBase]);
+                    break;
+                }
+
                 if (command >= IdMonitorBase && command - IdMonitorBase < _monitors.Count)
                 {
                     var mon = _monitors[command - IdMonitorBase];
