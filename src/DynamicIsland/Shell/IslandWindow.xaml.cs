@@ -49,6 +49,7 @@ public partial class IslandWindow : Window
     bool _dragging;
     bool _eatClick;
     bool _clipboardHooked;
+    IntPtr _foreignForeground;
     DockAnchor _anchor = DockAnchor.TopCenter;
     IslandOrientation _orientation = IslandOrientation.Horizontal;
     NativeMethods.POINT _pressCursor;
@@ -351,6 +352,9 @@ public partial class IslandWindow : Window
             e.Handled = true;
         };
         TranslateNotice.ConfirmClicked += (_, _) => ConfirmTranslation();
+        TranslateNotice.CopyRequested += (_, text) => CopyTranslation(text);
+        TranslateNotice.DismissClicked += (_, _) => DismissTranslation();
+        TranslateNotice.ResultMenuClosed += (_, _) => OnTranslationMenuClosed();
         TranslateNotice.DirectionClicked += (_, direction) =>
         {
             Settings.TranslateDirection = TranslatePolicy.ToSetting(direction);
@@ -484,6 +488,7 @@ public partial class IslandWindow : Window
         CheckPointer();
         var now = DateTime.UtcNow;
         _director.Tick(now);
+        PaintTranslationRecall();
         var cameraReason = CameraPolicy.Classify(
             _director.CameraSession,
             _director.Expanded,
@@ -585,7 +590,7 @@ public partial class IslandWindow : Window
 
     void CheckPointer()
     {
-        if (_dragging || _dragArmed)
+        if (_dragging || _dragArmed || _director.SelectionHold || TranslateNotice.IsResultMenuOpen)
             return;
         if (!_director.PointerInside || !NativeMethods.GetCursorPos(out var point))
             return;
@@ -614,13 +619,36 @@ public partial class IslandWindow : Window
                 handled = true;
                 break;
             case NativeMethods.WM_LBUTTONDOWN:
-                ArmDrag();
+                var press = HitTranslation();
+                if (press == DynamicIsland.Core.Translation.TranslationHit.ResultText)
+                    _director.SetTranslationSelection(true);
+                if (DynamicIsland.Core.Translation.TranslationGesture.ShouldArmDrag(press, _director.SelectionHold))
+                    ArmDrag();
                 break;
             case NativeMethods.WM_LBUTTONUP:
+                bool selecting = _director.SelectionHold;
+                if (selecting)
+                    _director.SetTranslationSelection(false);
                 FinishDrag();
+                if (selecting && CursorOutsidePill())
+                {
+                    _director.PointerExited(DateTime.UtcNow);
+                    Dispatcher.BeginInvoke(RestoreForeignForegroundIfIdle, DispatcherPriority.ApplicationIdle);
+                    if (!_renderLive)
+                        SyncLoops();
+                }
                 break;
             case NativeMethods.WM_MOUSEACTIVATE:
                 handled = true;
+                // 岛平时不激活。只有点在译文上时才破例，让只读文本框拿到键盘，Ctrl+C 才能复制选区。
+                // 扩展样式仍是 NOACTIVATE | TOOLWINDOW，不进任务栏，也不进 Alt+Tab。指针离开后把前台还回去。
+                if (DynamicIsland.Core.Translation.TranslationGesture.AllowsFocusForSelection(HitTranslation()))
+                {
+                    RememberForeignForeground(hwnd);
+                    Focusable = true;
+                    return (IntPtr)NativeMethods.MA_ACTIVATE;
+                }
+
                 return (IntPtr)NativeMethods.MA_NOACTIVATE;
             case NativeMethods.WM_NCHITTEST:
                 handled = true;
@@ -653,9 +681,10 @@ public partial class IslandWindow : Window
                 break;
             case NativeMethods.WM_MOUSELEAVE:
                 _trackingLeave = false;
-                if (_dragging || _dragArmed)
+                if (_dragging || _dragArmed || _director.SelectionHold || TranslateNotice.IsResultMenuOpen)
                     break;
                 _director.PointerExited(DateTime.UtcNow);
+                Dispatcher.BeginInvoke(RestoreForeignForegroundIfIdle, DispatcherPriority.ApplicationIdle);
                 if (!_renderLive)
                     SyncLoops();
                 break;
@@ -808,8 +837,9 @@ public partial class IslandWindow : Window
             var result = await _translator.TranslateAsync(request, token);
             if (token.IsCancellationRequested)
                 return;
+            _translate.RememberResult(result);
+            _director.ShowTranslationResult(result, DateTime.UtcNow);
             TranslateNotice.ShowResult(result);
-            _director.PushNotice(IslandMode.Translate, DateTime.UtcNow);
             Nudge();
         }
         catch (OperationCanceledException)
@@ -825,6 +855,138 @@ public partial class IslandWindow : Window
                 Nudge();
             }
         }
+    }
+
+    void PaintTranslationRecall()
+    {
+        if (!_director.IsShowingTranslation || _director.LastTranslation is not string text)
+            return;
+        if (TranslateNotice.IsShowing(text))
+            return;
+        TranslateNotice.ShowResult(text);
+    }
+
+    void CopyTranslation(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return;
+        _translate.SuppressClipboardEcho();
+        try
+        {
+            System.Windows.Clipboard.SetText(text);
+        }
+        catch (Exception ex)
+        {
+            _translate.CancelClipboardEcho();
+            Log.Error("copy-translation", ex);
+            return;
+        }
+
+        _director.MarkTranslationCopied();
+        Nudge();
+    }
+
+    void DismissTranslation()
+    {
+        _translate.ForgetResult();
+        _director.DismissTranslation(DateTime.UtcNow);
+        RestoreForeignForeground();
+        Nudge();
+    }
+
+    public void ShowStoredTranslation()
+    {
+        if (!_director.RevealTranslation(DateTime.UtcNow) || _director.LastTranslation is not string text)
+        {
+            ShowToast("翻译", "还没有译文");
+            return;
+        }
+
+        TranslateNotice.ShowResult(text);
+        Nudge();
+    }
+
+    public bool HasStoredTranslation => _director.HasTranslation;
+
+    void OnTranslationMenuClosed()
+    {
+        if (_director.SelectionHold)
+            return;
+        if (!CursorOutsidePill())
+            return;
+        _director.PointerExited(DateTime.UtcNow);
+        RestoreForeignForeground();
+        if (!_renderLive)
+            SyncLoops();
+    }
+
+    DynamicIsland.Core.Translation.TranslationHit HitTranslation()
+    {
+        if (!TranslateNotice.ResultIsSelectable || !_director.IsShowingTranslation)
+            return DynamicIsland.Core.Translation.TranslationHit.None;
+        if (!NativeMethods.GetCursorPos(out var point))
+            return DynamicIsland.Core.Translation.TranslationHit.None;
+        if (HitElement(TranslateNotice.ResultBox, point))
+            return DynamicIsland.Core.Translation.TranslationHit.ResultText;
+        if (TranslateNotice.CopyButton.IsVisible && HitElement(TranslateNotice.CopyButton, point))
+            return DynamicIsland.Core.Translation.TranslationHit.CopyControl;
+        if (TranslateNotice.CloseButton.IsVisible && HitElement(TranslateNotice.CloseButton, point))
+            return DynamicIsland.Core.Translation.TranslationHit.DismissControl;
+        return DynamicIsland.Core.Translation.TranslationHit.None;
+    }
+
+    static bool HitElement(FrameworkElement element, NativeMethods.POINT point)
+    {
+        if (!element.IsVisible || element.ActualWidth < 1 || element.ActualHeight < 1)
+            return false;
+        try
+        {
+            var local = element.PointFromScreen(new Point(point.X, point.Y));
+            return local.X >= 0 && local.Y >= 0 && local.X <= element.ActualWidth && local.Y <= element.ActualHeight;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    bool CursorOutsidePill()
+    {
+        if (!NativeMethods.GetCursorPos(out var point))
+            return false;
+        try
+        {
+            return !HitPill(PointFromScreen(new Point(point.X, point.Y)));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    void RememberForeignForeground(IntPtr self)
+    {
+        var current = NativeMethods.GetForegroundWindow();
+        if (current != IntPtr.Zero && current != self)
+            _foreignForeground = current;
+    }
+
+    void RestoreForeignForegroundIfIdle()
+    {
+        if (_director.PointerInside || _director.SelectionHold || TranslateNotice.IsResultMenuOpen)
+            return;
+        RestoreForeignForeground();
+    }
+
+    void RestoreForeignForeground()
+    {
+        Focusable = false;
+        TranslateNotice.BlurResult();
+        var target = _foreignForeground;
+        _foreignForeground = IntPtr.Zero;
+        if (target == IntPtr.Zero)
+            return;
+        NativeMethods.SetForegroundWindow(target);
     }
 
     async Task StartCameraAsync()

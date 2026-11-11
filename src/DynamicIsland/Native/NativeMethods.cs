@@ -31,6 +31,7 @@ static class NativeMethods
     public const int WM_CONTEXTMENU = 0x007B;
     public const int WM_DPICHANGED = 0x02E0;
     public const int WM_NULL = 0x0000;
+    public const int MA_ACTIVATE = 1;
     public const int MA_NOACTIVATE = 3;
     public const int HTCLIENT = 1;
     public const int HTTRANSPARENT = -1;

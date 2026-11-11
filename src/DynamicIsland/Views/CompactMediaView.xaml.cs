@@ -25,13 +25,7 @@ public partial class CompactMediaView : UserControl
             return;
         }
 
-        Art.Fill = new ImageBrush(source)
-        {
-            Stretch = Stretch.UniformToFill,
-            AlignmentX = AlignmentX.Center,
-            AlignmentY = AlignmentY.Center
-        };
-        RenderOptions.SetBitmapScalingMode(Art, BitmapScalingMode.HighQuality);
+        Art.Fill = ArtBrush.Create(source, ArtHost.Width, ArtHost.Height);
         Note.Visibility = System.Windows.Visibility.Collapsed;
     }
 

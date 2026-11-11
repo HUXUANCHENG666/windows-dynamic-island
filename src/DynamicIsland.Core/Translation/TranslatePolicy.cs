@@ -98,10 +98,38 @@ public sealed class TranslateSession
     public string? PendingText { get; private set; }
     public bool SendAuthorized { get; private set; }
     public TranslateRequest? LastRequest { get; private set; }
+    public string? LastResult { get; private set; }
+    int _clipboardEcho;
+
+    public void RememberResult(string text) => LastResult = text.Trim();
+
+    public void ForgetResult() => LastResult = null;
+
+    /// <summary>刚把译文写进剪贴板。下一次剪贴板通知是这次复制的回声，不能再弹邀请。</summary>
+    public void SuppressClipboardEcho() => _clipboardEcho++;
+
+    public void CancelClipboardEcho()
+    {
+        if (_clipboardEcho > 0)
+            _clipboardEcho--;
+    }
+
+    public bool IsOwnResult(string? text) =>
+        LastResult != null
+        && !string.IsNullOrWhiteSpace(text)
+        && string.Equals(text.Trim(), LastResult, StringComparison.Ordinal);
 
     public bool OfferClipboard(string? text)
     {
         SendAuthorized = false;
+        if (_clipboardEcho > 0)
+        {
+            _clipboardEcho--;
+            return false;
+        }
+
+        if (IsOwnResult(text))
+            return false;
         if (!TranslatePolicy.ShouldInvite(text, PendingText))
             return false;
         PendingText = text!.Trim();

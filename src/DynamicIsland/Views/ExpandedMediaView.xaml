@@ -11,7 +11,7 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition x:Name="ArtCol" Width="104"/>
                 <ColumnDefinition x:Name="GapCol" Width="14"/>
-                <ColumnDefinition Width="*"/>
+                <ColumnDefinition x:Name="MetaCol" Width="*"/>
             </Grid.ColumnDefinitions>
             <Grid x:Name="ArtHost" Width="104" Height="104">
                 <Rectangle x:Name="Art" RadiusX="24" RadiusY="24"/>
