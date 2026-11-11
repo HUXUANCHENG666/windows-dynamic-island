@@ -8,6 +8,7 @@ using DynamicIsland.Core.Camera;
 using DynamicIsland.Core.Formatting;
 using DynamicIsland.Core.Ipc;
 using DynamicIsland.Core.Island;
+using DynamicIsland.Core.Notifications;
 using DynamicIsland.Core.SystemState;
 using DynamicIsland.Core.Timer;
 using DynamicIsland.Core.Translation;
@@ -27,6 +28,7 @@ public partial class IslandWindow : Window
     readonly MediaService _media;
     readonly VolumeService _volume;
     readonly PowerService _power;
+    readonly NotificationCenterService _notifications;
     readonly Translator _translator = new();
     readonly TranslateSession _translate = new();
     readonly CameraSession _camera;
@@ -48,6 +50,8 @@ public partial class IslandWindow : Window
     bool _dragArmed;
     bool _dragging;
     bool _eatClick;
+    NotificationCard? _toastCard;
+    IslandMode _trackedMode = IslandMode.Idle;
     bool _clipboardHooked;
     DockAnchor _anchor = DockAnchor.TopCenter;
     IslandOrientation _orientation = IslandOrientation.Horizontal;
@@ -61,7 +65,7 @@ public partial class IslandWindow : Window
 
     public DynamicIsland.Core.Settings.AppSettings Settings => _settings.Settings;
     public string? ForeignProcess { get; private set; }
-    public bool CameraIsOpen => _deviceOpen || _director.Mode == IslandMode.Camera;
+    public bool CameraIsOpen => _deviceOpen || _director.CameraOpen || _director.Mode == IslandMode.Camera;
     public StreamGeometry? HitGeometry { get; set; }
     public StreamGeometry? SlopGeometry { get; set; }
 
@@ -103,6 +107,9 @@ public partial class IslandWindow : Window
         _camera.Frame += (pixels, width, height) => CameraNotice.SetFrame(pixels, width, height);
         _volume = new VolumeService(Dispatcher);
         _power = new PowerService(Dispatcher);
+        _notifications = new NotificationCenterService(Dispatcher);
+        _notifications.Arrived += (_, card) => ShowIncoming(card);
+        _notifications.AccessLost += (_, access) => ExplainNotificationAccess(access, openSettings: false);
         _media.Changed += (_, _) => OnMedia();
         _volume.Changed += (_, reading) =>
         {
@@ -138,6 +145,11 @@ public partial class IslandWindow : Window
         catch (Exception ex) { Log.Error("volume", ex); }
         try { _power.Start(); }
         catch (Exception ex) { Log.Error("power", ex); }
+        if (Settings.NotificationCenter)
+        {
+            try { await EnableNotificationCenterAsync(prompt: false); }
+            catch (Exception ex) { Log.Info(NotificationLog.Failed(ex.HResult)); }
+        }
         EvaluateHide();
     }
 
@@ -167,11 +179,107 @@ public partial class IslandWindow : Window
         Nudge();
     }
 
-    public void ShowToast(string title, string body)
+    public void ShowToast(string title, string body, TimeSpan? hold = null)
     {
+        _toastCard = null;
         ToastNotice.SetToast(title, body);
+        _director.PushNotice(IslandMode.Toast, DateTime.UtcNow, hold);
+        Nudge();
+    }
+
+    public void ToggleNotificationCenter()
+    {
+        if (Settings.NotificationCenter)
+        {
+            Settings.NotificationCenter = false;
+            SettingsStore.Save(Settings);
+            _notifications.Stop();
+            ShowToast(NotificationCopy.Title, NotificationCopy.Closed);
+            return;
+        }
+
+        if (!Settings.NotificationCenterExplained)
+        {
+            Settings.NotificationCenterExplained = true;
+            SettingsStore.Save(Settings);
+            ShowToast(NotificationCopy.Title, NotificationCopy.FirstUse, NoticePolicy.GuidanceHold);
+        }
+
+        _ = EnableNotificationCenterAsync(prompt: true);
+    }
+
+    async Task EnableNotificationCenterAsync(bool prompt)
+    {
+        NotificationAccess access;
+        try
+        {
+            access = prompt
+                ? await _notifications.RequestAccessAsync()
+                : _notifications.ReadAccess();
+        }
+        catch (Exception ex)
+        {
+            Log.Info(NotificationLog.Failed(ex.HResult));
+            access = NotificationAccess.Unavailable;
+        }
+
+        Log.Info(NotificationLog.Access(access));
+        if (!NotificationAccessPolicy.MayListen(true, access))
+        {
+            _notifications.Stop();
+            if (prompt)
+            {
+                Settings.NotificationCenter = false;
+                SettingsStore.Save(Settings);
+            }
+
+            ExplainNotificationAccess(access, openSettings: prompt && access == NotificationAccess.Denied);
+            return;
+        }
+
+        Settings.NotificationCenter = true;
+        SettingsStore.Save(Settings);
+        _notifications.Start();
+        if (prompt)
+            ShowToast(NotificationCopy.Title, NotificationCopy.Allowed, NoticePolicy.GuidanceHold);
+    }
+
+    void ExplainNotificationAccess(NotificationAccess access, bool openSettings)
+    {
+        string body = access switch
+        {
+            NotificationAccess.Denied => NotificationCopy.Denied,
+            NotificationAccess.Unavailable => NotificationCopy.Unavailable,
+            NotificationAccess.Allowed => NotificationCopy.Allowed,
+            _ => NotificationCopy.Unspecified
+        };
+        ShowToast(NotificationCopy.Title, body, NoticePolicy.GuidanceHold);
+        if (openSettings)
+            NotificationActivator.OpenPrivacySettings();
+    }
+
+    void ShowIncoming(NotificationCard card)
+    {
+        _toastCard = card;
+        ToastNotice.SetIncoming(card.AppName, card.Title, card.Summary);
         _director.PushNotice(IslandMode.Toast, DateTime.UtcNow);
         Nudge();
+    }
+
+    async Task OpenNotificationAsync(NotificationCard card)
+    {
+        bool opened = false;
+        try
+        {
+            opened = await _notifications.OpenAsync(card);
+        }
+        catch (Exception ex)
+        {
+            Log.Info(NotificationLog.Failed(ex.HResult));
+        }
+
+        if (!opened)
+            ShowToast(NotificationCopy.Title, NotificationCopy.OpenFailed);
     }
 
     public void OpenStopwatch()
@@ -206,6 +314,7 @@ public partial class IslandWindow : Window
         _media.Dispose();
         _volume.Dispose();
         _power.Dispose();
+        _notifications.Dispose();
         Close();
     }
 
@@ -256,7 +365,7 @@ public partial class IslandWindow : Window
 
     public void ToggleCamera()
     {
-        if (_deviceOpen || _director.Mode == IslandMode.Camera)
+        if (_deviceOpen || _director.CameraOpen || _director.Mode == IslandMode.Camera)
         {
             ReleaseCamera(collapseUi: true);
             Nudge();
@@ -327,6 +436,7 @@ public partial class IslandWindow : Window
         _topmost?.Stop();
         SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
         _translateCts?.Cancel();
+        _notifications.Dispose();
         ReleaseCamera(collapseUi: false);
         _watcher.Dispose();
         _translator.Dispose();
@@ -496,6 +606,10 @@ public partial class IslandWindow : Window
             SaveTimer();
             ShowToast("时间到", "专注结束");
         }
+
+        if (_trackedMode == IslandMode.Toast && _director.Mode != IslandMode.Toast)
+            _toastCard = null;
+        _trackedMode = _director.Mode;
 
         bool transitioning = !_animator.IsSettled;
         bool allowBlur = EffectsPolicy.AllowBlur(_director.Expanded && !_director.ShowAsDot, transitioning);
@@ -753,7 +867,7 @@ public partial class IslandWindow : Window
         bool hide = HidePolicy.IsOccluded(
             new HideSignals(Settings.Stealth, sample.HasForeignWindow, sample.OnIslandMonitor, sample.CoversIslandMonitor, sample.ProcessName),
             Settings.HideProcesses);
-        if (hide && (_deviceOpen || _director.Mode == IslandMode.Camera))
+        if (hide && (_deviceOpen || _director.CameraOpen || _director.Mode == IslandMode.Camera))
             ReleaseCamera(collapseUi: true);
         _director.SetOccluded(hide, DateTime.UtcNow);
         Nudge();
@@ -834,7 +948,7 @@ public partial class IslandWindow : Window
         CameraNotice.ShowWaiting();
         Nudge();
         var error = await _camera.StartAsync();
-        if (_director.Mode != IslandMode.Camera || !_director.Expanded)
+        if (!_director.CameraOpen)
         {
             ReleaseCamera(collapseUi: false);
             return;
@@ -860,7 +974,7 @@ public partial class IslandWindow : Window
         if (_camera.IsOpen)
             _camera.Release();
         CameraNotice.SetLive(false);
-        if (collapseUi && _director.Mode == IslandMode.Camera)
+        if (collapseUi && (_director.CameraOpen || _director.Mode == IslandMode.Camera))
             _director.SetCamera(false);
     }
 
@@ -912,8 +1026,16 @@ public partial class IslandWindow : Window
                 {
                     if (HitPill(PointFromScreen(new Point(point.X, point.Y))))
                     {
-                        _director.Click(DateTime.UtcNow);
-                        Nudge();
+                        if (_director.Mode == IslandMode.Toast && _toastCard is { } card
+                            && card.Launch.Kind != NotificationLaunchKind.None)
+                        {
+                            _ = OpenNotificationAsync(card);
+                        }
+                        else
+                        {
+                            _director.Click(DateTime.UtcNow);
+                            Nudge();
+                        }
                     }
                 }
                 catch
