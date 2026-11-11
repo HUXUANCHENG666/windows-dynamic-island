@@ -13,7 +13,11 @@ static class SettingsStore
         {
             if (!File.Exists(FilePath))
                 return new AppSettings();
-            return SettingsJson.Deserialize(File.ReadAllText(FilePath));
+            var settings = SettingsJson.Deserialize(File.ReadAllText(FilePath));
+            settings.HideProcesses ??= new();
+            settings.Docks ??= new();
+            settings.Timer ??= new();
+            return settings;
         }
         catch (Exception ex)
         {

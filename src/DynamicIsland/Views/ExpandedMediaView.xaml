@@ -4,22 +4,22 @@
              Focusable="False">
     <Grid Margin="16,14,16,12">
         <Grid.RowDefinitions>
-            <RowDefinition Height="104"/>
+            <RowDefinition x:Name="TopRow" Height="104"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
-        <Grid>
+        <Grid x:Name="Head">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="104"/>
-                <ColumnDefinition Width="14"/>
+                <ColumnDefinition x:Name="ArtCol" Width="104"/>
+                <ColumnDefinition x:Name="GapCol" Width="14"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
-            <Grid>
+            <Grid x:Name="ArtHost" Width="104" Height="104">
                 <Rectangle x:Name="Art" RadiusX="24" RadiusY="24"/>
                 <Viewbox x:Name="Note" Width="32" Height="32" IsHitTestVisible="False">
                     <Path x:Name="NotePath"/>
                 </Viewbox>
             </Grid>
-            <Grid Grid.Column="2">
+            <Grid x:Name="Meta" Grid.Column="2">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>

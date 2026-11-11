@@ -102,6 +102,48 @@ public partial class ExpandedMediaView : UserControl
         border.IsHitTestVisible = enabled;
     }
 
+    public void SetVertical(bool vertical)
+    {
+        if (vertical)
+        {
+            TopRow.Height = new GridLength(1, GridUnitType.Star);
+            Head.RowDefinitions.Clear();
+            Head.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Head.RowDefinitions.Add(new RowDefinition { Height = new GridLength(10) });
+            Head.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            ArtCol.Width = new GridLength(1, GridUnitType.Star);
+            GapCol.Width = new GridLength(0);
+            Grid.SetColumn(ArtHost, 0);
+            Grid.SetRow(ArtHost, 0);
+            Grid.SetColumn(Meta, 0);
+            Grid.SetRow(Meta, 2);
+            ArtHost.Width = 132;
+            ArtHost.Height = 132;
+            ArtHost.HorizontalAlignment = HorizontalAlignment.Center;
+            Title.TextAlignment = TextAlignment.Center;
+            Artist.TextAlignment = TextAlignment.Center;
+            Title.HorizontalAlignment = HorizontalAlignment.Center;
+            Artist.HorizontalAlignment = HorizontalAlignment.Center;
+            return;
+        }
+
+        TopRow.Height = new GridLength(104);
+        Head.RowDefinitions.Clear();
+        ArtCol.Width = new GridLength(104);
+        GapCol.Width = new GridLength(14);
+        Grid.SetColumn(ArtHost, 0);
+        Grid.SetRow(ArtHost, 0);
+        Grid.SetColumn(Meta, 2);
+        Grid.SetRow(Meta, 0);
+        ArtHost.Width = 104;
+        ArtHost.Height = 104;
+        ArtHost.HorizontalAlignment = HorizontalAlignment.Stretch;
+        Title.TextAlignment = TextAlignment.Left;
+        Artist.TextAlignment = TextAlignment.Left;
+        Title.HorizontalAlignment = HorizontalAlignment.Stretch;
+        Artist.HorizontalAlignment = HorizontalAlignment.Stretch;
+    }
+
     static void Raise(EventHandler? handler, MouseButtonEventArgs e)
     {
         e.Handled = true;

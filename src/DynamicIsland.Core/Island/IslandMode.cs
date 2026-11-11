@@ -7,7 +7,9 @@ public enum IslandMode
     Volume,
     Battery,
     Timer,
-    Toast
+    Toast,
+    Translate,
+    Camera
 }
 
 public enum AmbientKind

@@ -4,11 +4,13 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
 using System.Windows.Threading;
+using DynamicIsland.Core.Camera;
 using DynamicIsland.Core.Formatting;
 using DynamicIsland.Core.Ipc;
 using DynamicIsland.Core.Island;
 using DynamicIsland.Core.SystemState;
 using DynamicIsland.Core.Timer;
+using DynamicIsland.Core.Translation;
 using DynamicIsland.Native;
 using DynamicIsland.Services;
 using DynamicIsland.Visuals;
@@ -25,7 +27,12 @@ public partial class IslandWindow : Window
     readonly MediaService _media;
     readonly VolumeService _volume;
     readonly PowerService _power;
+    readonly Translator _translator = new();
+    readonly TranslateSession _translate = new();
+    readonly CameraSession _camera;
+    readonly FullscreenWatcher _watcher = new();
     readonly DynamicIsland.Core.Media.TimelineEstimator _timeline = new();
+    CancellationTokenSource? _translateCts;
     TrayController? _tray;
     DispatcherTimer? _slow;
     DispatcherTimer? _topmost;
@@ -37,17 +44,32 @@ public partial class IslandWindow : Window
     bool _servicesStarted;
     bool _inPulse;
     bool _positioning;
+    bool _deviceOpen;
+    bool _dragArmed;
+    bool _dragging;
+    bool _eatClick;
+    bool _clipboardHooked;
+    DockAnchor _anchor = DockAnchor.TopCenter;
+    IslandOrientation _orientation = IslandOrientation.Horizontal;
+    NativeMethods.POINT _pressCursor;
+    int _pressX;
+    int _pressY;
     PixelRect _placed;
     TimeSpan _lastRender;
     double _wavePhase;
     DateTime _lastTimerSaveUtc;
 
     public DynamicIsland.Core.Settings.AppSettings Settings => _settings.Settings;
+    public string? ForeignProcess { get; private set; }
+    public bool CameraIsOpen => _deviceOpen || _director.Mode == IslandMode.Camera;
     public StreamGeometry? HitGeometry { get; set; }
     public StreamGeometry? SlopGeometry { get; set; }
 
     public IslandWindow(DynamicIsland.Core.Settings.AppSettings settings)
     {
+        settings.Timer ??= new();
+        settings.HideProcesses ??= new();
+        settings.Docks ??= new();
         _settings = new AppSettingsHost(settings);
         InitializeComponent();
         Width = IslandMetrics.WindowWidth;
@@ -70,10 +92,15 @@ public partial class IslandWindow : Window
         _announceFinish = _timer.Import(settings.Timer, DateTime.UtcNow);
         _timerPinned = settings.Timer.Pinned || _timer.IsRunning || _timer.IsCompleted;
         _director.SetAmbient(AmbientPolicy.Choose(false, false, _timerPinned));
+        if (settings.Stealth)
+            _director.SetOccluded(true, DateTime.UtcNow);
         _animator.PlayIntro();
-        _animator.SetTarget(_director.Mode, _director.Expanded);
+        _animator.SetTarget(_director.Mode, _director.Expanded, _director.ShowAsDot, _orientation);
+        TranslateNotice.SetDirection(TranslatePolicy.Parse(settings.TranslateDirection));
 
         _media = new MediaService(Dispatcher);
+        _camera = new CameraSession(Dispatcher);
+        _camera.Frame += (pixels, width, height) => CameraNotice.SetFrame(pixels, width, height);
         _volume = new VolumeService(Dispatcher);
         _power = new PowerService(Dispatcher);
         _media.Changed += (_, _) => OnMedia();
@@ -111,6 +138,7 @@ public partial class IslandWindow : Window
         catch (Exception ex) { Log.Error("volume", ex); }
         try { _power.Start(); }
         catch (Exception ex) { Log.Error("power", ex); }
+        EvaluateHide();
     }
 
     public void HandleCommand(ClientCommand command)
@@ -172,12 +200,76 @@ public partial class IslandWindow : Window
     public void ExitApp()
     {
         SaveTimer();
+        ReleaseCamera(collapseUi: false);
         _tray?.Dispose();
         _tray = null;
         _media.Dispose();
         _volume.Dispose();
         _power.Dispose();
         Close();
+    }
+
+    public void ToggleStealth()
+    {
+        Settings.Stealth = !Settings.Stealth;
+        SettingsStore.Save(Settings);
+        EvaluateHide();
+    }
+
+    public void ToggleListedProcess(string? process)
+    {
+        if (string.IsNullOrWhiteSpace(process))
+            return;
+        Settings.HideProcesses ??= new();
+        HidePolicy.ToggleListed(Settings.HideProcesses, process);
+        SettingsStore.Save(Settings);
+        EvaluateHide();
+    }
+
+    public void TranslateClipboard()
+    {
+        string text;
+        try
+        {
+            text = System.Windows.Clipboard.ContainsText() ? System.Windows.Clipboard.GetText() : "";
+        }
+        catch (Exception ex)
+        {
+            Log.Error("clipboard", ex);
+            ShowToast("翻译", "现在读不到剪贴板");
+            return;
+        }
+
+        var trimmed = text.Trim();
+        if (trimmed.Length == 0 || trimmed.Length > TranslatePolicy.MaxInviteChars || !TranslatePolicy.ContainsLanguage(trimmed))
+        {
+            ShowToast("翻译", "剪贴板里没有可翻译的文字");
+            return;
+        }
+
+        _translate.SetPending(trimmed);
+        TranslateNotice.ShowInvite(trimmed);
+        _director.PushNotice(IslandMode.Translate, DateTime.UtcNow);
+        Nudge();
+        ConfirmTranslation();
+    }
+
+    public void ToggleCamera()
+    {
+        if (_deviceOpen || _director.Mode == IslandMode.Camera)
+        {
+            ReleaseCamera(collapseUi: true);
+            Nudge();
+            return;
+        }
+
+        if (!CameraPolicy.MayStart(userRequested: true, occluded: _director.Occluded))
+        {
+            ShowToast("摄像头", "先退出全屏或关闭隐身，再打开摄像头");
+            return;
+        }
+
+        _ = StartCameraAsync();
     }
 
     public bool HitPill(Point windowPoint)
@@ -198,6 +290,9 @@ public partial class IslandWindow : Window
         source.AddHook(WndProc);
         ApplyChrome(source.Handle);
         Position();
+        _watcher.Start(source.Handle);
+        _clipboardHooked = NativeMethods.AddClipboardFormatListener(source.Handle);
+        EvaluateHide();
         SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
         _topmost = new DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
         _topmost.Tick += (_, _) => ReassertTopmost();
@@ -219,7 +314,8 @@ public partial class IslandWindow : Window
     {
         base.OnDpiChanged(oldDpi, newDpi);
         Position();
-        _animator.Apply(this, newDpi.DpiScaleX);
+        bool transitioning = !_animator.IsSettled;
+        _animator.Apply(this, newDpi.DpiScaleX, _anchor, EffectsPolicy.AllowBlur(_director.Expanded && !_director.ShowAsDot, transitioning));
     }
 
     protected override void OnClosed(EventArgs e)
@@ -230,16 +326,38 @@ public partial class IslandWindow : Window
         _slow?.Stop();
         _topmost?.Stop();
         SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
+        _translateCts?.Cancel();
+        ReleaseCamera(collapseUi: false);
+        _watcher.Dispose();
+        _translator.Dispose();
+        if (_clipboardHooked)
+        {
+            var hwnd = new WindowInteropHelper(this).Handle;
+            if (hwnd != IntPtr.Zero)
+                NativeMethods.RemoveClipboardFormatListener(hwnd);
+            _clipboardHooked = false;
+        }
         base.OnClosed(e);
         Application.Current?.Shutdown();
     }
 
     void Wire()
     {
-        PreviewMouseLeftButtonDown += (_, _) =>
+        PreviewMouseLeftButtonUp += (_, e) =>
         {
-            _director.Click(DateTime.UtcNow);
-            Nudge();
+            if (!_dragging && !_eatClick)
+                return;
+            _eatClick = false;
+            e.Handled = true;
+        };
+        TranslateNotice.ConfirmClicked += (_, _) => ConfirmTranslation();
+        TranslateNotice.DirectionClicked += (_, direction) =>
+        {
+            Settings.TranslateDirection = TranslatePolicy.ToSetting(direction);
+            SettingsStore.Save(Settings);
+            TranslateNotice.SetDirection(direction);
+            if (_translate.SendAuthorized)
+                ConfirmTranslation();
         };
         ExpandedMedia.PlayPauseClicked += (_, _) =>
         {
@@ -366,15 +484,24 @@ public partial class IslandWindow : Window
         CheckPointer();
         var now = DateTime.UtcNow;
         _director.Tick(now);
+        var cameraReason = CameraPolicy.Classify(
+            _director.CameraSession,
+            _director.Expanded,
+            _director.Occluded,
+            _dragging || _dragArmed);
+        if (_deviceOpen && CameraPolicy.ShouldRelease(cameraReason))
+            ReleaseCamera(collapseUi: false);
         if (_timer.ConsumeCompletion())
         {
             SaveTimer();
             ShowToast("时间到", "专注结束");
         }
 
-        _animator.SetTarget(_director.Mode, _director.Expanded);
+        bool transitioning = !_animator.IsSettled;
+        bool allowBlur = EffectsPolicy.AllowBlur(_director.Expanded && !_director.ShowAsDot, transitioning);
+        _animator.SetTarget(_director.Mode, _director.Expanded, _director.ShowAsDot, _orientation);
         _animator.Step(dt);
-        _animator.Apply(this, CurrentDpi());
+        _animator.Apply(this, CurrentDpi(), _anchor, allowBlur);
         UpdateLive(dt);
         MaybeSaveTimer(now);
         SyncLoops();
@@ -421,7 +548,9 @@ public partial class IslandWindow : Window
     {
         bool waveform = _director.Mode == IslandMode.Media && _media.Current.IsPlaying;
         bool clock = _director.Mode == IslandMode.Idle && _director.Expanded;
-        bool animate = !_animator.IsSettled || waveform;
+        bool transitioning = !_animator.IsSettled;
+        bool expanded = _director.Expanded && !_director.ShowAsDot;
+        bool animate = EffectsPolicy.UseHighFrameRate(expanded, transitioning, waveform);
         if (animate && !_renderLive)
         {
             _renderLive = true;
@@ -456,6 +585,8 @@ public partial class IslandWindow : Window
 
     void CheckPointer()
     {
+        if (_dragging || _dragArmed)
+            return;
         if (!_director.PointerInside || !NativeMethods.GetCursorPos(out var point))
             return;
         try
@@ -473,6 +604,21 @@ public partial class IslandWindow : Window
     {
         switch (msg)
         {
+            case NativeMethods.WM_APP_CHECKHIDE:
+                _watcher.MarkDelivered();
+                EvaluateHide();
+                handled = true;
+                break;
+            case NativeMethods.WM_CLIPBOARDUPDATE:
+                OnClipboardInvite();
+                handled = true;
+                break;
+            case NativeMethods.WM_LBUTTONDOWN:
+                ArmDrag();
+                break;
+            case NativeMethods.WM_LBUTTONUP:
+                FinishDrag();
+                break;
             case NativeMethods.WM_MOUSEACTIVATE:
                 handled = true;
                 return (IntPtr)NativeMethods.MA_NOACTIVATE;
@@ -501,11 +647,14 @@ public partial class IslandWindow : Window
                 }
 
                 _director.PointerEntered(DateTime.UtcNow);
+                MoveWhileDragging();
                 if (!_renderLive)
                     SyncLoops();
                 break;
             case NativeMethods.WM_MOUSELEAVE:
                 _trackingLeave = false;
+                if (_dragging || _dragArmed)
+                    break;
                 _director.PointerExited(DateTime.UtcNow);
                 if (!_renderLive)
                     SyncLoops();
@@ -517,26 +666,33 @@ public partial class IslandWindow : Window
 
     void Position()
     {
-        if (_positioning)
+        if (_positioning || _dragging)
             return;
         var hwnd = new WindowInteropHelper(this).Handle;
         if (hwnd == IntPtr.Zero)
             return;
         var monitors = MonitorEnumerator.Enumerate();
-        MonitorDesc? monitor = null;
-        if (!string.IsNullOrWhiteSpace(Settings.MonitorDeviceName))
-        {
-            monitor = monitors.FirstOrDefault(item =>
-                string.Equals(item.DeviceName, Settings.MonitorDeviceName, StringComparison.OrdinalIgnoreCase));
-        }
-
-        monitor ??= monitors.FirstOrDefault(item => item.IsPrimary) ?? monitors.FirstOrDefault();
+        var monitor = ResolveMonitor(monitors);
         if (monitor == null)
             return;
 
-        var rect = WindowPlacement.CenterTop(
-            monitor.X, monitor.Y, monitor.Width, monitor.Height,
-            monitor.DpiX, monitor.DpiY, Width, Height);
+        Settings.Docks ??= new();
+        _anchor = DockStore.Recall(Settings.Docks, monitor.DeviceName);
+        var orientation = Dock.OrientationOf(_anchor);
+        var host = IslandMetrics.HostDip(orientation);
+        Width = host.Width;
+        Height = host.Height;
+        if (orientation != _orientation)
+        {
+            _orientation = orientation;
+            ApplyOrientation(orientation == IslandOrientation.Vertical);
+        }
+
+        var monitorRect = new PixelRect(monitor.X, monitor.Y, monitor.Width, monitor.Height);
+        var reported = new PixelRect(monitor.WorkX, monitor.WorkY, monitor.WorkWidth, monitor.WorkHeight);
+        var work = WorkAreaMath.ExcludeBars(monitorRect, reported, TaskbarBounds.Query());
+        var pixels = WindowPlacement.ToPixels(Width, Height, monitor.DpiX, monitor.DpiY);
+        var rect = SnapMath.Place(_anchor, work, pixels.Width, pixels.Height, monitorRect);
         if (rect == _placed)
             return;
         _positioning = true;
@@ -545,12 +701,273 @@ public partial class IslandWindow : Window
             _placed = rect;
             NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, rect.X, rect.Y, rect.Width, rect.Height,
                 NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW);
-            Log.Info($"place {monitor.Label} @ {rect.X},{rect.Y} {rect.Width}x{rect.Height} dpi {monitor.DpiX}");
+            Log.Info($"place {monitor.Label} {_anchor} @ {rect.X},{rect.Y} {rect.Width}x{rect.Height} dpi {monitor.DpiX}");
         }
         finally
         {
             _positioning = false;
         }
+    }
+
+    static MonitorDesc? ResolveMonitor(IReadOnlyList<MonitorDesc> monitors, string? deviceName)
+    {
+        MonitorDesc? monitor = null;
+        if (!string.IsNullOrWhiteSpace(deviceName))
+        {
+            monitor = monitors.FirstOrDefault(item =>
+                string.Equals(item.DeviceName, deviceName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return monitor ?? monitors.FirstOrDefault(item => item.IsPrimary) ?? monitors.FirstOrDefault();
+    }
+
+    MonitorDesc? ResolveMonitor(IReadOnlyList<MonitorDesc> monitors) =>
+        ResolveMonitor(monitors, Settings.MonitorDeviceName);
+
+    void ApplyOrientation(bool vertical)
+    {
+        CompactMedia.SetVertical(vertical);
+        CompactTimer.SetVertical(vertical);
+        ExpandedIdle.SetVertical(vertical);
+        ExpandedMedia.SetVertical(vertical);
+        ExpandedTimer.SetVertical(vertical);
+        VolumeNotice.SetVertical(vertical);
+        BatteryNotice.SetVertical(vertical);
+        ToastNotice.SetVertical(vertical);
+        TranslateNotice.SetVertical(vertical);
+        CameraNotice.SetVertical(vertical);
+    }
+
+    void EvaluateHide()
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero)
+            return;
+        var monitor = ResolveMonitor(MonitorEnumerator.Enumerate());
+        if (monitor == null)
+            return;
+        var sample = ForegroundProbe.Read(hwnd, new PixelRect(monitor.X, monitor.Y, monitor.Width, monitor.Height));
+        if (!string.IsNullOrWhiteSpace(sample.ProcessName))
+            ForeignProcess = sample.ProcessName;
+        Settings.HideProcesses ??= new();
+        bool hide = HidePolicy.IsOccluded(
+            new HideSignals(Settings.Stealth, sample.HasForeignWindow, sample.OnIslandMonitor, sample.CoversIslandMonitor, sample.ProcessName),
+            Settings.HideProcesses);
+        if (hide && (_deviceOpen || _director.Mode == IslandMode.Camera))
+            ReleaseCamera(collapseUi: true);
+        _director.SetOccluded(hide, DateTime.UtcNow);
+        Nudge();
+    }
+
+    void OnClipboardInvite()
+    {
+        string text;
+        try
+        {
+            if (!System.Windows.Clipboard.ContainsText())
+                return;
+            text = System.Windows.Clipboard.GetText();
+        }
+        catch
+        {
+            return;
+        }
+
+        if (!_translate.OfferClipboard(text))
+            return;
+        TranslateNotice.ShowInvite(_translate.PendingText ?? text);
+        _director.PushNotice(IslandMode.Translate, DateTime.UtcNow);
+        Nudge();
+    }
+
+    void ConfirmTranslation()
+    {
+        var request = _translate.Confirm(TranslatePolicy.Parse(Settings.TranslateDirection));
+        if (request is null)
+        {
+            TranslateNotice.ShowError("没有可翻译的文字");
+            _director.PushNotice(IslandMode.Translate, DateTime.UtcNow);
+            Nudge();
+            return;
+        }
+
+        _ = RunTranslationAsync(request.Value);
+    }
+
+    async Task RunTranslationAsync(TranslateRequest request)
+    {
+        _translateCts?.Cancel();
+        _translateCts = new CancellationTokenSource();
+        var token = _translateCts.Token;
+        TranslateNotice.ShowBusy(request.Clipped);
+        _director.PushNotice(IslandMode.Translate, DateTime.UtcNow);
+        Nudge();
+        try
+        {
+            Log.Info($"translate send {request.Text.Length} {request.Source}->{request.Target}");
+            var result = await _translator.TranslateAsync(request, token);
+            if (token.IsCancellationRequested)
+                return;
+            TranslateNotice.ShowResult(result);
+            _director.PushNotice(IslandMode.Translate, DateTime.UtcNow);
+            Nudge();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Log.Info("translate failed " + ex.GetType().Name);
+            if (!token.IsCancellationRequested)
+            {
+                TranslateNotice.ShowError(ex is InvalidOperationException ? ex.Message : "翻译没有完成。");
+                _director.PushNotice(IslandMode.Translate, DateTime.UtcNow);
+                Nudge();
+            }
+        }
+    }
+
+    async Task StartCameraAsync()
+    {
+        ReleaseCamera(collapseUi: false);
+        _director.SetCamera(true);
+        CameraNotice.ShowWaiting();
+        Nudge();
+        var error = await _camera.StartAsync();
+        if (_director.Mode != IslandMode.Camera || !_director.Expanded)
+        {
+            ReleaseCamera(collapseUi: false);
+            return;
+        }
+
+        if (!string.IsNullOrEmpty(error) || !_camera.IsOpen)
+        {
+            _deviceOpen = false;
+            CameraNotice.ShowError(string.IsNullOrEmpty(error) ? "打不开摄像头。" : error);
+            _director.ShowCameraMessage(DateTime.UtcNow);
+            Nudge();
+            return;
+        }
+
+        _deviceOpen = true;
+        CameraNotice.SetLive(true);
+        Nudge();
+    }
+
+    void ReleaseCamera(bool collapseUi)
+    {
+        _deviceOpen = false;
+        if (_camera.IsOpen)
+            _camera.Release();
+        CameraNotice.SetLive(false);
+        if (collapseUi && _director.Mode == IslandMode.Camera)
+            _director.SetCamera(false);
+    }
+
+    void ArmDrag()
+    {
+        if (!NativeMethods.GetCursorPos(out var point))
+            return;
+        Point local;
+        try { local = PointFromScreen(new Point(point.X, point.Y)); }
+        catch { return; }
+        if (!HitPill(local))
+            return;
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero || !NativeMethods.GetWindowRect(hwnd, out var rect))
+            return;
+        _dragArmed = true;
+        _dragging = false;
+        _pressCursor = point;
+        _pressX = rect.Left;
+        _pressY = rect.Top;
+    }
+
+    void MoveWhileDragging()
+    {
+        if (!_dragArmed || !NativeMethods.GetCursorPos(out var point))
+            return;
+        int dx = point.X - _pressCursor.X;
+        int dy = point.Y - _pressCursor.Y;
+        if (!_dragging && dx * dx + dy * dy < 36)
+            return;
+        _dragging = true;
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero)
+            return;
+        NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, _pressX + dx, _pressY + dy, 0, 0,
+            NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+    }
+
+    void FinishDrag()
+    {
+        bool dragged = _dragging;
+        _dragArmed = false;
+        _dragging = false;
+        if (!dragged)
+        {
+            if (NativeMethods.GetCursorPos(out var point))
+            {
+                try
+                {
+                    if (HitPill(PointFromScreen(new Point(point.X, point.Y))))
+                    {
+                        _director.Click(DateTime.UtcNow);
+                        Nudge();
+                    }
+                }
+                catch
+                {
+                    // Ignore a hit-test during a DPI change.
+                }
+            }
+
+            return;
+        }
+
+        _eatClick = true;
+        SnapFromCursor();
+    }
+
+    void SnapFromCursor()
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero || !NativeMethods.GetWindowRect(hwnd, out var rect) || !NativeMethods.GetCursorPos(out var point))
+            return;
+        double dpi = Math.Max(0.5, CurrentDpi());
+        double pillLeft = System.Windows.Controls.Canvas.GetLeft(PillHost);
+        double pillTop = System.Windows.Controls.Canvas.GetTop(PillHost);
+        if (double.IsNaN(pillLeft))
+            pillLeft = 0;
+        if (double.IsNaN(pillTop))
+            pillTop = 0;
+        int cx = rect.Left + (int)Math.Round((pillLeft + PillHost.ActualWidth / 2.0) * dpi);
+        int cy = rect.Top + (int)Math.Round((pillTop + PillHost.ActualHeight / 2.0) * dpi);
+        if (PillHost.ActualWidth < 1)
+        {
+            cx = point.X;
+            cy = point.Y;
+        }
+
+        var monitors = MonitorEnumerator.Enumerate();
+        var monitor = monitors.FirstOrDefault(item => item.X <= cx && cx < item.X + item.Width && item.Y <= cy && cy < item.Y + item.Height)
+            ?? monitors.FirstOrDefault(item => item.IsPrimary)
+            ?? monitors.FirstOrDefault();
+        if (monitor == null)
+            return;
+        var monitorRect = new PixelRect(monitor.X, monitor.Y, monitor.Width, monitor.Height);
+        var reported = new PixelRect(monitor.WorkX, monitor.WorkY, monitor.WorkWidth, monitor.WorkHeight);
+        var work = WorkAreaMath.ExcludeBars(monitorRect, reported, TaskbarBounds.Query());
+        int inset = (int)Math.Round(56 * (monitor.DpiX / 96.0));
+        var anchor = SnapMath.Nearest(cx, cy, work, inset);
+        Settings.Docks ??= new();
+        DockStore.Remember(Settings.Docks, monitor.DeviceName, anchor);
+        Settings.MonitorDeviceName = monitor.IsPrimary ? null : monitor.DeviceName;
+        SettingsStore.Save(Settings);
+        _placed = default;
+        _dragging = false;
+        Position();
+        EvaluateHide();
     }
 
     static void ApplyChrome(IntPtr hwnd)

@@ -11,6 +11,14 @@ public sealed class IslandDirector
     public bool Expanded { get; private set; }
     public IslandMode Mode { get; private set; } = IslandMode.Idle;
     public bool PointerInside { get; private set; }
+    public bool Occluded { get; private set; }
+    public bool CameraOpen { get; private set; }
+
+    /// <summary>全屏或隐身时收成小点。提示弹出来的那一会儿不是小点。</summary>
+    public bool ShowAsDot => Occluded && !Expanded;
+
+    /// <summary>用户打开的预览还在。鼠标离开、拖动吸附都不能把它收起来。</summary>
+    public bool CameraSession => CameraOpen && Mode == IslandMode.Camera;
 
     IslandMode? _notice;
     DateTime _noticeUntil;
@@ -22,7 +30,8 @@ public sealed class IslandDirector
     public bool HasScheduledWork =>
         _expandAt != null || _collapseAt != null || _notice != null || _queued != null;
 
-    public IslandFrame TargetFrame => IslandMetrics.FrameFor(Mode, Expanded);
+    public IslandFrame TargetFrame =>
+        ShowAsDot ? IslandMetrics.StealthDot : IslandMetrics.FrameFor(Mode, Expanded);
 
     public static IslandMode Map(AmbientKind kind) => kind switch
     {
@@ -34,14 +43,65 @@ public sealed class IslandDirector
     public void SetAmbient(AmbientKind ambient)
     {
         Ambient = ambient;
-        if (_notice is null)
+        if (_notice is null && Mode != IslandMode.Camera)
             Mode = Map(ambient);
+    }
+
+    public void SetOccluded(bool occluded, DateTime now)
+    {
+        if (Occluded == occluded)
+            return;
+        Occluded = occluded;
+        if (!occluded || _notice is not null || Mode == IslandMode.Camera)
+            return;
+        Expanded = false;
+        _expandAt = null;
+        _collapseAt = null;
+    }
+
+    public void SetCamera(bool open)
+    {
+        if (open)
+        {
+            CameraOpen = true;
+            _notice = null;
+            Mode = IslandMode.Camera;
+            Expanded = true;
+            _expandAt = null;
+            _collapseAt = null;
+            return;
+        }
+
+        CameraOpen = false;
+        if (Mode != IslandMode.Camera)
+            return;
+        Mode = Map(Ambient);
+        _expandAt = null;
+        if (Occluded || !PointerInside)
+        {
+            Expanded = false;
+            _collapseAt = null;
+        }
+    }
+
+    public void ShowCameraMessage(DateTime now)
+    {
+        CameraOpen = false;
+        _notice = null;
+        Mode = IslandMode.Camera;
+        Expanded = true;
+        _expandAt = null;
+        _collapseAt = now + TimeSpan.FromSeconds(6);
     }
 
     public void PointerEntered(DateTime now)
     {
         PointerInside = true;
+        if (Occluded && !Expanded)
+            return;
         _collapseAt = null;
+        if (Occluded)
+            return;
         if (!Expanded)
             _expandAt ??= now + NoticePolicy.HoverExpandDelay;
     }
@@ -50,12 +110,21 @@ public sealed class IslandDirector
     {
         PointerInside = false;
         _expandAt = null;
-        if (Expanded)
-            _collapseAt = now + NoticePolicy.HoverCollapseDelay;
+        if (!Expanded || CameraSession)
+        {
+            _collapseAt = null;
+            return;
+        }
+
+        _collapseAt = now + (Occluded
+            ? TimeSpan.FromMilliseconds(240)
+            : NoticePolicy.HoverCollapseDelay);
     }
 
     public void Click(DateTime now)
     {
+        if (Occluded && !Expanded)
+            return;
         PointerInside = true;
         _collapseAt = null;
         _expandAt = null;
@@ -69,6 +138,9 @@ public sealed class IslandDirector
     /// </summary>
     public void TrayClick(DateTime now)
     {
+        if (CameraSession)
+            return;
+
         if (Expanded && !PointerInside)
         {
             _collapseAt = now;
@@ -83,7 +155,7 @@ public sealed class IslandDirector
 
     public void PushNotice(IslandMode mode, DateTime now)
     {
-        if (mode is not (IslandMode.Volume or IslandMode.Battery or IslandMode.Toast))
+        if (mode is not (IslandMode.Volume or IslandMode.Battery or IslandMode.Toast or IslandMode.Translate))
             throw new ArgumentOutOfRangeException(nameof(mode));
 
         if (_notice == mode)
@@ -92,8 +164,8 @@ public sealed class IslandDirector
             return;
         }
 
-        bool interacting = PointerInside && Expanded && _notice is null
-            && Mode is IslandMode.Media or IslandMode.Timer or IslandMode.Idle;
+        bool interacting = !Occluded && PointerInside && Expanded && _notice is null
+            && Mode is IslandMode.Media or IslandMode.Timer or IslandMode.Idle or IslandMode.Camera;
         if (interacting)
         {
             _queued = mode;
@@ -117,7 +189,7 @@ public sealed class IslandDirector
         {
             _notice = null;
             Mode = Map(Ambient);
-            if (!PointerInside)
+            if (Occluded || !PointerInside)
             {
                 Expanded = false;
                 _collapseAt = null;
@@ -128,6 +200,9 @@ public sealed class IslandDirector
                 Expanded = true;
             }
         }
+
+        if (CameraSession)
+            _collapseAt = null;
 
         if (_collapseAt is DateTime collapseAt && now >= collapseAt && !PointerInside)
         {

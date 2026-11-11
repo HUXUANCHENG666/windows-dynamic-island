@@ -35,4 +35,13 @@ public partial class ExpandedIdleView : UserControl
         Ui.Text(Clock, now.ToString("HH:mm", Chinese));
         Ui.Text(Date, now.ToString("M月d日 dddd", Chinese));
     }
+
+    public void SetVertical(bool vertical)
+    {
+        Actions.Orientation = vertical ? Orientation.Vertical : Orientation.Horizontal;
+        Stopwatch.Margin = vertical ? new System.Windows.Thickness(0, 0, 0, 8) : new System.Windows.Thickness(0, 0, 8, 0);
+        Stopwatch.HorizontalAlignment = System.Windows.HorizontalAlignment.Center;
+        FocusChip.HorizontalAlignment = System.Windows.HorizontalAlignment.Center;
+        Clock.FontSize = vertical ? 36 : 42;
+    }
 }

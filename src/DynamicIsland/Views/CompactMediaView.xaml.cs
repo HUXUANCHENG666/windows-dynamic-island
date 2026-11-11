@@ -1,3 +1,4 @@
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using DynamicIsland.Core.Island;
@@ -35,4 +36,41 @@ public partial class CompactMediaView : UserControl
     }
 
     public void SetWave(double phase, double level, bool playing) => Wave.Set(phase, level, playing);
+
+    public void SetVertical(bool vertical)
+    {
+        if (vertical)
+        {
+            Layout.VerticalAlignment = VerticalAlignment.Center;
+            Layout.HorizontalAlignment = HorizontalAlignment.Center;
+            ColArt.Width = GridLength.Auto;
+            ColGap.Width = new GridLength(0);
+            ColWave.Width = new GridLength(0);
+            RowArt.Height = GridLength.Auto;
+            RowGap.Height = new GridLength(8);
+            RowWave.Height = GridLength.Auto;
+            Grid.SetColumn(ArtHost, 0);
+            Grid.SetRow(ArtHost, 0);
+            Grid.SetColumn(Wave, 0);
+            Grid.SetRow(Wave, 2);
+            Wave.Width = 22;
+            Wave.Height = 28;
+            return;
+        }
+
+        Layout.VerticalAlignment = VerticalAlignment.Stretch;
+        Layout.HorizontalAlignment = HorizontalAlignment.Stretch;
+        ColArt.Width = GridLength.Auto;
+        ColGap.Width = new GridLength(1, GridUnitType.Star);
+        ColWave.Width = GridLength.Auto;
+        RowArt.Height = new GridLength(1, GridUnitType.Star);
+        RowGap.Height = new GridLength(0);
+        RowWave.Height = new GridLength(0);
+        Grid.SetColumn(ArtHost, 0);
+        Grid.SetRow(ArtHost, 0);
+        Grid.SetColumn(Wave, 2);
+        Grid.SetRow(Wave, 0);
+        Wave.Width = 28;
+        Wave.Height = 16;
+    }
 }

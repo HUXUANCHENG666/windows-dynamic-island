@@ -13,10 +13,20 @@ public sealed class TimerState
     public bool Pinned { get; set; }
 }
 
+public sealed class MonitorDock
+{
+    public string DeviceName { get; set; } = "";
+    public string Anchor { get; set; } = "TopCenter";
+}
+
 public sealed class AppSettings
 {
     public string? MonitorDeviceName { get; set; }
     public TimerState Timer { get; set; } = new();
+    public bool Stealth { get; set; }
+    public List<string> HideProcesses { get; set; } = new();
+    public List<MonitorDock> Docks { get; set; } = new();
+    public string TranslateDirection { get; set; } = "auto";
 }
 
 public static class SettingsJson

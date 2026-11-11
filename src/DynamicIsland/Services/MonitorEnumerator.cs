@@ -9,6 +9,10 @@ sealed class MonitorDesc
     public int Y { get; init; }
     public int Width { get; init; }
     public int Height { get; init; }
+    public int WorkX { get; init; }
+    public int WorkY { get; init; }
+    public int WorkWidth { get; init; }
+    public int WorkHeight { get; init; }
     public uint DpiX { get; init; } = 96;
     public uint DpiY { get; init; } = 96;
     public bool IsPrimary { get; init; }
@@ -43,6 +47,8 @@ static class MonitorEnumerator
 
             int width = info.rcMonitor.Right - info.rcMonitor.Left;
             int height = info.rcMonitor.Bottom - info.rcMonitor.Top;
+            int workW = info.rcWork.Right - info.rcWork.Left;
+            int workH = info.rcWork.Bottom - info.rcWork.Top;
             bool primary = (info.dwFlags & 1) != 0;
             string name = info.szDevice ?? "";
             string shortName = name.Replace(@"\\.\", "", StringComparison.Ordinal);
@@ -54,6 +60,10 @@ static class MonitorEnumerator
                 Y = info.rcMonitor.Top,
                 Width = width,
                 Height = height,
+                WorkX = info.rcWork.Left,
+                WorkY = info.rcWork.Top,
+                WorkWidth = workW > 0 ? workW : width,
+                WorkHeight = workH > 0 ? workH : height,
                 DpiX = dpiX,
                 DpiY = dpiY,
                 IsPrimary = primary,

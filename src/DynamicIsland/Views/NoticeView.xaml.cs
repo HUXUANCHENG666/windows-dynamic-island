@@ -77,6 +77,51 @@ public partial class NoticeView : UserControl
         BarHost.Visibility = Visibility.Collapsed;
     }
 
+    public void SetVertical(bool vertical)
+    {
+        if (vertical)
+        {
+            IconCol.Width = new GridLength(1, GridUnitType.Star);
+            TextCol.Width = new GridLength(1, GridUnitType.Star);
+            IconRow.Height = GridLength.Auto;
+            Grid.SetColumn(IconHost, 0);
+            Grid.SetRow(IconHost, 0);
+            Grid.SetColumnSpan(IconHost, 2);
+            Grid.SetColumn(Copy, 0);
+            Grid.SetRow(Copy, 1);
+            Grid.SetColumnSpan(Copy, 2);
+            Copy.Margin = new Thickness(0, 8, 0, 0);
+            Copy.HorizontalAlignment = HorizontalAlignment.Stretch;
+            Title.TextAlignment = TextAlignment.Center;
+            Detail.TextAlignment = TextAlignment.Center;
+            Title.HorizontalAlignment = HorizontalAlignment.Center;
+            Grid.SetColumn(Percent, 0);
+            Grid.SetRow(Percent, 1);
+            Percent.Margin = new Thickness(0, 2, 0, 0);
+            Percent.HorizontalAlignment = HorizontalAlignment.Center;
+            return;
+        }
+
+        IconCol.Width = new GridLength(40);
+        TextCol.Width = new GridLength(1, GridUnitType.Star);
+        IconRow.Height = new GridLength(1, GridUnitType.Star);
+        Grid.SetColumn(IconHost, 0);
+        Grid.SetRow(IconHost, 0);
+        Grid.SetColumnSpan(IconHost, 1);
+        Grid.SetColumn(Copy, 1);
+        Grid.SetRow(Copy, 0);
+        Grid.SetColumnSpan(Copy, 1);
+        Copy.Margin = new Thickness(8, 0, 0, 0);
+        Copy.HorizontalAlignment = HorizontalAlignment.Stretch;
+        Title.TextAlignment = TextAlignment.Left;
+        Detail.TextAlignment = TextAlignment.Left;
+        Title.HorizontalAlignment = HorizontalAlignment.Stretch;
+        Grid.SetColumn(Percent, 1);
+        Grid.SetRow(Percent, 0);
+        Percent.Margin = new Thickness(10, 0, 0, 0);
+        Percent.HorizontalAlignment = HorizontalAlignment.Right;
+    }
+
     void ShowIcon(bool speaker, bool battery, bool bell)
     {
         Speaker.Visibility = speaker ? Visibility.Visible : Visibility.Collapsed;

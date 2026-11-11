@@ -42,7 +42,59 @@ public static class IslandMetrics
     public const double ToastW = 372;
     public const double ToastH = 96;
 
-    public static IslandFrame FrameFor(IslandMode mode, bool expanded) => mode switch
+    public const double TranslateW = 400;
+    public const double TranslateH = 176;
+
+    public const double CameraW = 392;
+    public const double CameraH = 248;
+
+    public const double VerticalWindowWidth = 420;
+    public const double VerticalWindowHeight = 560;
+
+    public const double VIdleCompactW = 37;
+    public const double VIdleCompactH = 130;
+    public const double VIdleExpandedW = 210;
+    public const double VIdleExpandedH = 292;
+
+    public const double VMediaCompactW = 56;
+    public const double VMediaCompactH = 188;
+    public const double VMediaExpandedW = 248;
+    public const double VMediaExpandedH = 456;
+
+    public const double VTimerCompactW = 56;
+    public const double VTimerCompactH = 156;
+    public const double VTimerExpandedW = 230;
+    public const double VTimerExpandedH = 392;
+
+    public const double VVolumeW = 176;
+    public const double VVolumeH = 210;
+
+    public const double VBatteryW = 176;
+    public const double VBatteryH = 196;
+
+    public const double VToastW = 210;
+    public const double VToastH = 220;
+
+    public const double VTranslateW = 236;
+    public const double VTranslateH = 340;
+
+    public const double VCameraW = 248;
+    public const double VCameraH = 420;
+
+    public static readonly IslandFrame StealthDot = new(12, 12, 6, 2);
+
+    public static (double Width, double Height) HostDip(IslandOrientation orientation) =>
+        orientation == IslandOrientation.Vertical
+            ? (VerticalWindowWidth, VerticalWindowHeight)
+            : (WindowWidth, WindowHeight);
+
+    public static IslandFrame FrameFor(IslandMode mode, bool expanded) =>
+        FrameFor(mode, expanded, IslandOrientation.Horizontal);
+
+    public static IslandFrame FrameFor(IslandMode mode, bool expanded, IslandOrientation orientation) =>
+        orientation == IslandOrientation.Vertical ? Vertical(mode, expanded) : Horizontal(mode, expanded);
+
+    static IslandFrame Horizontal(IslandMode mode, bool expanded) => mode switch
     {
         IslandMode.Idle => expanded
             ? Card(IdleExpandedW, IdleExpandedH, 46, 4.25)
@@ -56,11 +108,34 @@ public static class IslandMetrics
         IslandMode.Volume => Pill(VolumeW, VolumeH),
         IslandMode.Battery => Pill(BatteryW, BatteryH),
         IslandMode.Toast => Card(ToastW, ToastH, 40, 3.3),
+        IslandMode.Translate => Card(TranslateW, TranslateH, 42, 4.1),
+        IslandMode.Camera => Card(CameraW, CameraH, 48, 4.4),
         _ => Pill(IdleCompactW, IdleCompactH)
     };
 
-    static IslandFrame Pill(double w, double h) => new(w, h, h / 2.0, 2.0);
+    static IslandFrame Vertical(IslandMode mode, bool expanded) => mode switch
+    {
+        IslandMode.Idle => expanded
+            ? Card(VIdleExpandedW, VIdleExpandedH, 40, 4.25)
+            : Capsule(VIdleCompactW, VIdleCompactH),
+        IslandMode.Media => expanded
+            ? Card(VMediaExpandedW, VMediaExpandedH, 44, 4.5)
+            : Capsule(VMediaCompactW, VMediaCompactH),
+        IslandMode.Timer => expanded
+            ? Card(VTimerExpandedW, VTimerExpandedH, 42, 4.4)
+            : Capsule(VTimerCompactW, VTimerCompactH),
+        IslandMode.Volume => Capsule(VVolumeW, VVolumeH),
+        IslandMode.Battery => Capsule(VBatteryW, VBatteryH),
+        IslandMode.Toast => Card(VToastW, VToastH, 36, 3.3),
+        IslandMode.Translate => Card(VTranslateW, VTranslateH, 40, 4.1),
+        IslandMode.Camera => Card(VCameraW, VCameraH, 44, 4.4),
+        _ => Pill(VIdleCompactW, VIdleCompactH)
+    };
+
+    static IslandFrame Pill(double w, double h) => Capsule(w, h);
+
+    static IslandFrame Capsule(double w, double h) => new(w, h, Math.Min(w, h) / 2.0, 2.0);
 
     static IslandFrame Card(double w, double h, double radius, double n) =>
-        new(w, h, Math.Min(radius, h / 2.0), n);
+        new(w, h, Math.Min(radius, Math.Min(w, h) / 2.0), n);
 }
