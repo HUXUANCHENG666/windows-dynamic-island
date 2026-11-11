@@ -7,7 +7,11 @@ static class NativeMethods
 {
     public static readonly IntPtr HWND_TOPMOST = new(-1);
 
+    public const int GWL_STYLE = -16;
     public const int GWL_EXSTYLE = -20;
+    public const long WS_CAPTION = 0x00C00000;
+    public const uint GA_ROOT = 2;
+    public const int DWMWA_CLOAKED = 14;
     public const int WS_EX_NOACTIVATE = 0x08000000;
     public const int WS_EX_TOOLWINDOW = 0x00000080;
     public const int WS_EX_APPWINDOW = 0x00040000;
@@ -202,6 +206,37 @@ static class NativeMethods
 
     [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsIconic(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr data);
+
+    public delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr data);
+
+    [DllImport("dwmapi.dll")]
+    public static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out int value, int size);
+
+    public enum QueryUserNotificationState
+    {
+        NotPresent = 1,
+        Busy = 2,
+        RunningD3DFullScreen = 3,
+        PresentationMode = 4,
+        AcceptsNotifications = 5,
+        QuietTime = 6,
+        App = 7
+    }
+
+    [DllImport("shell32.dll")]
+    public static extern int SHQueryUserNotificationState(out QueryUserNotificationState state);
 
     [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);

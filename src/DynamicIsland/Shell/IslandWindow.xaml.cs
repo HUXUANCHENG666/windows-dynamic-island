@@ -363,6 +363,8 @@ public partial class IslandWindow : Window
             if (_translate.SendAuthorized)
                 ConfirmTranslation();
         };
+        ExpandedMedia.PreviousSessionClicked += (_, _) => _media.SelectRelative(-1);
+        ExpandedMedia.NextSessionClicked += (_, _) => _media.SelectRelative(1);
         ExpandedMedia.PlayPauseClicked += (_, _) =>
         {
             _media.OptimisticToggle();
@@ -508,6 +510,8 @@ public partial class IslandWindow : Window
         _animator.Step(dt);
         _animator.Apply(this, CurrentDpi(), _anchor, allowBlur);
         UpdateLive(dt);
+        if (!_director.Expanded)
+            _media.ReleaseSessionPin();
         MaybeSaveTimer(now);
         SyncLoops();
     }
@@ -775,12 +779,14 @@ public partial class IslandWindow : Window
         var monitor = ResolveMonitor(MonitorEnumerator.Enumerate());
         if (monitor == null)
             return;
-        var sample = ForegroundProbe.Read(hwnd, new PixelRect(monitor.X, monitor.Y, monitor.Width, monitor.Height));
+        var islandMonitor = new PixelRect(monitor.X, monitor.Y, monitor.Width, monitor.Height);
+        var sample = ForegroundProbe.Read(hwnd, islandMonitor);
         if (!string.IsNullOrWhiteSpace(sample.ProcessName))
             ForeignProcess = sample.ProcessName;
         Settings.HideProcesses ??= new();
+        bool covers = sample.CoversIslandMonitor || FullscreenProbe.Covers(islandMonitor);
         bool hide = HidePolicy.IsOccluded(
-            new HideSignals(Settings.Stealth, sample.HasForeignWindow, sample.OnIslandMonitor, sample.CoversIslandMonitor, sample.ProcessName),
+            new HideSignals(Settings.Stealth, sample.HasForeignWindow, sample.OnIslandMonitor, covers, sample.ProcessName),
             Settings.HideProcesses);
         if (hide && (_deviceOpen || _director.Mode == IslandMode.Camera))
             ReleaseCamera(collapseUi: true);
