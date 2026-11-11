@@ -26,11 +26,16 @@ sealed class FullscreenWatcher : IDisposable
     public void Start(IntPtr sink)
     {
         _sink = sink;
+        // 钩子只传之后发生的事件，启动那一刻的前台窗口不会补发 FOREGROUND。
+        // 不先取一次，_foreground 会一直是 0，位置变化事件就全被下面那条过滤丢掉。
+        _foreground = NativeMethods.GetForegroundWindow();
         uint flags = NativeMethods.WINEVENT_OUTOFCONTEXT | NativeMethods.WINEVENT_SKIPOWNPROCESS;
         _foregroundHook = Hook(NativeMethods.EVENT_SYSTEM_FOREGROUND, flags);
         _moveEndHook = Hook(NativeMethods.EVENT_SYSTEM_MOVESIZEEND, flags);
         _minimizeHook = Hook(NativeMethods.EVENT_SYSTEM_MINIMIZEEND, flags);
-        _moveHook = Hook(NativeMethods.EVENT_OBJECT_LOCATIONCHANGE, flags);
+        _moveHook = Environment.GetEnvironmentVariable("DI_NO_LOCATION_HOOK") == "1"
+            ? IntPtr.Zero
+            : Hook(NativeMethods.EVENT_OBJECT_LOCATIONCHANGE, flags);
     }
 
     IntPtr Hook(uint eventType, uint flags) => NativeMethods.SetWinEventHook(

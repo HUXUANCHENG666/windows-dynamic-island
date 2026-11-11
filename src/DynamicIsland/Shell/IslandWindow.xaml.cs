@@ -38,6 +38,7 @@ public partial class IslandWindow : Window
     TrayController? _tray;
     DispatcherTimer? _slow;
     DispatcherTimer? _topmost;
+    DispatcherTimer? _hideSweep;
     bool _timerPinned;
     bool _announceFinish;
     bool _renderLive;
@@ -407,6 +408,11 @@ public partial class IslandWindow : Window
         _topmost = new DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
         _topmost.Tick += (_, _) => ReassertTopmost();
         _topmost.Start();
+        // 兜底扫描：F11、独占全屏、DPI 变化、显示器热插拔都不一定产生上面那四类 WinEvent，
+        // 只靠钩子会漏。一秒一次足够快；EvaluateHide 在状态没变时是幂等的，常驻期间 Nudge 也不触发重绘。
+        _hideSweep = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _hideSweep.Tick += (_, _) => EvaluateHide();
+        _hideSweep.Start();
         _renderLive = true;
         CompositionTarget.Rendering += OnRendering;
     }
@@ -435,6 +441,7 @@ public partial class IslandWindow : Window
         CompositionTarget.Rendering -= OnRendering;
         _slow?.Stop();
         _topmost?.Stop();
+        _hideSweep?.Stop();
         SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
         _translateCts?.Cancel();
         _notifications.Dispose();
