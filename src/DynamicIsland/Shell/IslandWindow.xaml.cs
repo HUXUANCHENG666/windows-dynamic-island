@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -50,6 +51,17 @@ public partial class IslandWindow : Window
     bool _deviceOpen;
     bool _dragArmed;
     bool _dragging;
+    readonly List<ThrowMath.DragSample> _dragSamples = new();
+    readonly Stopwatch _dragClock = Stopwatch.StartNew();
+    DispatcherTimer? _dragLoop;
+    bool _throwActive;
+    ThrowMath.Body _throwBody;
+    PixelRect _throwWork;
+    double _throwHalfW;
+    double _throwHalfH;
+    double _throwOffsetX;
+    double _throwOffsetY;
+    TimeSpan _lastThrowTick;
     bool _eatClick;
     NotificationCard? _toastCard;
     IslandMode _trackedMode = IslandMode.Idle;
@@ -442,6 +454,7 @@ public partial class IslandWindow : Window
         _slow?.Stop();
         _topmost?.Stop();
         _hideSweep?.Stop();
+        _dragLoop?.Stop();
         SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
         _translateCts?.Cancel();
         _notifications.Dispose();
@@ -761,6 +774,15 @@ public partial class IslandWindow : Window
                     Dispatcher.BeginInvoke(RestoreForeignForegroundIfIdle, DispatcherPriority.ApplicationIdle);
                     if (!_renderLive)
                         SyncLoops();
+                }
+                break;
+            case NativeMethods.WM_CAPTURECHANGED:
+                // 鼠标捕获被别的程序抢走时，拖动状态必须复位，
+                // 否则岛会停在上一个位置，直到用户再点一下。
+                if (_dragArmed)
+                {
+                    FinishDrag();
+                    handled = true;
                 }
                 break;
             case NativeMethods.WM_MOUSEACTIVATE:
@@ -1170,6 +1192,14 @@ public partial class IslandWindow : Window
         _pressCursor = point;
         _pressX = rect.Left;
         _pressY = rect.Top;
+        StopThrow();
+        _dragSamples.Clear();
+        _dragClock.Restart();
+        _dragSamples.Add(new ThrowMath.DragSample(point.X, point.Y, 0));
+        // 拖得快时窗口跟不上指针，指针会跑出窗口，WM_MOUSEMOVE 就断了。
+        // 抓住鼠标以后，移动和松手都还能送到这里。
+        NativeMethods.SetCapture(hwnd);
+        StartDragLoop();
     }
 
     void MoveWhileDragging()
@@ -1186,6 +1216,15 @@ public partial class IslandWindow : Window
             return;
         NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, _pressX + dx, _pressY + dy, 0, 0,
             NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+        TrackDrag(point);
+    }
+
+    void TrackDrag(NativeMethods.POINT point)
+    {
+        double now = _dragClock.Elapsed.TotalSeconds;
+        _dragSamples.Add(new ThrowMath.DragSample(point.X, point.Y, now));
+        while (_dragSamples.Count > 2 && now - _dragSamples[0].Seconds > 0.35)
+            _dragSamples.RemoveAt(0);
     }
 
     void FinishDrag()
@@ -1193,8 +1232,10 @@ public partial class IslandWindow : Window
         bool dragged = _dragging;
         _dragArmed = false;
         _dragging = false;
+        NativeMethods.ReleaseCapture();
         if (!dragged)
         {
+            StopDragLoop();
             if (NativeMethods.GetCursorPos(out var point))
             {
                 try
@@ -1223,29 +1264,33 @@ public partial class IslandWindow : Window
         }
 
         _eatClick = true;
+        if (NativeMethods.GetCursorPos(out var end))
+            TrackDrag(end);
+        var (vx, vy) = ThrowMath.Velocity(_dragSamples);
+        if (ThrowMath.ShouldLaunch(vx, vy) && BeginThrow(vx, vy))
+            return;
+        StopDragLoop();
         SnapFromCursor();
     }
 
     void SnapFromCursor()
     {
         var hwnd = new WindowInteropHelper(this).Handle;
-        if (hwnd == IntPtr.Zero || !NativeMethods.GetWindowRect(hwnd, out var rect) || !NativeMethods.GetCursorPos(out var point))
+        if (hwnd == IntPtr.Zero || !NativeMethods.GetWindowRect(hwnd, out var rect))
             return;
-        double dpi = Math.Max(0.5, CurrentDpi());
-        double pillLeft = System.Windows.Controls.Canvas.GetLeft(PillHost);
-        double pillTop = System.Windows.Controls.Canvas.GetTop(PillHost);
-        if (double.IsNaN(pillLeft))
-            pillLeft = 0;
-        if (double.IsNaN(pillTop))
-            pillTop = 0;
-        int cx = rect.Left + (int)Math.Round((pillLeft + PillHost.ActualWidth / 2.0) * dpi);
-        int cy = rect.Top + (int)Math.Round((pillTop + PillHost.ActualHeight / 2.0) * dpi);
-        if (PillHost.ActualWidth < 1)
+        if (PillHost.ActualWidth < 1 && NativeMethods.GetCursorPos(out var point))
         {
-            cx = point.X;
-            cy = point.Y;
+            SnapAt(point.X, point.Y);
+            return;
         }
 
+        var center = IslandCenter(rect);
+        SnapAt(center.X, center.Y);
+    }
+
+    /// <summary>把胶囊中心所在的显示器找出来，吸附到最近的固定点。指针拖放和抛掷结束都走这里。</summary>
+    void SnapAt(int cx, int cy)
+    {
         var monitors = MonitorEnumerator.Enumerate();
         var monitor = monitors.FirstOrDefault(item => item.X <= cx && cx < item.X + item.Width && item.Y <= cy && cy < item.Y + item.Height)
             ?? monitors.FirstOrDefault(item => item.IsPrimary)
@@ -1265,6 +1310,144 @@ public partial class IslandWindow : Window
         _dragging = false;
         Position();
         EvaluateHide();
+    }
+
+    (int X, int Y) IslandCenter(NativeMethods.RECT rect)
+    {
+        double dpi = Math.Max(0.5, CurrentDpi());
+        double left = System.Windows.Controls.Canvas.GetLeft(PillHost);
+        double top = System.Windows.Controls.Canvas.GetTop(PillHost);
+        if (double.IsNaN(left))
+            left = 0;
+        if (double.IsNaN(top))
+            top = 0;
+        if (PillHost.ActualWidth < 1 || PillHost.ActualHeight < 1)
+            return ((rect.Left + rect.Right) / 2, (rect.Top + rect.Bottom) / 2);
+        return (
+            rect.Left + (int)Math.Round((left + PillHost.ActualWidth / 2.0) * dpi),
+            rect.Top + (int)Math.Round((top + PillHost.ActualHeight / 2.0) * dpi));
+    }
+
+    (double W, double H) PillHalfSize()
+    {
+        double dpi = Math.Max(0.5, CurrentDpi());
+        double w = PillHost.ActualWidth * dpi;
+        double h = PillHost.ActualHeight * dpi;
+        return w < 1 || h < 1 ? (0, 0) : (w / 2.0, h / 2.0);
+    }
+
+    PixelRect? WorkAreaAt(int cx, int cy)
+    {
+        var monitors = MonitorEnumerator.Enumerate();
+        var monitor = monitors.FirstOrDefault(item => item.X <= cx && cx < item.X + item.Width && item.Y <= cy && cy < item.Y + item.Height)
+            ?? monitors.FirstOrDefault(item => item.IsPrimary)
+            ?? monitors.FirstOrDefault();
+        if (monitor == null)
+            return null;
+        var monitorRect = new PixelRect(monitor.X, monitor.Y, monitor.Width, monitor.Height);
+        var reported = new PixelRect(monitor.WorkX, monitor.WorkY, monitor.WorkWidth, monitor.WorkHeight);
+        return WorkAreaExcluded(monitorRect, reported);
+    }
+
+    static PixelRect WorkAreaExcluded(PixelRect monitorRect, PixelRect reported) =>
+        WorkAreaMath.ExcludeBars(monitorRect, reported, TaskbarBounds.Query());
+
+    void StartDragLoop()
+    {
+        _dragLoop ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
+        _dragLoop.Tick -= OnDragTick;
+        _dragLoop.Tick += OnDragTick;
+        _dragLoop.Start();
+    }
+
+    void StopDragLoop()
+    {
+        if (_dragLoop == null)
+            return;
+        _dragLoop.Stop();
+        _dragLoop.Tick -= OnDragTick;
+    }
+
+    void OnDragTick(object? sender, EventArgs e)
+    {
+        if (_throwActive)
+        {
+            StepThrow();
+            return;
+        }
+
+        if (!_dragArmed)
+        {
+            StopDragLoop();
+            return;
+        }
+
+        MoveWhileDragging();
+    }
+
+    bool BeginThrow(double vx, double vy)
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero || !NativeMethods.GetWindowRect(hwnd, out var rect))
+            return false;
+        var center = IslandCenter(rect);
+        var work = WorkAreaAt(center.X, center.Y);
+        if (work == null)
+            return false;
+        var (halfW, halfH) = PillHalfSize();
+        if (halfW <= 0 || halfH <= 0)
+            return false;
+
+        _throwWork = work.Value;
+        _throwHalfW = halfW;
+        _throwHalfH = halfH;
+        _throwOffsetX = center.X - rect.Left;
+        _throwOffsetY = center.Y - rect.Top;
+        _throwBody = new ThrowMath.Body(
+            ClampAxis(center.X, _throwWork.X + halfW, _throwWork.Right - halfW),
+            ClampAxis(center.Y, _throwWork.Y + halfH, _throwWork.Bottom - halfH),
+            vx,
+            vy);
+        _lastThrowTick = _dragClock.Elapsed;
+        _throwActive = true;
+        StartDragLoop();
+        return true;
+    }
+
+    static double ClampAxis(double value, double min, double max) =>
+        max < min ? (min + max) / 2.0 : Math.Clamp(value, min, max);
+
+    void StepThrow()
+    {
+        var now = _dragClock.Elapsed;
+        double dt = Math.Clamp((now - _lastThrowTick).TotalSeconds, 0.004, 0.05);
+        _lastThrowTick = now;
+        _throwBody = ThrowMath.Step(_throwBody, dt, _throwWork, _throwHalfW, _throwHalfH);
+
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd != IntPtr.Zero)
+        {
+            NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST,
+                (int)Math.Round(_throwBody.X - _throwOffsetX),
+                (int)Math.Round(_throwBody.Y - _throwOffsetY),
+                0, 0, NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+        }
+
+        if (!ThrowMath.Settled(_throwBody))
+            return;
+
+        int cx = (int)Math.Round(_throwBody.X);
+        int cy = (int)Math.Round(_throwBody.Y);
+        StopThrow();
+        SnapAt(cx, cy);
+    }
+
+    void StopThrow()
+    {
+        _throwActive = false;
+        _lastThrowTick = TimeSpan.Zero;
+        if (!_dragArmed)
+            StopDragLoop();
     }
 
     static void ApplyChrome(IntPtr hwnd)

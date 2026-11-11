@@ -26,6 +26,7 @@ static class NativeMethods
     public const int WM_NCHITTEST = 0x0084;
     public const int WM_LBUTTONDOWN = 0x0201;
     public const int WM_MOUSEMOVE = 0x0200;
+    public const int WM_CAPTURECHANGED = 0x0215;
     public const int WM_CLIPBOARDUPDATE = 0x031D;
     public const int WM_APP_CHECKHIDE = 0x8000 + 41;
     public const int WM_MOUSELEAVE = 0x02A3;
@@ -93,6 +94,12 @@ static class NativeMethods
 
     [DllImport("user32.dll")]
     public static extern bool GetCursorPos(out POINT point);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr SetCapture(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool ReleaseCapture();
 
     [DllImport("user32.dll")]
     public static extern bool TrackMouseEvent(ref TRACKMOUSEEVENT eventTrack);
