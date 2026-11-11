@@ -53,6 +53,11 @@ public partial class IslandWindow : Window
     bool _dragging;
     readonly List<ThrowMath.DragSample> _dragSamples = new();
     readonly Stopwatch _dragClock = Stopwatch.StartNew();
+    DropShadowEffect? _pillShadow;
+    BitmapCache? _pillCache;
+    bool _motionEffectsOff;
+    int _frameCount;
+    double _frameWindow;
     bool _throwActive;
     ThrowMath.Body _throwBody;
     PixelRect _throwWork;
@@ -98,7 +103,7 @@ public partial class IslandWindow : Window
         Height = IslandMetrics.WindowHeight;
         FontFamily = new FontFamily(IslandFonts.Ui);
         Pill.Fill = Theme.IslandFill;
-        Pill.Effect = new DropShadowEffect
+        _pillShadow = new DropShadowEffect
         {
             Color = Colors.Black,
             BlurRadius = 18,
@@ -107,6 +112,8 @@ public partial class IslandWindow : Window
             Opacity = 0.48,
             RenderingBias = RenderingBias.Performance
         };
+        Pill.Effect = _pillShadow;
+        _pillCache = new BitmapCache { EnableClearType = false, SnapsToDevicePixels = false };
         PillStroke.Stroke = Theme.Hairline;
         PillStroke.StrokeThickness = 1.6;
         ContentHost.Background = Brushes.Transparent;
@@ -591,6 +598,17 @@ public partial class IslandWindow : Window
         double dt = _lastRender == TimeSpan.Zero ? 1.0 / 60.0 : (args.RenderingTime - _lastRender).TotalSeconds;
         _lastRender = args.RenderingTime;
         Pulse(dt);
+
+        // 只在拖拽/滑行时统计，每秒留一条，用来判断到底是帧率不够还是手感参数不合适。
+        _frameCount++;
+        _frameWindow += dt;
+        if (_frameWindow >= 1.0)
+        {
+            if (_motionEffectsOff)
+                Log.Info($"motion fps {_frameCount / _frameWindow:0.0}");
+            _frameCount = 0;
+            _frameWindow = 0;
+        }
     }
 
     void OnSlow(object? sender, EventArgs e)
@@ -621,6 +639,9 @@ public partial class IslandWindow : Window
 
     void PulseCore(double dt)
     {
+        bool moving = _dragging || _throwActive || _gliding;
+        ApplyMotionEffects(moving);
+
         if (_gliding)
             StepGlide(dt);
         else if (_throwActive)
@@ -650,7 +671,7 @@ public partial class IslandWindow : Window
         _trackedMode = _director.Mode;
 
         bool transitioning = !_animator.IsSettled;
-        bool allowBlur = EffectsPolicy.AllowBlur(_director.Expanded && !_director.ShowAsDot, transitioning);
+        bool allowBlur = !moving && EffectsPolicy.AllowBlur(_director.Expanded && !_director.ShowAsDot, transitioning);
         _animator.SetTarget(_director.Mode, _director.Expanded, _director.ShowAsDot, _orientation);
         _animator.Step(dt);
         _animator.Apply(this, CurrentDpi(), _anchor, allowBlur);
@@ -1443,6 +1464,27 @@ public partial class IslandWindow : Window
         _throwActive = false;
         _gliding = false;
         SyncLoops();
+    }
+
+    /// <summary>
+    /// 移动时每帧都要重新合成窗口，阴影和模糊是这里最贵的两项。
+    /// 拖拽和滑行期间先摘掉，停稳后装回来；位图缓存让胶囊在移动时直接复用纹理。
+    /// </summary>
+    void ApplyMotionEffects(bool moving)
+    {
+        if (moving == _motionEffectsOff)
+            return;
+        _motionEffectsOff = moving;
+        if (moving)
+        {
+            Pill.Effect = null;
+            Pill.CacheMode = _pillCache;
+        }
+        else
+        {
+            Pill.Effect = _pillShadow;
+            Pill.CacheMode = null;
+        }
     }
 
     void BeginGlide(int fromX, int fromY, int toX, int toY)
