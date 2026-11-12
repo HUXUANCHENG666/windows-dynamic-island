@@ -34,6 +34,8 @@ public partial class IslandWindow : Window
     readonly TranslateSession _translate = new();
     readonly CameraSession _camera;
     readonly FullscreenWatcher _watcher = new();
+    readonly PopupWatcher _popups = new();
+    readonly PopupFeed _popupFeed = new();
     readonly DynamicIsland.Core.Media.TimelineEstimator _timeline = new();
     CancellationTokenSource? _translateCts;
     TrayController? _tray;
@@ -425,6 +427,8 @@ public partial class IslandWindow : Window
         ApplyChrome(source.Handle);
         Position();
         _watcher.Start(source.Handle);
+        if (Settings.PopupAlerts)
+            _popups.Start(source.Handle);
         _clipboardHooked = NativeMethods.AddClipboardFormatListener(source.Handle);
         EvaluateHide();
         SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
@@ -470,6 +474,7 @@ public partial class IslandWindow : Window
         _notifications.Dispose();
         ReleaseCamera(collapseUi: false);
         _watcher.Dispose();
+        _popups.Dispose();
         _translator.Dispose();
         if (_clipboardHooked)
         {
@@ -786,6 +791,10 @@ public partial class IslandWindow : Window
                 EvaluateHide();
                 handled = true;
                 break;
+            case NativeMethods.WM_APP_POPUP:
+                EvaluatePopup((IntPtr)lParam);
+                handled = true;
+                break;
             case NativeMethods.WM_CLIPBOARDUPDATE:
                 OnClipboardInvite();
                 handled = true;
@@ -946,6 +955,75 @@ public partial class IslandWindow : Window
         ToastNotice.SetVertical(vertical);
         TranslateNotice.SetVertical(vertical);
         CameraNotice.SetVertical(vertical);
+    }
+
+    /// <summary>
+    /// 只认进程和窗口形状：是不是关注的应用、窗口够不够大、是不是独立的顶层窗口。
+    /// 标题和正文一概不读，所以拿到的是"有新消息"，不是消息内容。
+    /// </summary>
+    void EvaluatePopup(IntPtr hwnd)
+    {
+        if (!Settings.PopupAlerts || hwnd == IntPtr.Zero)
+            return;
+        var watched = Settings.AlertProcesses;
+        if (watched == null || watched.Count == 0)
+            return;
+        if (!NativeMethods.IsWindowVisible(hwnd))
+            return;
+        if (!NativeMethods.GetWindowRect(hwnd, out var rect))
+            return;
+
+        NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
+        bool own = pid != 0 && pid == (uint)Environment.ProcessId;
+        var root = NativeMethods.GetAncestor(hwnd, NativeMethods.GA_ROOT);
+        bool topLevel = root == IntPtr.Zero || root == hwnd;
+        string raw = ForegroundProbe.RawProcessName(hwnd);
+        string normalized = HidePolicy.NormalizeProcess(raw);
+
+        var shown = new ShownWindow(
+            true,
+            topLevel,
+            ForegroundProbe.IsShell(hwnd),
+            own,
+            rect.Right - rect.Left,
+            rect.Bottom - rect.Top,
+            ForegroundProbe.ClassName(hwnd),
+            normalized);
+
+        if (!PopupAlert.ShouldAlert(shown, watched))
+            return;
+        if (!_popupFeed.Allow(normalized, DateTime.UtcNow))
+            return;
+
+        ShowToast(string.IsNullOrWhiteSpace(raw) ? "应用" : raw, "有新消息");
+    }
+
+    public void TogglePopupAlerts()
+    {
+        Settings.PopupAlerts = !Settings.PopupAlerts;
+        SettingsStore.Save(Settings);
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (Settings.PopupAlerts)
+        {
+            if (hwnd != IntPtr.Zero)
+                _popups.Start(hwnd);
+            if (Settings.AlertProcesses is not { Count: > 0 })
+                ShowToast("应用弹窗提醒", "从托盘菜单把要提醒的程序加进来");
+        }
+        else
+        {
+            _popups.Stop();
+            _popupFeed.Clear();
+        }
+    }
+
+    public void ToggleAlertProcess(string? processName)
+    {
+        Settings.AlertProcesses ??= new();
+        bool added = HidePolicy.ToggleListed(Settings.AlertProcesses, processName ?? "");
+        SettingsStore.Save(Settings);
+        if (Settings.PopupAlerts && added && processName is { Length: > 0 })
+            ShowToast("已加入提醒", processName);
     }
 
     void EvaluateHide()

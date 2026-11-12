@@ -29,6 +29,7 @@ static class NativeMethods
     public const int WM_CAPTURECHANGED = 0x0215;
     public const int WM_CLIPBOARDUPDATE = 0x031D;
     public const int WM_APP_CHECKHIDE = 0x8000 + 41;
+    public const int WM_APP_POPUP = 0x8000 + 42;
     public const int WM_MOUSELEAVE = 0x02A3;
     public const int WM_MOUSEACTIVATE = 0x0021;
     public const int WM_LBUTTONUP = 0x0202;
@@ -61,6 +62,7 @@ static class NativeMethods
     public const int WM_TRAY = 0x8000 + 20;
 
     public const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
+    public const uint EVENT_OBJECT_SHOW = 0x8002;
     public const uint EVENT_SYSTEM_MOVESIZEEND = 0x000B;
     public const uint EVENT_SYSTEM_MINIMIZEEND = 0x0017;
     public const uint EVENT_OBJECT_LOCATIONCHANGE = 0x800B;

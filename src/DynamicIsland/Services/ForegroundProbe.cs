@@ -34,16 +34,24 @@ static class ForegroundProbe
         return new ForegroundSample(true, on, covers, ProcessName(hwnd));
     }
 
-    static bool IsShell(IntPtr hwnd)
+    public static bool IsShell(IntPtr hwnd)
+    {
+        var name = ClassName(hwnd);
+        return name is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd";
+    }
+
+    public static string ClassName(IntPtr hwnd)
     {
         var name = new StringBuilder(64);
         int length = NativeMethods.GetClassName(hwnd, name, name.Capacity);
-        if (length <= 0)
-            return false;
-        return name.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd";
+        return length > 0 ? name.ToString() : "";
     }
 
-    static string ProcessName(IntPtr hwnd)
+    /// <summary>归一化后的进程名，用来匹配名单。</summary>
+    public static string ProcessName(IntPtr hwnd) => HidePolicy.NormalizeProcess(RawProcessName(hwnd));
+
+    /// <summary>原始文件名，保留大小写，用来在提示里显示。</summary>
+    public static string RawProcessName(IntPtr hwnd)
     {
         NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
         if (pid == 0)
@@ -57,7 +65,12 @@ static class ForegroundProbe
             int size = buffer.Capacity;
             if (!NativeMethods.QueryFullProcessImageName(process, 0, buffer, ref size))
                 return "";
-            return HidePolicy.NormalizeProcess(buffer.ToString());
+            var full = buffer.ToString();
+            int slash = Math.Max(full.LastIndexOf('\\'), full.LastIndexOf('/'));
+            var file = slash >= 0 && slash < full.Length - 1 ? full[(slash + 1)..] : full;
+            if (file.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                file = file[..^4];
+            return file;
         }
         finally
         {
