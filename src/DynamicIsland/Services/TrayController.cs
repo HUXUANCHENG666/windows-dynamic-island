@@ -20,9 +20,6 @@ sealed class TrayController : IDisposable
     const int IdCamera = 9;
     const int IdHideCurrent = 10;
     const int IdNotifications = 12;
-    const int IdPopupAlert = 13;
-    const int IdWatchCurrent = 14;
-    const int IdWatchBase = 400;
     const int IdMonitorBase = 100;
     const int IdHideBase = 300;
 
@@ -30,7 +27,6 @@ sealed class TrayController : IDisposable
     readonly HwndSource _source;
     readonly List<MonitorDesc> _monitors = new();
     readonly List<string> _hideSnapshot = new();
-    readonly List<string> _watchSnapshot = new();
     IntPtr _icon;
     bool _added;
 
@@ -144,34 +140,6 @@ sealed class TrayController : IDisposable
             NativeMethods.AppendMenu(menu, NativeMethods.MF_STRING, (IntPtr)IdStopwatch, "打开秒表");
             NativeMethods.AppendMenu(menu, NativeMethods.MF_STRING, (IntPtr)IdFocus, "开始 25 分钟专注");
             NativeMethods.AppendMenu(menu, NativeMethods.MF_SEPARATOR, IntPtr.Zero, null);
-            uint alert = NativeMethods.MF_STRING | (_window.Settings.PopupAlerts ? NativeMethods.MF_CHECKED : 0);
-            NativeMethods.AppendMenu(menu, alert, (IntPtr)IdPopupAlert, "应用弹窗提醒");
-
-            _watchSnapshot.Clear();
-            if (_window.Settings.AlertProcesses is { Count: > 0 } watchProcesses)
-            {
-                IntPtr watchMenu = NativeMethods.CreatePopupMenu();
-                int watchCount = Math.Min(watchProcesses.Count, 12);
-                for (int i = 0; i < watchCount; i++)
-                {
-                    _watchSnapshot.Add(watchProcesses[i]);
-                    NativeMethods.AppendMenu(watchMenu, NativeMethods.MF_STRING, (IntPtr)(IdWatchBase + i), "移出 " + watchProcesses[i]);
-                }
-
-                NativeMethods.AppendMenu(menu, NativeMethods.MF_POPUP, watchMenu, "提醒名单");
-            }
-
-            string? alertForeign = _window.ForeignProcess;
-            if (!string.IsNullOrWhiteSpace(alertForeign))
-            {
-                _window.Settings.AlertProcesses ??= new();
-                bool watching = DynamicIsland.Core.Island.HidePolicy.IsListed(_window.Settings.AlertProcesses, alertForeign);
-                string watchLabel = watching
-                    ? $"把 {alertForeign} 移出提醒名单"
-                    : $"{alertForeign} 弹窗时提醒";
-                NativeMethods.AppendMenu(menu, NativeMethods.MF_STRING, (IntPtr)IdWatchCurrent, watchLabel);
-            }
-
             uint notes = NativeMethods.MF_STRING | (_window.Settings.NotificationCenter ? NativeMethods.MF_CHECKED : 0);
             NativeMethods.AppendMenu(menu, notes, (IntPtr)IdNotifications, "在岛上显示通知中心");
             NativeMethods.AppendMenu(menu, NativeMethods.MF_STRING, (IntPtr)IdToast, "发送一条测试通知");
@@ -245,22 +213,10 @@ sealed class TrayController : IDisposable
             case IdHideCurrent:
                 _window.ToggleListedProcess(_window.ForeignProcess);
                 break;
-            case IdPopupAlert:
-                _window.TogglePopupAlerts();
-                break;
-            case IdWatchCurrent:
-                _window.ToggleAlertProcess(_window.ForeignProcess);
-                break;
             default:
                 if (command >= IdHideBase && command - IdHideBase < _hideSnapshot.Count)
                 {
                     _window.ToggleListedProcess(_hideSnapshot[command - IdHideBase]);
-                    break;
-                }
-
-                if (command >= IdWatchBase && command - IdWatchBase < _watchSnapshot.Count)
-                {
-                    _window.ToggleAlertProcess(_watchSnapshot[command - IdWatchBase]);
                     break;
                 }
 

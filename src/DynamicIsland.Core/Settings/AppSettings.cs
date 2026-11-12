@@ -33,12 +33,6 @@ public sealed class AppSettings
 
     /// <summary>第一次打开时已经在岛上说明过权限。拒绝之后不再重复那句介绍。</summary>
     public bool NotificationCenterExplained { get; set; }
-
-    /// <summary>关注的应用弹出新窗口时在岛上提醒。默认关。</summary>
-    public bool PopupAlerts { get; set; }
-
-    /// <summary>要提醒的程序，存归一化后的进程名（小写、不含 .exe）。</summary>
-    public List<string> AlertProcesses { get; set; } = new();
 }
 
 public static class SettingsJson
