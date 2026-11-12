@@ -51,6 +51,7 @@ sealed class MediaService : IDisposable
     int _artGeneration;
     int _refreshing;
     int _idCounter;
+    DateTime _lastUnsupported;
 
     public MediaService(Dispatcher dispatcher) => _dispatcher = dispatcher;
 
@@ -110,11 +111,17 @@ sealed class MediaService : IDisposable
 
     public async Task NextAsync()
     {
+        var session = SelectedSession();
+        if (session == null)
+        {
+            Log.Info("next no-session");
+            return;
+        }
+
         try
         {
-            var session = SelectedSession();
-            if (session != null)
-                await session.TrySkipNextAsync();
+            if (!await session.TrySkipNextAsync())
+                ReportUnsupported("next");
         }
         catch (Exception ex)
         {
@@ -124,17 +131,39 @@ sealed class MediaService : IDisposable
 
     public async Task PreviousAsync()
     {
+        var session = SelectedSession();
+        if (session == null)
+        {
+            Log.Info("previous no-session");
+            return;
+        }
+
         try
         {
-            var session = SelectedSession();
-            if (session != null)
-                await session.TrySkipPreviousAsync();
+            if (!await session.TrySkipPreviousAsync())
+                ReportUnsupported("previous");
         }
         catch (Exception ex)
         {
             Log.Error("previous", ex);
         }
     }
+
+    /// <summary>
+    /// 有些会话只是"能显示、能暂停"，不支持上一首下一首（网页里的单个视频就是）。
+    /// 失败时告诉岛一声，免得用户以为是没反应。
+    /// </summary>
+    void ReportUnsupported(string area)
+    {
+        var now = DateTime.UtcNow;
+        if (now - _lastUnsupported < TimeSpan.FromSeconds(3))
+            return;
+        _lastUnsupported = now;
+        Log.Info($"{area} unsupported");
+        Unsupported?.Invoke(this, EventArgs.Empty);
+    }
+
+    public event EventHandler? Unsupported;
 
     void RefreshRoster()
     {

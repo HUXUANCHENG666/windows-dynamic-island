@@ -12,7 +12,6 @@ sealed class TrayController : IDisposable
     const int IdStartup = 2;
     const int IdStopwatch = 3;
     const int IdFocus = 4;
-    const int IdToast = 5;
     const int IdLog = 6;
     const int IdStealth = 7;
     const int IdTranslate = 8;
@@ -142,7 +141,6 @@ sealed class TrayController : IDisposable
             NativeMethods.AppendMenu(menu, NativeMethods.MF_SEPARATOR, IntPtr.Zero, null);
             uint notes = NativeMethods.MF_STRING | (_window.Settings.NotificationCenter ? NativeMethods.MF_CHECKED : 0);
             NativeMethods.AppendMenu(menu, notes, (IntPtr)IdNotifications, "在岛上显示通知中心");
-            NativeMethods.AppendMenu(menu, NativeMethods.MF_STRING, (IntPtr)IdToast, "发送一条测试通知");
             NativeMethods.AppendMenu(menu, NativeMethods.MF_STRING, (IntPtr)IdLog, "打开日志");
             NativeMethods.AppendMenu(menu, NativeMethods.MF_SEPARATOR, IntPtr.Zero, null);
             NativeMethods.AppendMenu(menu, NativeMethods.MF_STRING, (IntPtr)IdExit, "退出");
@@ -188,9 +186,6 @@ sealed class TrayController : IDisposable
                 break;
             case IdFocus:
                 _window.OpenCountdown(25);
-                break;
-            case IdToast:
-                _window.ShowToast("灵动岛", "这是一条测试通知");
                 break;
             case IdNotifications:
                 _window.ToggleNotificationCenter();

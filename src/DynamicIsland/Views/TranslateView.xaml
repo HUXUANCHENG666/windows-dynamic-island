@@ -68,7 +68,7 @@
                  AcceptsReturn="True" IsReadOnly="True" IsReadOnlyCaretVisible="True"
                  BorderThickness="0" Background="Transparent" Padding="0" Margin="0,6,0,0"
                  Focusable="False" FocusVisualStyle="{x:Null}" Cursor="Arrow"
-                 IsHitTestVisible="False" VerticalScrollBarVisibility="Auto"
+                 IsHitTestVisible="True" VerticalScrollBarVisibility="Auto"
                  HorizontalScrollBarVisibility="Disabled">
             <TextBox.ContextMenu>
                 <ContextMenu>

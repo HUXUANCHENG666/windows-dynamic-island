@@ -516,6 +516,7 @@ public partial class IslandWindow : Window
         };
         ExpandedMedia.NextClicked += (_, _) => _ = _media.NextAsync();
         ExpandedMedia.PreviousClicked += (_, _) => _ = _media.PreviousAsync();
+        _media.Unsupported += (_, _) => ShowToast("媒体控制", "这个应用不支持上一首或下一首");
         ExpandedIdle.StopwatchRequested += (_, _) => OpenStopwatch();
         ExpandedIdle.FocusRequested += (_, _) => OpenCountdown(25);
         ExpandedTimer.ToggleRequested += (_, _) =>
