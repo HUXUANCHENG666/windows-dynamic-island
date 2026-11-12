@@ -92,18 +92,21 @@ public partial class TranslateView : UserControl
 
     public void SetVertical(bool vertical)
     {
-        Actions.Orientation = vertical ? Orientation.Vertical : Orientation.Horizontal;
-        var gap = vertical ? new Thickness(0, 8, 0, 0) : new Thickness(8, 0, 0, 0);
-        var tight = vertical ? new Thickness(0, 8, 0, 0) : new Thickness(6, 0, 0, 0);
-        Auto.Margin = gap;
-        ZhEn.Margin = tight;
-        EnZh.Margin = tight;
-        Copy.Margin = tight;
-        Close.Margin = tight;
-        Source.MaxHeight = vertical ? 72 : 36;
+        // 竖排时不要把六个按钮竖着堆起来——那样会把译文挤出画面。
+        // 保持横向排列，宽度不够时由 WrapPanel 自动换行，行间用下边距隔开。
+        Actions.Orientation = Orientation.Horizontal;
+        var margin = vertical ? new Thickness(0, 0, 6, 8) : new Thickness(0, 0, 6, 0);
+        Go.Margin = margin;
+        Auto.Margin = margin;
+        ZhEn.Margin = margin;
+        EnZh.Margin = margin;
+        Copy.Margin = margin;
+        Close.Margin = margin;
+        Source.MaxHeight = vertical ? 60 : 36;
         Source.TextAlignment = vertical ? TextAlignment.Center : TextAlignment.Left;
         Result.TextAlignment = vertical ? TextAlignment.Center : TextAlignment.Left;
-        Actions.HorizontalAlignment = vertical ? HorizontalAlignment.Center : HorizontalAlignment.Left;
+        // 换行要拿到完整可用宽度；居中对齐会让宽度收缩成一行，反而不换行。
+        Actions.HorizontalAlignment = vertical ? HorizontalAlignment.Stretch : HorizontalAlignment.Left;
     }
 
     public void SetDirection(TranslateDirection direction)
