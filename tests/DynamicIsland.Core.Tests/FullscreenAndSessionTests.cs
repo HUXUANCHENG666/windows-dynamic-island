@@ -8,8 +8,8 @@ public class FullscreenAndSessionTests
     static readonly PixelRect Primary = new(0, 0, 1920, 1080);
     static readonly PixelRect Second = new(1920, 0, 1920, 1080);
 
-    static TopWindow Window(PixelRect rect, bool borderless = false, bool ignore = false) =>
-        new(rect, ignore, borderless);
+    static TopWindow Window(PixelRect rect, bool borderless = false, bool ignore = false, bool maximized = false) =>
+        new(rect, ignore, borderless, maximized);
 
     [Fact]
     public void Fullscreen_BorderlessCover_HidesOnlyOnThatMonitor()
@@ -36,6 +36,11 @@ public class FullscreenAndSessionTests
         var kazumiOverTaskbarGap = Window(new PixelRect(0, 0, 1920, 1032), borderless: true);
         Assert.True(FullscreenPolicy.NearlyCovers(kazumiOverTaskbarGap.Rect, Primary));
         Assert.True(FullscreenPolicy.ShouldHide(Primary, new[] { kazumiOverTaskbarGap }, ShellAttention.Busy));
+
+        // 同样的尺寸，只要带 WS_MAXIMIZE 就是普通最大化窗口，不能让它把岛藏起来。
+        var maximizedBorderless = Window(new PixelRect(0, 0, 1920, 1032), borderless: true, maximized: true);
+        Assert.False(FullscreenPolicy.ShouldHide(Primary, new[] { maximizedBorderless }, ShellAttention.Busy));
+        Assert.False(FullscreenPolicy.ShouldHide(Primary, new[] { maximizedBorderless }, ShellAttention.None));
 
         var maximizedWord = Window(new PixelRect(0, 0, 1920, 1032), borderless: false);
         Assert.False(FullscreenPolicy.ShouldHide(Primary, new[] { maximizedWord }, ShellAttention.Busy));

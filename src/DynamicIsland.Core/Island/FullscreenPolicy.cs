@@ -14,8 +14,9 @@ public enum ShellAttention
 /// <summary>
 /// 从上到下的一扇窗口。Ignore 用来丢掉桌面、Shell、本进程自己的窗口，以及看不见的窗口。
 /// Borderless 是没有标题栏的无边框窗口，Kazumi 这类全屏就是这样盖住屏幕的。
+/// Maximized 是常规最大化——它也会铺满工作区，但那不是全屏，不能用来决定隐身。
 /// </summary>
-public readonly record struct TopWindow(PixelRect Rect, bool Ignore, bool Borderless);
+public readonly record struct TopWindow(PixelRect Rect, bool Ignore, bool Borderless, bool Maximized = false);
 
 /// <summary>
 /// 只在岛自己这块屏被盖住时收成小点。
@@ -53,7 +54,9 @@ public static class FullscreenPolicy
             return false;
         if (HidePolicy.Covers(windowOnTop.Rect, monitor, CoverTolerancePx))
             return true;
-        if (windowOnTop.Borderless && NearlyCovers(windowOnTop.Rect, monitor))
+        // 最大化窗口同样会铺满工作区、差一截任务栏，形状和全屏播放器一模一样，
+        // 只能靠 WS_MAXIMIZE 区分：它是最大化就不是全屏。
+        if (windowOnTop.Borderless && !windowOnTop.Maximized && NearlyCovers(windowOnTop.Rect, monitor))
             return true;
         if (attention == ShellAttention.Direct3D
             && HidePolicy.CenterOn(windowOnTop.Rect, monitor)
@@ -66,6 +69,7 @@ public static class FullscreenPolicy
     {
         if (!HidePolicy.CenterOn(window, monitor))
             return false;
+        // 内缩到任务栏高度左右。再大一点，普通最大化窗口也会被算成全屏。
         int insetX = Math.Min(72, Math.Max(1, monitor.Width / 12));
         int insetY = Math.Min(72, Math.Max(1, monitor.Height / 12));
         if (monitor.Width <= insetX * 2 || monitor.Height <= insetY * 2)

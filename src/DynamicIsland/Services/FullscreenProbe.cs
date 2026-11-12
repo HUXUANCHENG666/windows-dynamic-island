@@ -56,6 +56,7 @@ static class FullscreenProbe
         bool own = pid != 0 && pid == self;
         bool ignore = !visible || shell || own;
         bool borderless = false;
+        bool maximized = false;
         var rect = new PixelRect(0, 0, 0, 0);
         if (!ignore && NativeMethods.GetWindowRect(hwnd, out var bounds))
         {
@@ -64,13 +65,14 @@ static class FullscreenProbe
             rect = new PixelRect(bounds.Left, bounds.Top, Math.Max(0, width), Math.Max(0, height));
             long style = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_STYLE).ToInt64();
             borderless = (style & NativeMethods.WS_CAPTION) == 0;
+            maximized = (style & NativeMethods.WS_MAXIMIZE) != 0;
         }
         else
         {
             ignore = true;
         }
 
-        return new TopWindow(rect, ignore, borderless);
+        return new TopWindow(rect, ignore, borderless, maximized);
     }
 
     static bool IsCloaked(IntPtr hwnd)

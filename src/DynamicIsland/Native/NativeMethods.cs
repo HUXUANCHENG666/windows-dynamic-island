@@ -10,6 +10,7 @@ static class NativeMethods
     public const int GWL_STYLE = -16;
     public const int GWL_EXSTYLE = -20;
     public const long WS_CAPTION = 0x00C00000;
+    public const long WS_MAXIMIZE = 0x01000000;
     public const uint GA_ROOT = 2;
     public const int DWMWA_CLOAKED = 14;
     public const int WS_EX_NOACTIVATE = 0x08000000;

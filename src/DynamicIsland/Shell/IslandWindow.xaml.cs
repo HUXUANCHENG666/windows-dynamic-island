@@ -40,6 +40,8 @@ public partial class IslandWindow : Window
     DispatcherTimer? _slow;
     DispatcherTimer? _topmost;
     DispatcherTimer? _hideSweep;
+    int _coverStreak;
+    bool _lastHide;
     bool _timerPinned;
     bool _announceFinish;
     bool _renderLive;
@@ -961,10 +963,30 @@ public partial class IslandWindow : Window
         if (!string.IsNullOrWhiteSpace(sample.ProcessName))
             ForeignProcess = sample.ProcessName;
         Settings.HideProcesses ??= new();
-        bool covers = sample.CoversIslandMonitor || FullscreenProbe.Covers(islandMonitor);
+        bool raw = sample.CoversIslandMonitor || FullscreenProbe.Covers(islandMonitor);
+
+        // 切窗口、拖窗口的过程中会有一两帧看着像铺满了屏幕，那不算全屏。
+        // 连续两次都判成覆盖才真的收起来；退出全屏时立刻恢复，不做延迟。
+        if (raw)
+        {
+            if (_coverStreak < 2)
+                _coverStreak++;
+        }
+        else
+        {
+            _coverStreak = 0;
+        }
+
+        bool covers = _coverStreak >= 2;
         bool hide = HidePolicy.IsOccluded(
             new HideSignals(Settings.Stealth, sample.HasForeignWindow, sample.OnIslandMonitor, covers, sample.ProcessName),
             Settings.HideProcesses);
+        if (hide != _lastHide)
+        {
+            _lastHide = hide;
+            Log.Info($"occlude {hide} covers {covers} on {sample.OnIslandMonitor} proc {sample.ProcessName}");
+        }
+
         if (hide && (_deviceOpen || _director.CameraOpen || _director.Mode == IslandMode.Camera))
             ReleaseCamera(collapseUi: true);
         _director.SetOccluded(hide, DateTime.UtcNow);
