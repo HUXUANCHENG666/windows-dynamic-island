@@ -44,6 +44,16 @@ static class FullscreenProbe
             list.Add(Describe(hwnd, self));
             return true;
         }, IntPtr.Zero);
+
+        // 前台窗口插到最前。直接全屏的播放器有时被一扇过渡窗压住，枚举顺序会把它漏到后面。
+        IntPtr foreground = NativeMethods.GetForegroundWindow();
+        if (foreground != IntPtr.Zero)
+        {
+            var front = Describe(foreground, self);
+            if (!front.Ignore)
+                list.Insert(0, front);
+        }
+
         return list;
     }
 
@@ -52,9 +62,11 @@ static class FullscreenProbe
         bool visible = NativeMethods.IsWindowVisible(hwnd) && !NativeMethods.IsIconic(hwnd) && !IsCloaked(hwnd);
         var className = ClassName(hwnd);
         bool shell = FullscreenPolicy.IsShellOrDesktop(className);
+        long extended = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE).ToInt64();
+        bool clickThrough = FullscreenPolicy.IsClickThrough(extended);
         NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
         bool own = pid != 0 && pid == self;
-        bool ignore = !visible || shell || own;
+        bool ignore = !visible || shell || own || clickThrough;
         bool borderless = false;
         bool maximized = false;
         var rect = new PixelRect(0, 0, 0, 0);
@@ -64,7 +76,16 @@ static class FullscreenProbe
             int height = bounds.Bottom - bounds.Top;
             rect = new PixelRect(bounds.Left, bounds.Top, Math.Max(0, width), Math.Max(0, height));
             long style = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_STYLE).ToInt64();
-            borderless = (style & NativeMethods.WS_CAPTION) == 0;
+            bool caption = (style & NativeMethods.WS_CAPTION) != 0;
+            int nonClientW = width;
+            int nonClientH = height;
+            if (NativeMethods.GetClientRect(hwnd, out var client))
+            {
+                nonClientW = Math.Max(0, width - Math.Max(0, client.Right - client.Left));
+                nonClientH = Math.Max(0, height - Math.Max(0, client.Bottom - client.Top));
+            }
+
+            borderless = FullscreenPolicy.IsVisuallyBorderless(caption, nonClientW, nonClientH);
             maximized = (style & NativeMethods.WS_MAXIMIZE) != 0;
         }
         else

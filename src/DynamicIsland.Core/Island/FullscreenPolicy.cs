@@ -20,19 +20,36 @@ public readonly record struct TopWindow(PixelRect Rect, bool Ignore, bool Border
 
 /// <summary>
 /// 只在岛自己这块屏被盖住时收成小点。
-/// 严格盖住 rcMonitor 的窗口都算，不管有没有标题栏。
-/// 无边框窗口差一点没盖住任务栏（Kazumi 常见）也算。普通最大化窗口有标题栏，而且只占工作区，不算。
-/// 独占 D3D 时，这块屏上那扇够大的前台窗口也算。别的屏幕上的全屏不算。
+/// 带标题栏的最大化窗口不算，哪怕任务栏自动隐藏、矩形盖住了整块屏。
+/// 无边框窗口盖住整块屏就算，包括还留着 WS_MAXIMIZE 的直接全屏。差一点没盖住任务栏的无边框窗口也算。
+/// 独占 D3D 时，这块屏上那扇够大、且不是普通最大化的前台窗口也算。别的屏幕上的全屏不算。
 /// </summary>
 public static class FullscreenPolicy
 {
     public const int CoverTolerancePx = 8;
 
+    /// <summary>
+    /// 桌面、任务栏，以及切换窗口时一闪而过的全屏壳层。
+    /// 这些窗口会在打开或切走普通窗口时铺满屏幕，不能拿来决定隐身。
+    /// </summary>
     public static bool IsShellOrDesktop(string? className) => className switch
     {
         "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd" => true,
+        "Shell_LightDismissOverlay" or "MultitaskingViewFrame" or "ForegroundStaging" => true,
+        "Windows.Internal.Shell.TabProxyWindow" or "XamlExplorerHostIslandWindow" => true,
+        "ApplicationManager_ImmersiveShellWindow" or "NotifyIconOverflowWindow" => true,
         _ => false
     };
+
+    /// <summary>点得穿的窗口是遮罩，不是用户正在看的全屏。</summary>
+    public static bool IsClickThrough(long extendedStyle) => (extendedStyle & 0x20) != 0;
+
+    /// <summary>
+    /// 样式里还留着标题栏，但客户区已经铺满窗口时，按无边框算。
+    /// Kazumi 一类播放器切全屏后，WS_CAPTION 有时要等下一次激活才清掉。
+    /// </summary>
+    public static bool IsVisuallyBorderless(bool captionStyle, int nonClientWidth, int nonClientHeight) =>
+        !captionStyle || (nonClientWidth <= 2 && nonClientHeight <= 4);
 
     public static bool ShouldHide(PixelRect monitor, IReadOnlyList<TopWindow> zOrderTopFirst, ShellAttention attention)
     {
@@ -52,11 +69,17 @@ public static class FullscreenPolicy
             return false;
         if (!Overlaps(windowOnTop.Rect, monitor))
             return false;
+
+        // 带标题栏的最大化窗口会铺满工作区，自动隐藏任务栏时甚至盖住整块屏。那仍是最大化，不是全屏。
+        if (windowOnTop.Maximized && !windowOnTop.Borderless)
+            return false;
         if (HidePolicy.Covers(windowOnTop.Rect, monitor, CoverTolerancePx))
             return true;
-        // 最大化窗口同样会铺满工作区、差一截任务栏，形状和全屏播放器一模一样，
-        // 只能靠 WS_MAXIMIZE 区分：它是最大化就不是全屏。
-        if (windowOnTop.Borderless && !windowOnTop.Maximized && NearlyCovers(windowOnTop.Rect, monitor))
+        // 最大化窗口同样会铺满工作区、差一截任务栏。无边框的普通最大化也不算全屏。
+        // 无边框又真的盖住整块屏（含过期的 WS_MAXIMIZE）才算，Kazumi 直接全屏是这种。
+        if (windowOnTop.Maximized)
+            return false;
+        if (windowOnTop.Borderless && NearlyCovers(windowOnTop.Rect, monitor))
             return true;
         if (attention == ShellAttention.Direct3D
             && HidePolicy.CenterOn(windowOnTop.Rect, monitor)

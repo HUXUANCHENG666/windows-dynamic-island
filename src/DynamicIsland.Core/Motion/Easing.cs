@@ -30,7 +30,21 @@ public static class Easing
 
     public static double BlurFor(double opacity) => (1 - Clamp01(opacity)) * 5.5;
 
-    public static double ExpandedShift(double expand) => (1 - Clamp01(expand)) * 10;
+    public static double ExpandedShift(double expand) => (1 - Clamp01(expand)) * 12;
 
-    public static double CompactShift(double expand) => Clamp01(expand) * -5;
+    public static double CompactShift(double expand) => Clamp01(expand) * -6;
+
+    /// <summary>
+    /// 内容进来时从 0.94 落到 1。弹簧过冲最多再抬到大约 1.04，不另做一套动画。
+    /// </summary>
+    public static double EntranceScale(double presence)
+    {
+        double t = Clamp01(presence);
+        double over = presence - 1;
+        if (over < 0)
+            over = 0;
+        else if (over > 0.08)
+            over = 0.08;
+        return 0.94 + 0.06 * t + over * 0.5;
+    }
 }

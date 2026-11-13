@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using DynamicIsland.Core.Island;
 using DynamicIsland.Visuals;
 
 namespace DynamicIsland.Views;
@@ -24,6 +25,10 @@ public partial class ExpandedIdleView : UserControl
         Date.Foreground = Theme.Artist;
         StopwatchText.Foreground = Theme.Title;
         FocusText.Foreground = Theme.Title;
+        StopwatchIcon.Data = Geometry.Parse(Glyphs.Stopwatch);
+        StopwatchIcon.Stroke = Theme.Title;
+        FocusIcon.Data = Geometry.Parse(Glyphs.Focus);
+        FocusIcon.Stroke = Theme.Title;
         Ui.Hover(Stopwatch, Theme.Chip, Theme.ChipHover);
         Ui.Hover(FocusChip, Theme.Chip, Theme.ChipHover);
         Stopwatch.MouseLeftButtonUp += (_, e) => { e.Handled = true; StopwatchRequested?.Invoke(this, EventArgs.Empty); };
