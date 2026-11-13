@@ -12,12 +12,13 @@ sealed class TrayController : IDisposable
     const int IdStartup = 2;
     const int IdStopwatch = 3;
     const int IdFocus = 4;
-    const int IdToast = 5;
     const int IdLog = 6;
     const int IdStealth = 7;
     const int IdTranslate = 8;
+    const int IdRecall = 11;
     const int IdCamera = 9;
     const int IdHideCurrent = 10;
+    const int IdNotifications = 12;
     const int IdMonitorBase = 100;
     const int IdHideBase = 300;
 
@@ -130,13 +131,16 @@ sealed class TrayController : IDisposable
 
             NativeMethods.AppendMenu(menu, NativeMethods.MF_SEPARATOR, IntPtr.Zero, null);
             NativeMethods.AppendMenu(menu, NativeMethods.MF_STRING, (IntPtr)IdTranslate, "翻译剪贴板");
+            uint recall = NativeMethods.MF_STRING | (_window.HasStoredTranslation ? 0 : NativeMethods.MF_GRAYED);
+            NativeMethods.AppendMenu(menu, recall, (IntPtr)IdRecall, "翻译结果");
             uint camera = NativeMethods.MF_STRING | (_window.CameraIsOpen ? NativeMethods.MF_CHECKED : 0);
             NativeMethods.AppendMenu(menu, camera, (IntPtr)IdCamera, "摄像头画中画");
             NativeMethods.AppendMenu(menu, NativeMethods.MF_SEPARATOR, IntPtr.Zero, null);
             NativeMethods.AppendMenu(menu, NativeMethods.MF_STRING, (IntPtr)IdStopwatch, "打开秒表");
             NativeMethods.AppendMenu(menu, NativeMethods.MF_STRING, (IntPtr)IdFocus, "开始 25 分钟专注");
             NativeMethods.AppendMenu(menu, NativeMethods.MF_SEPARATOR, IntPtr.Zero, null);
-            NativeMethods.AppendMenu(menu, NativeMethods.MF_STRING, (IntPtr)IdToast, "发送一条测试通知");
+            uint notes = NativeMethods.MF_STRING | (_window.Settings.NotificationCenter ? NativeMethods.MF_CHECKED : 0);
+            NativeMethods.AppendMenu(menu, notes, (IntPtr)IdNotifications, "在岛上显示通知中心");
             NativeMethods.AppendMenu(menu, NativeMethods.MF_STRING, (IntPtr)IdLog, "打开日志");
             NativeMethods.AppendMenu(menu, NativeMethods.MF_SEPARATOR, IntPtr.Zero, null);
             NativeMethods.AppendMenu(menu, NativeMethods.MF_STRING, (IntPtr)IdExit, "退出");
@@ -183,8 +187,8 @@ sealed class TrayController : IDisposable
             case IdFocus:
                 _window.OpenCountdown(25);
                 break;
-            case IdToast:
-                _window.ShowToast("灵动岛", "这是一条测试通知");
+            case IdNotifications:
+                _window.ToggleNotificationCenter();
                 break;
             case IdLog:
                 OpenLog();
@@ -194,6 +198,9 @@ sealed class TrayController : IDisposable
                 break;
             case IdTranslate:
                 _window.TranslateClipboard();
+                break;
+            case IdRecall:
+                _window.ShowStoredTranslation();
                 break;
             case IdCamera:
                 _window.ToggleCamera();

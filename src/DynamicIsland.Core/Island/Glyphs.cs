@@ -14,4 +14,6 @@ public static class Glyphs
     public const string Slash = "M5,5 L19,19";
     public const string Bell = "M12,3.4 C8.7,3.4 6.8,6.2 6.8,9.3 V12.8 L4.8,16.4 H19.2 L17.2,12.8 V9.3 C17.2,6.2 15.3,3.4 12,3.4 Z M10.2,17.4 A1.8,1.8 0 0 0 13.8,17.4 A1.8,1.8 0 0 1 10.2,17.4 Z";
     public const string Music = "M10.2,17.6 A2.5,2.5 0 1 1 8,15.2 L8,7.2 L17.2,5.2 V13.6 A2.5,2.5 0 1 1 15,13.2 V8.2 L10.2,9.4 Z";
+    public const string ChevronLeft = "M14.6,5.4 L8.4,12 L14.6,18.6";
+    public const string ChevronRight = "M9.4,5.4 L15.6,12 L9.4,18.6";
 }

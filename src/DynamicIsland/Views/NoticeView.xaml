@@ -28,6 +28,7 @@
             </Viewbox>
         </Grid>
         <StackPanel x:Name="Copy" Grid.Column="1" VerticalAlignment="Center" Margin="8,0,0,0">
+            <TextBlock x:Name="AppName" FontSize="12" Margin="0,0,0,1" TextTrimming="CharacterEllipsis" Visibility="Collapsed"/>
             <Grid x:Name="TitleLine">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -41,7 +42,7 @@
                 <TextBlock x:Name="Percent" Grid.Column="1" FontSize="15" FontWeight="SemiBold" Margin="10,0,0,0"
                            Typography.NumeralAlignment="Tabular"/>
             </Grid>
-            <TextBlock x:Name="Detail" FontSize="13" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/>
+            <TextBlock x:Name="Detail" FontSize="13" Margin="0,2,0,0" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="54"/>
             <Grid x:Name="BarHost" Height="4" Margin="0,8,0,0">
                 <Border x:Name="BarTrack" CornerRadius="2"/>
                 <Border x:Name="BarFill" HorizontalAlignment="Left" CornerRadius="2" Height="4"/>

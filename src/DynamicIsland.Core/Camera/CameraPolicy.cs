@@ -65,4 +65,23 @@ public static class CameraFraming
         double height = sourceHeight * scale;
         return new CoverFit(scale, (destWidth - width) / 2.0, (destHeight - height) / 2.0, width, height);
     }
+
+    /// <summary>
+    /// 源图上被保留的那一块，坐标是相对整张图的 0 到 1。
+    /// 宽和高跟目标格子的比例一致，中心跟原图中心重合，所以铺进格子时不会拉扁，也不会靠向某一边。
+    /// </summary>
+    public readonly record struct RelRect(double X, double Y, double Width, double Height);
+
+    public static RelRect CenteredViewbox(double sourceWidth, double sourceHeight, double destWidth, double destHeight)
+    {
+        var fit = Cover(sourceWidth, sourceHeight, destWidth, destHeight);
+        if (fit.Scale <= 0 || sourceWidth <= 0 || sourceHeight <= 0)
+            return new RelRect(0, 0, 0, 0);
+
+        double cropW = destWidth / fit.Scale;
+        double cropH = destHeight / fit.Scale;
+        double cropX = (sourceWidth - cropW) / 2.0;
+        double cropY = (sourceHeight - cropH) / 2.0;
+        return new RelRect(cropX / sourceWidth, cropY / sourceHeight, cropW / sourceWidth, cropH / sourceHeight);
+    }
 }

@@ -7,7 +7,12 @@ static class NativeMethods
 {
     public static readonly IntPtr HWND_TOPMOST = new(-1);
 
+    public const int GWL_STYLE = -16;
     public const int GWL_EXSTYLE = -20;
+    public const long WS_CAPTION = 0x00C00000;
+    public const long WS_MAXIMIZE = 0x01000000;
+    public const uint GA_ROOT = 2;
+    public const int DWMWA_CLOAKED = 14;
     public const int WS_EX_NOACTIVATE = 0x08000000;
     public const int WS_EX_TOOLWINDOW = 0x00000080;
     public const int WS_EX_APPWINDOW = 0x00040000;
@@ -22,6 +27,7 @@ static class NativeMethods
     public const int WM_NCHITTEST = 0x0084;
     public const int WM_LBUTTONDOWN = 0x0201;
     public const int WM_MOUSEMOVE = 0x0200;
+    public const int WM_CAPTURECHANGED = 0x0215;
     public const int WM_CLIPBOARDUPDATE = 0x031D;
     public const int WM_APP_CHECKHIDE = 0x8000 + 41;
     public const int WM_MOUSELEAVE = 0x02A3;
@@ -31,6 +37,7 @@ static class NativeMethods
     public const int WM_CONTEXTMENU = 0x007B;
     public const int WM_DPICHANGED = 0x02E0;
     public const int WM_NULL = 0x0000;
+    public const int MA_ACTIVATE = 1;
     public const int MA_NOACTIVATE = 3;
     public const int HTCLIENT = 1;
     public const int HTTRANSPARENT = -1;
@@ -88,6 +95,12 @@ static class NativeMethods
 
     [DllImport("user32.dll")]
     public static extern bool GetCursorPos(out POINT point);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr SetCapture(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool ReleaseCapture();
 
     [DllImport("user32.dll")]
     public static extern bool TrackMouseEvent(ref TRACKMOUSEEVENT eventTrack);
@@ -201,6 +214,37 @@ static class NativeMethods
 
     [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsIconic(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr data);
+
+    public delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr data);
+
+    [DllImport("dwmapi.dll")]
+    public static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out int value, int size);
+
+    public enum QueryUserNotificationState
+    {
+        NotPresent = 1,
+        Busy = 2,
+        RunningD3DFullScreen = 3,
+        PresentationMode = 4,
+        AcceptsNotifications = 5,
+        QuietTime = 6,
+        App = 7
+    }
+
+    [DllImport("shell32.dll")]
+    public static extern int SHQueryUserNotificationState(out QueryUserNotificationState state);
 
     [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);

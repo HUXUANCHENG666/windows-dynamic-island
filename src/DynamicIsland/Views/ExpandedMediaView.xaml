@@ -11,13 +11,29 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition x:Name="ArtCol" Width="104"/>
                 <ColumnDefinition x:Name="GapCol" Width="14"/>
-                <ColumnDefinition Width="*"/>
+                <ColumnDefinition x:Name="MetaCol" Width="*"/>
             </Grid.ColumnDefinitions>
             <Grid x:Name="ArtHost" Width="104" Height="104">
                 <Rectangle x:Name="Art" RadiusX="24" RadiusY="24"/>
                 <Viewbox x:Name="Note" Width="32" Height="32" IsHitTestVisible="False">
                     <Path x:Name="NotePath"/>
                 </Viewbox>
+                <Grid x:Name="Switcher" Visibility="Collapsed">
+                    <Border x:Name="PrevSession" Width="22" Height="22" CornerRadius="11"
+                            HorizontalAlignment="Left" VerticalAlignment="Center" Margin="6,0,0,0">
+                        <Path x:Name="PrevSessionIcon" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              HorizontalAlignment="Center" VerticalAlignment="Center" Width="10" Height="10" Stretch="Uniform"/>
+                    </Border>
+                    <Border x:Name="NextSession" Width="22" Height="22" CornerRadius="11"
+                            HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,6,0">
+                        <Path x:Name="NextSessionIcon" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              HorizontalAlignment="Center" VerticalAlignment="Center" Width="10" Height="10" Stretch="Uniform"/>
+                    </Border>
+                    <Border x:Name="SessionBadge" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,6"
+                            CornerRadius="8" Padding="6,1" IsHitTestVisible="False">
+                        <TextBlock x:Name="SessionCountText" FontSize="11" FontWeight="SemiBold"/>
+                    </Border>
+                </Grid>
             </Grid>
             <Grid x:Name="Meta" Grid.Column="2">
                 <Grid.RowDefinitions>
