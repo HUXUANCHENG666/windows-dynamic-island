@@ -20,7 +20,7 @@
             <DropShadowEffect BlurRadius="28" ShadowDepth="10" Direction="270" Opacity="0.45" Color="Black"/>
         </Border.Effect>
         <StackPanel>
-                <Grid Margin="0,0,0,16">
+                <Grid x:Name="DragHeader" Margin="0,0,0,16" Cursor="SizeAll">
                     <StackPanel Orientation="Horizontal">
                         <Viewbox Width="18" Height="18" Margin="0,0,8,0" VerticalAlignment="Center">
                             <Path x:Name="Gear" StrokeThickness="1.4" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
@@ -59,10 +59,41 @@
                 </StackPanel>
 
                 <TextBlock x:Name="HideLabel" Text="隐身名单" FontSize="12" Margin="2,0,0,8"/>
-                <TextBlock x:Name="HideHint" Text="名单里的程序在这块屏幕上成为前台时，岛会收成小点。" FontSize="12" Margin="2,0,0,8" TextWrapping="Wrap"/>
-                <Border x:Name="HideCurrent" CornerRadius="14" Padding="12,8" HorizontalAlignment="Left" Margin="0,0,0,8" Cursor="Hand">
-                    <TextBlock x:Name="HideCurrentText" Text="把当前前台加入名单" FontSize="13"/>
+                <TextBlock x:Name="HideHint" Text="这些程序在这块屏幕上成为前台时，岛会收成小点。在下面输入任务管理器里的进程名即可加入，不用带 .exe，例如 chrome、msedge、WeChat、notepad。也可以点正在运行的程序。" FontSize="12" Margin="2,0,0,8" TextWrapping="Wrap"/>
+                <Grid Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Border x:Name="HideNameBox" CornerRadius="14" Margin="0,0,8,0">
+                        <Grid>
+                            <TextBlock x:Name="HideNameHint" Text="例如 chrome" FontSize="13" Margin="12,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                            <TextBox x:Name="HideName" Height="36" FontSize="13" Padding="12,6,12,6" VerticalContentAlignment="Center" BorderThickness="0" Background="Transparent"/>
+                        </Grid>
+                    </Border>
+                    <Border x:Name="HideAdd" Grid.Column="1" CornerRadius="14" Padding="14,8" Margin="0,0,8,0" Cursor="Hand">
+                        <TextBlock x:Name="HideAddText" Text="加入" FontSize="13" VerticalAlignment="Center"/>
+                    </Border>
+                    <Border x:Name="HideBrowse" Grid.Column="2" CornerRadius="14" Padding="12,8" Cursor="Hand">
+                        <TextBlock x:Name="HideBrowseText" Text="选择…" FontSize="13" VerticalAlignment="Center"/>
+                    </Border>
+                </Grid>
+                <TextBlock x:Name="HideStatus" FontSize="12" Margin="2,0,0,8" TextWrapping="Wrap"/>
+                <Border x:Name="HideCurrent" CornerRadius="14" Padding="12,8" HorizontalAlignment="Left" Margin="0,0,0,8" Cursor="Hand" Visibility="Collapsed">
+                    <TextBlock x:Name="HideCurrentText" Text="把刚才的程序加入名单" FontSize="13"/>
                 </Border>
+                <Grid Margin="2,0,0,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="RunningLabel" Text="正在运行，点一下就加入" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,8,0"/>
+                    <Border x:Name="HideRefresh" Grid.Column="1" CornerRadius="10" Padding="8,3" Cursor="Hand" VerticalAlignment="Center">
+                        <TextBlock x:Name="HideRefreshText" Text="刷新" FontSize="12"/>
+                    </Border>
+                </Grid>
+                <WrapPanel x:Name="RunningApps" Margin="0,0,0,8"/>
                 <StackPanel x:Name="HideList" Margin="0,0,0,16"/>
 
                 <TextBlock x:Name="ToolLabel" Text="工具" FontSize="12" Margin="2,0,0,8"/>

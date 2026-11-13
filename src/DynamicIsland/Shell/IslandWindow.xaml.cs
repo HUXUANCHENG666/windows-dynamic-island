@@ -433,6 +433,8 @@ public partial class IslandWindow : Window
         EvaluateHide();
     }
 
+    public void RefreshHideList() => EvaluateHide();
+
     public void TranslateClipboard()
     {
         string text;
@@ -592,6 +594,8 @@ public partial class IslandWindow : Window
         _media.Unsupported += (_, _) => ShowToast("媒体控制", "这个应用不支持上一首或下一首");
         ExpandedIdle.StopwatchRequested += (_, _) => OpenStopwatch();
         ExpandedIdle.FocusRequested += (_, _) => OpenCountdown(25);
+        ExpandedIdle.CameraRequested += (_, _) => ToggleCamera();
+        CameraNotice.CloseRequested += (_, _) => ToggleCamera();
         ExpandedTimer.ToggleRequested += (_, _) =>
         {
             if (_timer.IsCompleted)
