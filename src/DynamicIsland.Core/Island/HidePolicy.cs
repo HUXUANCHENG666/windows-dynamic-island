@@ -32,7 +32,7 @@ public static class HidePolicy
         return x >= monitor.X && x < monitor.Right && y >= monitor.Y && y < monitor.Bottom;
     }
 
-    public static bool IsOccluded(HideSignals signals, IReadOnlyCollection<string> hideList)
+    public static bool IsOccluded(HideSignals signals, IEnumerable<string> hideList)
     {
         if (signals.Stealth)
             return true;
@@ -83,7 +83,7 @@ public static class HidePolicy
         return true;
     }
 
-    public static bool IsListed(IReadOnlyCollection<string> list, string? process)
+    public static bool IsListed(IEnumerable<string> list, string? process)
     {
         var name = NormalizeProcess(process);
         if (name.Length == 0)

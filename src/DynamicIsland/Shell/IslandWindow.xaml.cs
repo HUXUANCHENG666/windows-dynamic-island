@@ -433,6 +433,8 @@ public partial class IslandWindow : Window
         EvaluateHide();
     }
 
+    public void RefreshHideList() => EvaluateHide();
+
     public void TranslateClipboard()
     {
         string text;
