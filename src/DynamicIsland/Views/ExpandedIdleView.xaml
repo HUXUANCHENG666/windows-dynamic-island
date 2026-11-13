@@ -7,11 +7,21 @@
                    Typography.NumeralAlignment="Tabular" Typography.NumeralStyle="Lining"/>
         <TextBlock x:Name="Date" FontSize="13" HorizontalAlignment="Center" Margin="0,1,0,12"/>
         <StackPanel x:Name="Actions" Orientation="Horizontal" HorizontalAlignment="Center">
-            <Border x:Name="Stopwatch" Height="32" CornerRadius="16" Padding="14,0" Margin="0,0,8,0">
-                <TextBlock x:Name="StopwatchText" Text="秒表" FontSize="13" VerticalAlignment="Center"/>
+            <Border x:Name="Stopwatch" Height="32" CornerRadius="16" Padding="12,0" Margin="0,0,8,0">
+                <StackPanel Orientation="Horizontal">
+                    <Viewbox Width="14" Height="14" Margin="0,0,6,0" VerticalAlignment="Center">
+                        <Path x:Name="StopwatchIcon" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+                    </Viewbox>
+                    <TextBlock x:Name="StopwatchText" Text="秒表" FontSize="13" VerticalAlignment="Center"/>
+                </StackPanel>
             </Border>
-            <Border x:Name="FocusChip" Height="32" CornerRadius="16" Padding="14,0">
-                <TextBlock x:Name="FocusText" Text="专注 25:00" FontSize="13" VerticalAlignment="Center"/>
+            <Border x:Name="FocusChip" Height="32" CornerRadius="16" Padding="12,0">
+                <StackPanel Orientation="Horizontal">
+                    <Viewbox Width="14" Height="14" Margin="0,0,6,0" VerticalAlignment="Center">
+                        <Path x:Name="FocusIcon" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                    </Viewbox>
+                    <TextBlock x:Name="FocusText" Text="专注 25:00" FontSize="13" VerticalAlignment="Center"/>
+                </StackPanel>
             </Border>
         </StackPanel>
     </StackPanel>

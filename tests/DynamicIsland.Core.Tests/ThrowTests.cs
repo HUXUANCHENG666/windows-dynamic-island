@@ -87,6 +87,26 @@ public class ThrowTests
     }
 
     [Fact]
+    public void Step_BounceStaysVisibleLongerThenSettles()
+    {
+        var body = new ThrowMath.Body(1700, 500, 1800, 420);
+        for (int i = 0; i < 80; i++)
+            body = ThrowMath.Step(body, 0.016, Work, 40, 20);
+
+        Assert.True(ThrowMath.Speed(body.Vx, body.Vy) > ThrowMath.RestSpeed);
+
+        int frames = 80;
+        while (!ThrowMath.Settled(body) && frames < 500)
+        {
+            body = ThrowMath.Step(body, 0.016, Work, 40, 20);
+            frames++;
+        }
+
+        Assert.True(ThrowMath.Settled(body));
+        Assert.InRange(frames, 100, 420);
+    }
+
+    [Fact]
     public void Step_DecaysUntilSettled()
     {
         var body = new ThrowMath.Body(960, 520, 1500, 0);

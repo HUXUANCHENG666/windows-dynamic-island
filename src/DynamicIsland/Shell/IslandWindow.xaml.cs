@@ -40,8 +40,10 @@ public partial class IslandWindow : Window
     DispatcherTimer? _slow;
     DispatcherTimer? _topmost;
     DispatcherTimer? _hideSweep;
-    int _coverStreak;
+    DispatcherTimer? _coverConfirm;
+    readonly OcclusionLatch _occlusion = new();
     bool _lastHide;
+    SettingsWindow? _settingsWindow;
     bool _timerPinned;
     bool _announceFinish;
     bool _renderLive;
@@ -345,6 +347,75 @@ public partial class IslandWindow : Window
         Close();
     }
 
+    public void OpenSettings()
+    {
+        if (_settingsWindow is { IsVisible: true })
+        {
+            _settingsWindow.Activate();
+            _settingsWindow.RefreshFromIsland();
+            return;
+        }
+
+        _settingsWindow = new SettingsWindow(this);
+        _settingsWindow.Closed += (_, _) => _settingsWindow = null;
+        _settingsWindow.Show();
+    }
+
+    public void SetTranslateDirection(DynamicIsland.Core.Translation.TranslateDirection direction)
+    {
+        Settings.TranslateDirection = DynamicIsland.Core.Translation.TranslatePolicy.ToSetting(direction);
+        SettingsStore.Save(Settings);
+        TranslateNotice.SetDirection(direction);
+    }
+
+    public void OpenLog()
+    {
+        try
+        {
+            Log.Info("log opened");
+            Process.Start(new ProcessStartInfo(Log.FilePath) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            Log.Error("log-open", ex);
+        }
+    }
+
+    bool CursorOnPill()
+    {
+        if (!NativeMethods.GetCursorPos(out var point))
+            return false;
+        try
+        {
+            return HitPill(PointFromScreen(new Point(point.X, point.Y)));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    void ArmCoverConfirm()
+    {
+        if (_coverConfirm != null)
+            return;
+        _coverConfirm = new DispatcherTimer { Interval = OcclusionLatch.EngageAfter + TimeSpan.FromMilliseconds(40) };
+        _coverConfirm.Tick += (_, _) =>
+        {
+            DisarmCoverConfirm();
+            EvaluateHide();
+        };
+        _coverConfirm.Start();
+    }
+
+    void DisarmCoverConfirm()
+    {
+        if (_coverConfirm == null)
+            return;
+        _coverConfirm.Stop();
+        _coverConfirm = null;
+    }
+
     public void ToggleStealth()
     {
         Settings.Stealth = !Settings.Stealth;
@@ -433,8 +504,8 @@ public partial class IslandWindow : Window
         _topmost = new DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
         _topmost.Tick += (_, _) => ReassertTopmost();
         _topmost.Start();
-        // 兜底扫描：F11、独占全屏、DPI 变化、显示器热插拔都不一定产生上面那四类 WinEvent，
-        // 只靠钩子会漏。半秒一次比钩子慢不了多少；EvaluateHide 在状态没变时是幂等的，常驻期间 Nudge 也不触发重绘。
+        // 兜底扫描：F11、独占全屏、DPI 变化、显示器热插拔都不一定产生 WinEvent。
+        // 真正收起要等覆盖稳定超过 OcclusionLatch，所以这次扫描不会把打开窗口的过渡帧收成小点。
         _hideSweep = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _hideSweep.Tick += (_, _) => EvaluateHide();
         _hideSweep.Start();
@@ -467,6 +538,8 @@ public partial class IslandWindow : Window
         _slow?.Stop();
         _topmost?.Stop();
         _hideSweep?.Stop();
+        _coverConfirm?.Stop();
+        _settingsWindow?.Close();
         SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
         _translateCts?.Cancel();
         _notifications.Dispose();
@@ -858,7 +931,11 @@ public partial class IslandWindow : Window
                     _trackingLeave = true;
                 }
 
-                _director.PointerEntered(DateTime.UtcNow);
+                // 宿主窗口比胶囊大得多。点在外面的消息不能当成悬停，否则一切窗口都会把岛弹开再收回。
+                if (CursorOnPill())
+                    _director.PointerEntered(DateTime.UtcNow);
+                else if (!_dragging && !_dragArmed && !_director.SelectionHold && !TranslateNotice.IsResultMenuOpen)
+                    _director.PointerExited(DateTime.UtcNow);
                 MoveWhileDragging();
                 if (!_renderLive)
                     SyncLoops();
@@ -964,28 +1041,21 @@ public partial class IslandWindow : Window
         if (!string.IsNullOrWhiteSpace(sample.ProcessName))
             ForeignProcess = sample.ProcessName;
         Settings.HideProcesses ??= new();
-        bool raw = sample.CoversIslandMonitor || FullscreenProbe.Covers(islandMonitor);
-
-        // 切窗口、拖窗口的过程中会有一两帧看着像铺满了屏幕，那不算全屏。
-        // 连续两次都判成覆盖才真的收起来；退出全屏时立刻恢复，不做延迟。
-        if (raw)
-        {
-            if (_coverStreak < 2)
-                _coverStreak++;
-        }
+        // 前台矩形不再单独算全屏。最大化、普通窗口和壳层过渡窗都会在打开的那一下盖住屏幕边缘。
+        bool raw = FullscreenProbe.Covers(islandMonitor);
+        var now = DateTime.UtcNow;
+        bool covers = _occlusion.Observe(raw, now);
+        if (raw && !covers)
+            ArmCoverConfirm();
         else
-        {
-            _coverStreak = 0;
-        }
-
-        bool covers = _coverStreak >= 2;
+            DisarmCoverConfirm();
         bool hide = HidePolicy.IsOccluded(
             new HideSignals(Settings.Stealth, sample.HasForeignWindow, sample.OnIslandMonitor, covers, sample.ProcessName),
             Settings.HideProcesses);
         if (hide != _lastHide)
         {
             _lastHide = hide;
-            Log.Info($"occlude {hide} covers {covers} on {sample.OnIslandMonitor} proc {sample.ProcessName}");
+            Log.Info($"occlude {hide} covers {covers} raw {raw} on {sample.OnIslandMonitor} proc {sample.ProcessName}");
         }
 
         if (hide && (_deviceOpen || _director.CameraOpen || _director.Mode == IslandMode.Camera))

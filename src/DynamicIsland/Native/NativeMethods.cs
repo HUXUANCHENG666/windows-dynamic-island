@@ -13,6 +13,7 @@ static class NativeMethods
     public const long WS_MAXIMIZE = 0x01000000;
     public const uint GA_ROOT = 2;
     public const int DWMWA_CLOAKED = 14;
+    public const int WS_EX_TRANSPARENT = 0x00000020;
     public const int WS_EX_NOACTIVATE = 0x08000000;
     public const int WS_EX_TOOLWINDOW = 0x00000080;
     public const int WS_EX_APPWINDOW = 0x00040000;
@@ -64,6 +65,7 @@ static class NativeMethods
     public const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
     public const uint EVENT_SYSTEM_MOVESIZEEND = 0x000B;
     public const uint EVENT_SYSTEM_MINIMIZEEND = 0x0017;
+    public const uint EVENT_OBJECT_SHOW = 0x8002;
     public const uint EVENT_OBJECT_LOCATIONCHANGE = 0x800B;
     public const uint WINEVENT_OUTOFCONTEXT = 0x0000;
     public const uint WINEVENT_SKIPOWNPROCESS = 0x0002;
@@ -248,6 +250,9 @@ static class NativeMethods
 
     [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+
+    [DllImport("user32.dll")]
+    public static extern bool GetClientRect(IntPtr hwnd, out RECT rect);
 
     [DllImport("user32.dll")]
     public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);

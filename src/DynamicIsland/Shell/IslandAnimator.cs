@@ -156,7 +156,7 @@ sealed class IslandAnimator
         }
 
         double fit = Math.Min(pillW / designW, pillH / designH);
-        Show(view, shown, Math.Clamp(fit, 0.45, 1.06), shift, allowBlur);
+        Show(view, shown, Math.Clamp(fit, 0.45, 1.06), shift, allowBlur, opacity);
         view.Width = designW;
         view.Height = designH;
         view.HorizontalAlignment = HorizontalAlignment.Center;
@@ -172,7 +172,7 @@ sealed class IslandAnimator
             return;
         }
 
-        Show(view, shown, 1, shift, allowBlur);
+        Show(view, shown, 1, shift, allowBlur, opacity);
         view.Width = width;
         view.Height = height;
         view.HorizontalAlignment = HorizontalAlignment.Center;
@@ -188,7 +188,7 @@ sealed class IslandAnimator
             return;
         }
 
-        Show(view, shown, 1, shift, allowBlur);
+        Show(view, shown, 1, shift, allowBlur, opacity);
         view.Width = width;
         view.Height = height;
         view.HorizontalAlignment = HorizontalAlignment.Stretch;
@@ -203,7 +203,7 @@ sealed class IslandAnimator
         view.IsHitTestVisible = false;
     }
 
-    static void Show(FrameworkElement view, double opacity, double scale, Shift shift, bool allowBlur)
+    static void Show(FrameworkElement view, double opacity, double scale, Shift shift, bool allowBlur, double presence)
     {
         view.Visibility = Visibility.Visible;
         view.Opacity = opacity;
@@ -222,9 +222,10 @@ sealed class IslandAnimator
             view.RenderTransformOrigin = new Point(0.5, 0.5);
         }
 
+        double entrance = Easing.EntranceScale(presence);
         var scaleTransform = (ScaleTransform)group.Children[0];
-        scaleTransform.ScaleX = scale;
-        scaleTransform.ScaleY = scale;
+        scaleTransform.ScaleX = scale * entrance;
+        scaleTransform.ScaleY = scale * entrance;
         var translate = (TranslateTransform)group.Children[1];
         translate.X = shift.X;
         translate.Y = shift.Y;

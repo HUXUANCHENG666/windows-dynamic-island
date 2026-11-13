@@ -48,6 +48,50 @@ public class FullscreenAndSessionTests
 
         var small = Window(new PixelRect(400, 200, 640, 480), borderless: true);
         Assert.False(FullscreenPolicy.ShouldHide(Primary, new[] { small }, ShellAttention.Busy));
+
+        // 自动隐藏任务栏时，普通最大化窗口的矩形会盖住整块屏，仍然不能隐身。
+        var maximizedCaption = Window(Primary, borderless: false, maximized: true);
+        Assert.False(FullscreenPolicy.ShouldHide(Primary, new[] { maximizedCaption }, ShellAttention.None));
+        Assert.False(FullscreenPolicy.ShouldHide(Primary, new[] { maximizedCaption }, ShellAttention.Direct3D));
+
+        // 无边框又盖住整块屏，就算还留着 WS_MAXIMIZE，也是直接全屏。
+        var kazumiStaleMaximize = Window(Primary, borderless: true, maximized: true);
+        Assert.True(FullscreenPolicy.ShouldHide(Primary, new[] { kazumiStaleMaximize }, ShellAttention.None));
+    }
+
+    [Fact]
+    public void Fullscreen_ShellTransitionWindowsAreNotFullscreen()
+    {
+        Assert.True(FullscreenPolicy.IsShellOrDesktop("Shell_LightDismissOverlay"));
+        Assert.True(FullscreenPolicy.IsShellOrDesktop("Windows.Internal.Shell.TabProxyWindow"));
+        Assert.True(FullscreenPolicy.IsShellOrDesktop("MultitaskingViewFrame"));
+        Assert.False(FullscreenPolicy.IsShellOrDesktop("FLUTTER_RUNNER_WIN32_WINDOW"));
+        Assert.True(FullscreenPolicy.IsClickThrough(0x20));
+        Assert.False(FullscreenPolicy.IsClickThrough(0));
+        Assert.True(FullscreenPolicy.IsVisuallyBorderless(captionStyle: true, nonClientWidth: 0, nonClientHeight: 0));
+        Assert.False(FullscreenPolicy.IsVisuallyBorderless(captionStyle: true, nonClientWidth: 16, nonClientHeight: 39));
+
+        var overlay = Window(Primary, borderless: true, ignore: true);
+        var notepad = Window(new PixelRect(200, 160, 900, 640));
+        Assert.False(FullscreenPolicy.ShouldHide(Primary, new[] { overlay, notepad }, ShellAttention.None));
+    }
+
+    [Fact]
+    public void Occlusion_IgnoresABurstAndHidesOnlyAfterItStays()
+    {
+        var latch = new OcclusionLatch();
+        var t0 = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        Assert.False(latch.Observe(true, t0));
+        Assert.False(latch.Observe(true, t0.AddMilliseconds(40)));
+        Assert.False(latch.Engaged);
+        Assert.False(latch.Observe(false, t0.AddMilliseconds(220)));
+
+        Assert.False(latch.Observe(true, t0.AddMilliseconds(1000)));
+        Assert.True(latch.Observe(true, t0.AddMilliseconds(1000 + (int)OcclusionLatch.EngageAfter.TotalMilliseconds)));
+        Assert.True(latch.Engaged);
+        Assert.False(latch.Observe(false, t0.AddMilliseconds(1600)));
+        Assert.False(latch.Engaged);
     }
 
     [Fact]

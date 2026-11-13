@@ -14,6 +14,7 @@ sealed class FullscreenWatcher : IDisposable
     IntPtr _moveEndHook;
     IntPtr _minimizeHook;
     IntPtr _moveHook;
+    IntPtr _showHook;
     IntPtr _foreground;
     int _posted;
     uint _lastLocation;
@@ -33,6 +34,7 @@ sealed class FullscreenWatcher : IDisposable
         _foregroundHook = Hook(NativeMethods.EVENT_SYSTEM_FOREGROUND, flags);
         _moveEndHook = Hook(NativeMethods.EVENT_SYSTEM_MOVESIZEEND, flags);
         _minimizeHook = Hook(NativeMethods.EVENT_SYSTEM_MINIMIZEEND, flags);
+        _showHook = Hook(NativeMethods.EVENT_OBJECT_SHOW, flags);
         _moveHook = Environment.GetEnvironmentVariable("DI_NO_LOCATION_HOOK") == "1"
             ? IntPtr.Zero
             : Hook(NativeMethods.EVENT_OBJECT_LOCATIONCHANGE, flags);
@@ -57,6 +59,11 @@ sealed class FullscreenWatcher : IDisposable
             var root = NativeMethods.GetAncestor(hwnd, NativeMethods.GA_ROOT);
             _foreground = root != IntPtr.Zero ? root : hwnd;
         }
+        else if (eventType == NativeMethods.EVENT_OBJECT_SHOW)
+        {
+            if (idObject != 0 || idChild != 0)
+                return;
+        }
         else if (eventType is not (NativeMethods.EVENT_SYSTEM_MOVESIZEEND or NativeMethods.EVENT_SYSTEM_MINIMIZEEND))
         {
             return;
@@ -75,6 +82,7 @@ sealed class FullscreenWatcher : IDisposable
         Unhook(ref _moveEndHook);
         Unhook(ref _minimizeHook);
         Unhook(ref _moveHook);
+        Unhook(ref _showHook);
     }
 
     static void Unhook(ref IntPtr hook)

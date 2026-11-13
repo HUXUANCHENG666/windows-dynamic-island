@@ -91,4 +91,12 @@ public class SpringTests
         spring.Step(-1);
         Assert.Equal(3, spring.Value);
     }
+
+    [Fact]
+    public void EntranceScale_StartsSmallAndBarelyOvershoots()
+    {
+        Assert.InRange(Easing.EntranceScale(0), 0.93, 0.95);
+        Assert.InRange(Easing.EntranceScale(1), 0.99, 1.01);
+        Assert.InRange(Easing.EntranceScale(1.15), 1.02, 1.05);
+    }
 }
