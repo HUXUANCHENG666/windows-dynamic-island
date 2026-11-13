@@ -65,7 +65,25 @@ public class FullscreenAndSessionTests
         Assert.True(FullscreenPolicy.IsShellOrDesktop("Shell_LightDismissOverlay"));
         Assert.True(FullscreenPolicy.IsShellOrDesktop("Windows.Internal.Shell.TabProxyWindow"));
         Assert.True(FullscreenPolicy.IsShellOrDesktop("MultitaskingViewFrame"));
+        Assert.True(FullscreenPolicy.IsShellOrDesktop("TopLevelWindowForOverflowXamlIsland"));
+        Assert.True(FullscreenPolicy.IsShellOrDesktop("NotifyIconOverflowWindow"));
         Assert.False(FullscreenPolicy.IsShellOrDesktop("FLUTTER_RUNNER_WIN32_WINDOW"));
+        Assert.False(FullscreenPolicy.IsShellOrDesktop("Windows.UI.Core.CoreWindow"));
+        Assert.True(FullscreenPolicy.IsShellHostProcess("StartMenuExperienceHost.exe"));
+        Assert.True(FullscreenPolicy.IsShellHostProcess("SearchHost.exe"));
+        Assert.True(FullscreenPolicy.IsShellHostProcess("SearchApp.exe"));
+        Assert.True(FullscreenPolicy.IsShellHostProcess("ShellExperienceHost.exe"));
+        Assert.False(FullscreenPolicy.IsShellHostProcess("kazumi.exe"));
+        Assert.False(FullscreenPolicy.IsShellHostProcess("explorer.exe"));
+        Assert.True(FullscreenPolicy.IsShellOverlay("Windows.UI.Core.CoreWindow", "StartMenuExperienceHost.exe"));
+        Assert.True(FullscreenPolicy.IsShellOverlay("Windows.UI.Composition.DesktopWindowContentBridge", "SearchHost.exe"));
+        Assert.False(FullscreenPolicy.IsShellOverlay("Windows.UI.Core.CoreWindow", "kazumi"));
+        Assert.False(FullscreenPolicy.IsShellOverlay("FLUTTER_RUNNER_WIN32_WINDOW", "kazumi"));
+
+        var start = Window(Primary, borderless: true, ignore: true);
+        var kazumiBehindStart = Window(Primary, borderless: true);
+        Assert.False(FullscreenPolicy.ShouldHide(Primary, new[] { start }, ShellAttention.None));
+        Assert.True(FullscreenPolicy.ShouldHide(Primary, new[] { start, kazumiBehindStart }, ShellAttention.None));
         Assert.True(FullscreenPolicy.IsClickThrough(0x20));
         Assert.False(FullscreenPolicy.IsClickThrough(0));
         Assert.True(FullscreenPolicy.IsVisuallyBorderless(captionStyle: true, nonClientWidth: 0, nonClientHeight: 0));

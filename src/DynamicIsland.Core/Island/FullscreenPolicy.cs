@@ -38,8 +38,24 @@ public static class FullscreenPolicy
         "Shell_LightDismissOverlay" or "MultitaskingViewFrame" or "ForegroundStaging" => true,
         "Windows.Internal.Shell.TabProxyWindow" or "XamlExplorerHostIslandWindow" => true,
         "ApplicationManager_ImmersiveShellWindow" or "NotifyIconOverflowWindow" => true,
+        // Win11 隐藏图标浮层。窗口矩形经常被报成整块屏，类名只给资源管理器用。
+        "TopLevelWindowForOverflowXamlIsland" => true,
         _ => false
     };
+
+    /// <summary>
+    /// 开始菜单、搜索和任务中心。它们的窗口类（CoreWindow）普通 UWP 程序也用，
+    /// 所以只认这几个壳层进程。Kazumi 这类播放器不在里面。
+    /// </summary>
+    public static bool IsShellHostProcess(string? processName)
+    {
+        var process = HidePolicy.NormalizeProcess(processName);
+        return process is "startmenuexperiencehost" or "searchhost" or "searchapp" or "shellexperiencehost";
+    }
+
+    /// <summary>壳层浮层：类名已经能确定，或者进程是开始菜单 / 搜索 / 任务中心。</summary>
+    public static bool IsShellOverlay(string? className, string? processName) =>
+        IsShellOrDesktop(className) || IsShellHostProcess(processName);
 
     /// <summary>点得穿的窗口是遮罩，不是用户正在看的全屏。</summary>
     public static bool IsClickThrough(long extendedStyle) => (extendedStyle & 0x20) != 0;

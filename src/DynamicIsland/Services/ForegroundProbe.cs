@@ -17,7 +17,7 @@ static class ForegroundProbe
         IntPtr hwnd = NativeMethods.GetForegroundWindow();
         if (hwnd == IntPtr.Zero || hwnd == self)
             return default;
-        if (IsShell(hwnd))
+        if (IsShellOverlay(hwnd))
             return default;
         if (!NativeMethods.GetWindowRect(hwnd, out var rect))
             return default;
@@ -34,16 +34,17 @@ static class ForegroundProbe
         return new ForegroundSample(true, on, covers, ProcessName(hwnd));
     }
 
-    static bool IsShell(IntPtr hwnd)
+    static bool IsShellOverlay(IntPtr hwnd)
     {
-        var name = new StringBuilder(64);
+        var name = new StringBuilder(256);
         int length = NativeMethods.GetClassName(hwnd, name, name.Capacity);
-        if (length <= 0)
-            return false;
-        return name.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd";
+        var className = length > 0 ? name.ToString() : "";
+        if (FullscreenPolicy.IsShellOrDesktop(className))
+            return true;
+        return FullscreenPolicy.IsShellHostProcess(ProcessName(hwnd));
     }
 
-    static string ProcessName(IntPtr hwnd)
+    internal static string ProcessName(IntPtr hwnd)
     {
         NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
         if (pid == 0)

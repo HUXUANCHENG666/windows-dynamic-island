@@ -61,7 +61,8 @@ static class FullscreenProbe
     {
         bool visible = NativeMethods.IsWindowVisible(hwnd) && !NativeMethods.IsIconic(hwnd) && !IsCloaked(hwnd);
         var className = ClassName(hwnd);
-        bool shell = FullscreenPolicy.IsShellOrDesktop(className);
+        bool shell = FullscreenPolicy.IsShellOrDesktop(className)
+            || FullscreenPolicy.IsShellHostProcess(ForegroundProbe.ProcessName(hwnd));
         long extended = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE).ToInt64();
         bool clickThrough = FullscreenPolicy.IsClickThrough(extended);
         NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
@@ -105,7 +106,7 @@ static class FullscreenProbe
 
     static string ClassName(IntPtr hwnd)
     {
-        var name = new StringBuilder(64);
+        var name = new StringBuilder(256);
         int length = NativeMethods.GetClassName(hwnd, name, name.Capacity);
         return length > 0 ? name.ToString() : "";
     }
