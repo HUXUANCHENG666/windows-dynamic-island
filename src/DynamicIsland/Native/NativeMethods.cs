@@ -128,6 +128,15 @@ static class NativeMethods
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     public static extern bool Shell_NotifyIcon(uint message, ref NOTIFYICONDATA data);
 
+    [DllImport("shell32.dll")]
+    public static extern int Shell_NotifyIconGetRect(ref NOTIFYICONIDENTIFIER identifier, out RECT iconLocation);
+
+    [DllImport("user32.dll")]
+    public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool attach);
+
+    [DllImport("kernel32.dll")]
+    public static extern uint GetCurrentThreadId();
+
     [DllImport("user32.dll")]
     public static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr clip, MonitorEnumProc proc, IntPtr data);
 
@@ -199,6 +208,15 @@ static class NativeMethods
         public int dwInfoFlags;
         public Guid guidItem;
         public IntPtr hBalloonIcon;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct NOTIFYICONIDENTIFIER
+    {
+        public int cbSize;
+        public IntPtr hWnd;
+        public uint uID;
+        public Guid guidItem;
     }
 
     [DllImport("user32.dll")]
@@ -283,4 +301,29 @@ static class NativeMethods
 
     public static int SignedLow(IntPtr value) => unchecked((short)(value.ToInt64() & 0xFFFF));
     public static int SignedHigh(IntPtr value) => unchecked((short)((value.ToInt64() >> 16) & 0xFFFF));
+
+    /// <summary>
+    /// 托盘回调返回前，系统还允许这次点击把我们设成前台。
+    /// 只调 SetForegroundWindow 经常失败，附到当前前台线程上再设一次。
+    /// </summary>
+    public static void MakeForeground(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero)
+            return;
+        IntPtr current = GetForegroundWindow();
+        uint foregroundThread = GetWindowThreadProcessId(current, out _);
+        uint thisThread = GetCurrentThreadId();
+        bool attached = false;
+        try
+        {
+            if (foregroundThread != 0 && foregroundThread != thisThread)
+                attached = AttachThreadInput(foregroundThread, thisThread, true);
+            SetForegroundWindow(hwnd);
+        }
+        finally
+        {
+            if (attached)
+                AttachThreadInput(foregroundThread, thisThread, false);
+        }
+    }
 }

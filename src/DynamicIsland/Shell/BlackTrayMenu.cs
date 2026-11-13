@@ -1,7 +1,10 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Threading;
+using DynamicIsland.Core.Island;
 using DynamicIsland.Native;
 using DynamicIsland.Services;
 using DynamicIsland.Visuals;
@@ -11,11 +14,21 @@ namespace DynamicIsland.Shell;
 /// <summary>
 /// 托盘右键。系统菜单染不成岛的黑色，这里用一块同样的黑胶囊代替。
 /// 只放每天会碰到的几项，其余进设置窗口。
+/// 位置用物理像素 SetWindowPos。Left/Top 是 DIP，直接写光标坐标会在缩放屏上落到屏幕外。
 /// </summary>
 sealed class BlackTrayMenu : Window
 {
     readonly FontFamily _font = new(IslandFonts.Ui);
-    bool _ready;
+    readonly Border _card;
+    TrayAnchor _anchor;
+    double _dipW = TrayMenuPlacement.FallbackDipWidth;
+    double _dipH = TrayMenuPlacement.FallbackDipHeight;
+    long _shownAt;
+    bool _armed;
+    bool _closing;
+    bool _captureReady;
+    bool _logged;
+    DispatcherTimer? _arm;
 
     public BlackTrayMenu(IslandWindow island)
     {
@@ -26,10 +39,11 @@ sealed class BlackTrayMenu : Window
         Topmost = true;
         ShowActivated = true;
         ResizeMode = ResizeMode.NoResize;
-        SizeToContent = SizeToContent.WidthAndHeight;
+        SizeToContent = SizeToContent.Manual;
+        WindowStartupLocation = WindowStartupLocation.Manual;
         FontFamily = _font;
 
-        var card = new Border
+        _card = new Border
         {
             Background = Theme.IslandFill,
             CornerRadius = new CornerRadius(18),
@@ -38,7 +52,7 @@ sealed class BlackTrayMenu : Window
             BorderBrush = Theme.Hairline,
             BorderThickness = new Thickness(1)
         };
-        card.Effect = new System.Windows.Media.Effects.DropShadowEffect
+        _card.Effect = new System.Windows.Media.Effects.DropShadowEffect
         {
             Color = Colors.Black,
             BlurRadius = 22,
@@ -47,8 +61,8 @@ sealed class BlackTrayMenu : Window
             Opacity = 0.5
         };
         var stack = new StackPanel();
-        card.Child = stack;
-        Content = card;
+        _card.Child = stack;
+        Content = _card;
 
         AddCheck(stack, "隐身", island.Settings.Stealth, () => island.ToggleStealth());
         AddCheck(stack, "开机时启动", StartupRegistration.IsEnabled(), () =>
@@ -75,52 +89,190 @@ sealed class BlackTrayMenu : Window
         AddCommand(stack, "设置", () => island.OpenSettings());
         AddCommand(stack, "退出", () => island.ExitApp());
 
-        Deactivated += (_, _) =>
+        Deactivated += (_, _) => Dismiss(TrayDismiss.Deactivated);
+        PreviewKeyDown += (_, e) =>
         {
-            if (_ready)
-                Close();
-        };
-        SourceInitialized += (_, _) =>
-        {
-            var source = (System.Windows.Interop.HwndSource)PresentationSource.FromVisual(this)!;
-            long style = NativeMethods.GetWindowLongPtr(source.Handle, NativeMethods.GWL_EXSTYLE).ToInt64();
-            style |= NativeMethods.WS_EX_TOOLWINDOW;
-            style &= ~NativeMethods.WS_EX_APPWINDOW;
-            NativeMethods.SetWindowLongPtr(source.Handle, NativeMethods.GWL_EXSTYLE, new IntPtr(style));
+            if (e.Key != Key.Escape)
+                return;
+            e.Handled = true;
+            Dismiss(TrayDismiss.Escape);
         };
     }
 
-    public void ShowAtCursor()
+    public void ShowNear(TrayAnchor anchor)
     {
-        if (!NativeMethods.GetCursorPos(out var point))
+        _anchor = anchor;
+        _shownAt = Environment.TickCount64;
+        (_dipW, _dipH) = MeasureCard();
+        Width = _dipW;
+        Height = _dipH;
+        Opacity = 0;
+        try
         {
             Show();
+            ApplyPlacement();
+        }
+        finally
+        {
+            Opacity = 1;
+        }
+
+        var hwnd = new WindowInteropHelper(this).Handle;
+        NativeMethods.MakeForeground(hwnd);
+        Activate();
+        Focus();
+        TryCapture();
+        _arm = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+        _arm.Tick += (_, _) => OnArmTick();
+        _arm.Start();
+        Dispatcher.BeginInvoke(ApplyPlacement, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+    }
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        var hwnd = new WindowInteropHelper(this).Handle;
+        long style = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE).ToInt64();
+        style |= NativeMethods.WS_EX_TOOLWINDOW;
+        style &= ~NativeMethods.WS_EX_APPWINDOW;
+        style &= ~NativeMethods.WS_EX_NOACTIVATE;
+        NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE, new IntPtr(style));
+        ApplyPlacement();
+    }
+
+    protected override void OnContentRendered(EventArgs e)
+    {
+        base.OnContentRendered(e);
+        if (_card.ActualWidth < 1 || _card.ActualHeight < 1)
+            return;
+        if (Math.Abs(_card.ActualWidth - _dipW) < 1 && Math.Abs(_card.ActualHeight - _dipH) < 1)
+            return;
+        _dipW = _card.ActualWidth;
+        _dipH = _card.ActualHeight;
+        Width = _dipW;
+        Height = _dipH;
+        ApplyPlacement();
+    }
+
+    protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
+    {
+        base.OnDpiChanged(oldDpi, newDpi);
+        ApplyPlacement();
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        _closing = true;
+        _arm?.Stop();
+        ReleaseCapture();
+        base.OnClosed(e);
+    }
+
+    void OnArmTick()
+    {
+        if (_closing)
+        {
+            _arm?.Stop();
             return;
         }
 
-        Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        double width = DesiredSize.Width;
-        double height = DesiredSize.Height;
-        var monitors = MonitorEnumerator.Enumerate();
-        var monitor = monitors.FirstOrDefault(item =>
-                item.X <= point.X && point.X < item.X + item.Width && item.Y <= point.Y && point.Y < item.Y + item.Height)
-            ?? monitors.FirstOrDefault(item => item.IsPrimary)
-            ?? monitors.FirstOrDefault();
-        double left = point.X - width;
-        double top = point.Y - height - 6;
-        if (monitor != null)
+        var hwnd = new WindowInteropHelper(this).Handle;
+        NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
+            NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW);
+        TryCapture();
+        // 隐藏图标的浮层关掉时会把前台抢走。这里过一小会儿再拿回来，
+        // 等这次抢走结束，才开始把“失焦”当成用户点到了外面。
+        long age = Environment.TickCount64 - _shownAt;
+        if (age >= 200 && age < 260)
+            NativeMethods.MakeForeground(hwnd);
+        if (age < TrayMenuDismiss.DeactivateGraceMs)
+            return;
+        NativeMethods.MakeForeground(hwnd);
+        Activate();
+        TryCapture();
+        _arm?.Stop();
+        Dispatcher.BeginInvoke(() =>
         {
-            left = Math.Clamp(left, monitor.WorkX, Math.Max(monitor.WorkX, monitor.WorkX + monitor.WorkWidth - width));
-            if (top < monitor.WorkY)
-                top = point.Y + 6;
-            top = Math.Clamp(top, monitor.WorkY, Math.Max(monitor.WorkY, monitor.WorkY + monitor.WorkHeight - height));
+            if (!_closing)
+                _armed = true;
+        }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+    }
+
+    void ApplyPlacement()
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero || _closing)
+            return;
+        var screens = new List<TrayScreen>();
+        foreach (var monitor in MonitorEnumerator.Enumerate())
+        {
+            screens.Add(new TrayScreen(
+                monitor.X, monitor.Y, monitor.Width, monitor.Height,
+                monitor.WorkX, monitor.WorkY, monitor.WorkWidth, monitor.WorkHeight,
+                monitor.DpiX, monitor.DpiY, monitor.IsPrimary));
         }
 
-        Left = left;
-        Top = top;
-        Show();
-        Activate();
-        Dispatcher.BeginInvoke(() => _ready = true);
+        var rect = TrayMenuPlacement.Place(_anchor, _dipW, _dipH, screens);
+        NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, rect.X, rect.Y, rect.Width, rect.Height,
+            NativeMethods.SWP_SHOWWINDOW | NativeMethods.SWP_NOACTIVATE);
+        if (_logged)
+            return;
+        _logged = true;
+        Log.Info($"tray menu @ {rect.X},{rect.Y} {rect.Width}x{rect.Height}");
+    }
+
+    (double Width, double Height) MeasureCard()
+    {
+        _card.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        double width = _card.DesiredSize.Width;
+        double height = _card.DesiredSize.Height;
+        if (width < 1)
+            width = TrayMenuPlacement.FallbackDipWidth;
+        if (height < 1)
+            height = TrayMenuPlacement.FallbackDipHeight;
+        return (width, height);
+    }
+
+    void TryCapture()
+    {
+        if (_captureReady || _closing)
+            return;
+        if (!Mouse.Capture(_card, CaptureMode.SubTree))
+            return;
+        _captureReady = true;
+        Mouse.AddPreviewMouseDownOutsideCapturedElementHandler(_card, OnOutside);
+    }
+
+    void OnOutside(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton == MouseButton.Right)
+            return;
+        e.Handled = true;
+        Dismiss(TrayDismiss.Outside);
+    }
+
+    void ReleaseCapture()
+    {
+        if (_captureReady)
+        {
+            Mouse.RemovePreviewMouseDownOutsideCapturedElementHandler(_card, OnOutside);
+            _captureReady = false;
+        }
+
+        if (Mouse.Captured != null)
+            Mouse.Capture(null);
+    }
+
+    void Dismiss(TrayDismiss reason)
+    {
+        if (_closing)
+            return;
+        long age = Environment.TickCount64 - _shownAt;
+        if (!TrayMenuDismiss.ShouldDismiss(_armed, reason, age))
+            return;
+        _closing = true;
+        _arm?.Stop();
+        Close();
     }
 
     void AddCheck(StackPanel stack, string label, bool on, Action action)
@@ -151,7 +303,7 @@ sealed class BlackTrayMenu : Window
         row.MouseLeftButtonUp += (_, e) =>
         {
             e.Handled = true;
-            Close();
+            Dismiss(TrayDismiss.ItemChosen);
             action();
         };
         stack.Children.Add(row);

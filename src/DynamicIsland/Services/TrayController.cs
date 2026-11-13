@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Windows.Interop;
+using DynamicIsland.Core.Island;
 using DynamicIsland.Native;
 using DynamicIsland.Shell;
 
@@ -12,6 +13,7 @@ sealed class TrayController : IDisposable
     BlackTrayMenu? _menu;
     IntPtr _icon;
     bool _added;
+    long _openedAt = -1;
 
     public TrayController(IslandWindow window)
     {
@@ -45,18 +47,25 @@ sealed class TrayController : IDisposable
 
     IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        if (msg != NativeMethods.WM_TRAY)
-            return IntPtr.Zero;
-        int mouse = lParam.ToInt32();
-        if (mouse is NativeMethods.WM_RBUTTONUP or NativeMethods.WM_CONTEXTMENU)
+        if (msg == NativeMethods.WM_CONTEXTMENU || msg == NativeMethods.WM_RBUTTONUP)
         {
             ShowMenu();
             handled = true;
+            return IntPtr.Zero;
         }
-        else if (mouse == NativeMethods.WM_LBUTTONUP)
+
+        if (msg != NativeMethods.WM_TRAY)
+            return IntPtr.Zero;
+        switch (TrayMenuEvents.Decode(lParam.ToInt64()))
         {
-            _window.TrayClick();
-            handled = true;
+            case TrayPointerAction.OpenMenu:
+                ShowMenu();
+                handled = true;
+                break;
+            case TrayPointerAction.Primary:
+                _window.TrayClick();
+                handled = true;
+                break;
         }
 
         return IntPtr.Zero;
@@ -64,15 +73,52 @@ sealed class TrayController : IDisposable
 
     void ShowMenu()
     {
-        if (_menu != null)
+        long now = Environment.TickCount64;
+        if (!TrayMenuEvents.ShouldOpen(_openedAt < 0 ? -1 : now - _openedAt))
+            return;
+        _openedAt = now;
+        // 还在这次点击的回调里，系统才允许我们变成前台。晚了菜单会闪一下就没。
+        NativeMethods.MakeForeground(_source.Handle);
+
+        var previous = _menu;
+        _menu = null;
+        previous?.Close();
+
+        var menu = new BlackTrayMenu(_window);
+        _menu = menu;
+        menu.Closed += (_, _) =>
         {
-            _menu.Close();
-            _menu = null;
+            if (ReferenceEquals(_menu, menu))
+                _menu = null;
+        };
+        menu.ShowNear(ResolveAnchor());
+        NativeMethods.PostMessage(_source.Handle, NativeMethods.WM_NULL, IntPtr.Zero, IntPtr.Zero);
+    }
+
+    TrayAnchor ResolveAnchor()
+    {
+        bool hasIcon = false;
+        var icon = default(TrayAnchor);
+        var identifier = new NativeMethods.NOTIFYICONIDENTIFIER
+        {
+            cbSize = Marshal.SizeOf<NativeMethods.NOTIFYICONIDENTIFIER>(),
+            hWnd = _source.Handle,
+            uID = 1
+        };
+        if (NativeMethods.Shell_NotifyIconGetRect(ref identifier, out var rect) == 0)
+        {
+            int width = rect.Right - rect.Left;
+            int height = rect.Bottom - rect.Top;
+            if (width > 0 && height > 0 && width <= 256 && height <= 256)
+            {
+                hasIcon = true;
+                icon = new TrayAnchor(rect.Left, rect.Top, width, height);
+            }
         }
 
-        _menu = new BlackTrayMenu(_window);
-        _menu.Closed += (_, _) => _menu = null;
-        _menu.ShowAtCursor();
+        bool hasCursor = NativeMethods.GetCursorPos(out var point);
+        var cursor = hasCursor ? TrayAnchor.Point(point.X, point.Y) : default;
+        return TrayMenuPlacement.ChooseAnchor(hasIcon, icon, hasCursor, cursor);
     }
 
     void AddIcon(string tip)
