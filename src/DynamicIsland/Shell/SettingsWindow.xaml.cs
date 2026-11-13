@@ -78,6 +78,16 @@ public partial class SettingsWindow : Window
 
         Ui.Hover(CloseButton, Theme.Chip, Theme.ChipHover);
         Ui.Hover(HideCurrent, Theme.Chip, Theme.ChipHover);
+        DragHeader.Background = Brushes.Transparent;
+        Card.MouseLeftButtonDown += (_, e) =>
+        {
+            if (e.Handled || e.LeftButton != MouseButtonState.Pressed)
+                return;
+            if (IsInteractive(e.OriginalSource as DependencyObject))
+                return;
+            e.Handled = true;
+            BeginWindowDrag();
+        };
         CloseButton.MouseLeftButtonUp += (_, e) => { e.Handled = true; Close(); };
         NoticeToggle.MouseLeftButtonUp += (_, e) =>
         {
@@ -222,6 +232,52 @@ public partial class SettingsWindow : Window
             row.Child = grid;
             HideList.Children.Add(row);
         }
+    }
+
+    static bool IsInteractive(DependencyObject? source)
+    {
+        while (source != null)
+        {
+            if (source is TextBox)
+                return true;
+            if (source is FrameworkElement element && element.Cursor == Cursors.Hand)
+                return true;
+            source = VisualTreeHelper.GetParent(source);
+        }
+
+        return false;
+    }
+
+    void BeginWindowDrag()
+    {
+        try
+        {
+            DragMove();
+        }
+        catch (InvalidOperationException)
+        {
+            return;
+        }
+
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero || !NativeMethods.GetWindowRect(hwnd, out var rect))
+            return;
+        var screens = new List<TrayScreen>();
+        foreach (var monitor in MonitorEnumerator.Enumerate())
+        {
+            screens.Add(new TrayScreen(
+                monitor.X, monitor.Y, monitor.Width, monitor.Height,
+                monitor.WorkX, monitor.WorkY, monitor.WorkWidth, monitor.WorkHeight,
+                monitor.DpiX, monitor.DpiY, monitor.IsPrimary));
+        }
+
+        int width = rect.Right - rect.Left;
+        int height = rect.Bottom - rect.Top;
+        var placed = WindowDrag.KeepVisible(rect.Left, rect.Top, width, height, screens);
+        if (placed.X == rect.Left && placed.Y == rect.Top)
+            return;
+        NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, placed.X, placed.Y, 0, 0,
+            NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
     }
 
     void AddProcess(string raw)

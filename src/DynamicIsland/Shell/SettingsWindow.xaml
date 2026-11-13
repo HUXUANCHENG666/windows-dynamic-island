@@ -20,7 +20,7 @@
             <DropShadowEffect BlurRadius="28" ShadowDepth="10" Direction="270" Opacity="0.45" Color="Black"/>
         </Border.Effect>
         <StackPanel>
-                <Grid Margin="0,0,0,16">
+                <Grid x:Name="DragHeader" Margin="0,0,0,16" Cursor="SizeAll">
                     <StackPanel Orientation="Horizontal">
                         <Viewbox Width="18" Height="18" Margin="0,0,8,0" VerticalAlignment="Center">
                             <Path x:Name="Gear" StrokeThickness="1.4" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>

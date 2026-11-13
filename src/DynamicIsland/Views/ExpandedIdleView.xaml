@@ -15,6 +15,14 @@
                     <TextBlock x:Name="StopwatchText" Text="秒表" FontSize="13" VerticalAlignment="Center"/>
                 </StackPanel>
             </Border>
+            <Border x:Name="CameraChip" Height="32" CornerRadius="16" Padding="12,0" Margin="0,0,8,0">
+                <StackPanel Orientation="Horizontal">
+                    <Viewbox Width="14" Height="14" Margin="0,0,6,0" VerticalAlignment="Center">
+                        <Path x:Name="CameraIcon" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+                    </Viewbox>
+                    <TextBlock x:Name="CameraText" Text="摄像头" FontSize="13" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Border>
             <Border x:Name="FocusChip" Height="32" CornerRadius="16" Padding="12,0">
                 <StackPanel Orientation="Horizontal">
                     <Viewbox Width="14" Height="14" Margin="0,0,6,0" VerticalAlignment="Center">

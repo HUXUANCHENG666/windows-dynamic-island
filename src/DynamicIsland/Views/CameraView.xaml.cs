@@ -12,15 +12,27 @@ public partial class CameraView : UserControl
     int _sourceWidth;
     int _sourceHeight;
 
+    public event EventHandler? CloseRequested;
+
     public CameraView()
     {
         InitializeComponent();
         LiveText.FontFamily = new FontFamily(IslandFonts.Ui);
         Message.FontFamily = LiveText.FontFamily;
+        CloseText.FontFamily = LiveText.FontFamily;
         LiveText.Foreground = Theme.Title;
         Message.Foreground = Theme.Title;
+        CloseText.Foreground = Theme.Title;
         Dot.Fill = Theme.Danger;
         FrameHost.Background = Theme.Placeholder;
+        FrameHost.IsHitTestVisible = false;
+        Message.IsHitTestVisible = false;
+        Ui.Hover(CloseCamera, Theme.Chip, Theme.ChipHover);
+        CloseCamera.MouseLeftButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            CloseRequested?.Invoke(this, EventArgs.Empty);
+        };
         RenderOptions.SetBitmapScalingMode(Preview, BitmapScalingMode.HighQuality);
         SetLive(false);
     }

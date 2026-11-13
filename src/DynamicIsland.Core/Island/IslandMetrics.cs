@@ -18,7 +18,7 @@ public static class IslandMetrics
     public const double IdleCompactW = 130;
     public const double IdleCompactH = 37;
 
-    public const double IdleExpandedW = 312;
+    public const double IdleExpandedW = 392;
     public const double IdleExpandedH = 140;
 
     public const double MediaCompactW = 188;
