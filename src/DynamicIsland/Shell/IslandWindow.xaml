@@ -32,6 +32,7 @@
                 <views:NoticeView x:Name="ToastNotice"/>
                 <views:TranslateView x:Name="TranslateNotice"/>
                 <views:CameraView x:Name="CameraNotice"/>
+                <views:LiveTranslateView x:Name="LiveTranslateNotice"/>
             </Grid>
         </Grid>
     </Canvas>

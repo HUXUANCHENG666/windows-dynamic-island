@@ -23,6 +23,7 @@ static class Theme
     public static SolidColorBrush Hairline { get; } = Solid(Palette.Hairline);
     public static SolidColorBrush Placeholder { get; } = Solid(Palette.Placeholder);
     public static SolidColorBrush Danger { get; } = Solid(Palette.Danger);
+    public static SolidColorBrush Live { get; } = Solid(Palette.Live);
     public static SolidColorBrush Ink { get; } = Solid(Palette.Ink);
     public static LinearGradientBrush IslandFill { get; } = MakeFill();
 

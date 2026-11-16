@@ -9,7 +9,8 @@ public enum IslandMode
     Timer,
     Toast,
     Translate,
-    Camera
+    Camera,
+    LiveTranslate
 }
 
 public enum AmbientKind

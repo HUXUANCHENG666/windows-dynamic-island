@@ -22,6 +22,7 @@ public static class Palette
     public static readonly Rgba FillMid = new(8, 8, 8);
     public static readonly Rgba FillBottom = new(0, 0, 0);
     public static readonly Rgba Danger = new(255, 69, 58);
+    public static readonly Rgba Live = new(52, 199, 89);
     public static readonly Rgba Ink = new(0, 0, 0);
     public static readonly Rgba Shadow = new(0, 0, 0, 128);
 }

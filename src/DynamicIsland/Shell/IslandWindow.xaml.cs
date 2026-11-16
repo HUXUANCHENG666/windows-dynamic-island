@@ -8,6 +8,7 @@ using System.Windows.Threading;
 using DynamicIsland.Core.Camera;
 using DynamicIsland.Core.Formatting;
 using DynamicIsland.Core.Ipc;
+using DynamicIsland.Core.LiveTranslate;
 using DynamicIsland.Core.Island;
 using DynamicIsland.Core.Notifications;
 using DynamicIsland.Core.SystemState;
@@ -33,9 +34,11 @@ public partial class IslandWindow : Window
     readonly Translator _translator = new();
     readonly TranslateSession _translate = new();
     readonly CameraSession _camera;
+    readonly LiveTranslateService _liveTranslate;
     readonly FullscreenWatcher _watcher = new();
     readonly DynamicIsland.Core.Media.TimelineEstimator _timeline = new();
     CancellationTokenSource? _translateCts;
+    CancellationTokenSource? _ctsLive;
     TrayController? _tray;
     DispatcherTimer? _slow;
     DispatcherTimer? _topmost;
@@ -93,6 +96,7 @@ public partial class IslandWindow : Window
     public DynamicIsland.Core.Settings.AppSettings Settings => _settings.Settings;
     public string? ForeignProcess { get; private set; }
     public bool CameraIsOpen => _deviceOpen || _director.CameraOpen || _director.Mode == IslandMode.Camera;
+    public bool LiveTranslateIsOpen => _liveTranslate.IsRunning || _director.LiveTranslateOpen || _director.Mode == IslandMode.LiveTranslate;
     public StreamGeometry? HitGeometry { get; set; }
     public StreamGeometry? SlopGeometry { get; set; }
 
@@ -134,6 +138,9 @@ public partial class IslandWindow : Window
         _media = new MediaService(Dispatcher);
         _camera = new CameraSession(Dispatcher);
         _camera.Frame += (pixels, width, height) => CameraNotice.SetFrame(pixels, width, height);
+        _liveTranslate = new LiveTranslateService(Dispatcher);
+        _liveTranslate.Status += OnLiveTranslateStatus;
+        _liveTranslate.Transcript += OnLiveTranslateTranscript;
         _volume = new VolumeService(Dispatcher);
         _power = new PowerService(Dispatcher);
         _notifications = new NotificationCenterService(Dispatcher);
@@ -338,6 +345,7 @@ public partial class IslandWindow : Window
     {
         SaveTimer();
         ReleaseCamera(collapseUi: false);
+        StopLiveTranslate(collapseUi: false);
         _tray?.Dispose();
         _tray = null;
         _media.Dispose();
@@ -544,8 +552,11 @@ public partial class IslandWindow : Window
         _settingsWindow?.Close();
         SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
         _translateCts?.Cancel();
+        _ctsLive?.Cancel();
         _notifications.Dispose();
         ReleaseCamera(collapseUi: false);
+        StopLiveTranslate(collapseUi: false);
+        _liveTranslate.Dispose();
         _watcher.Dispose();
         _translator.Dispose();
         if (_clipboardHooked)
@@ -595,7 +606,10 @@ public partial class IslandWindow : Window
         ExpandedIdle.StopwatchRequested += (_, _) => OpenStopwatch();
         ExpandedIdle.FocusRequested += (_, _) => OpenCountdown(25);
         ExpandedIdle.CameraRequested += (_, _) => ToggleCamera();
+        ExpandedIdle.LiveTranslateRequested += (_, _) => ToggleLiveTranslate();
         CameraNotice.CloseRequested += (_, _) => ToggleCamera();
+        LiveTranslateNotice.CloseRequested += (_, _) => ToggleLiveTranslate();
+        LiveTranslateNotice.CancelRequested += (_, _) => _liveTranslate.CancelDownload();
         ExpandedTimer.ToggleRequested += (_, _) =>
         {
             if (_timer.IsCompleted)
@@ -1030,6 +1044,7 @@ public partial class IslandWindow : Window
         ToastNotice.SetVertical(vertical);
         TranslateNotice.SetVertical(vertical);
         CameraNotice.SetVertical(vertical);
+        LiveTranslateNotice.SetVertical(vertical);
     }
 
     void EvaluateHide()
@@ -1106,6 +1121,7 @@ public partial class IslandWindow : Window
     async Task RunTranslationAsync(TranslateRequest request)
     {
         _translateCts?.Cancel();
+        _ctsLive?.Cancel();
         _translateCts = new CancellationTokenSource();
         var token = _translateCts.Token;
         TranslateNotice.ShowBusy(request.Clipped);
@@ -1269,9 +1285,107 @@ public partial class IslandWindow : Window
         NativeMethods.SetForegroundWindow(target);
     }
 
+    public void ToggleLiveTranslate()
+    {
+        if (LiveTranslateIsOpen)
+        {
+            StopLiveTranslate(collapseUi: true);
+            _settingsWindow?.RefreshFromIsland();
+            Nudge();
+            return;
+        }
+
+        if (CameraIsOpen)
+            ReleaseCamera(collapseUi: false);
+        _ = StartLiveTranslateAsync();
+    }
+
+    async Task StartLiveTranslateAsync()
+    {
+        StopLiveTranslate(collapseUi: false);
+        _director.SetLiveTranslate(true);
+        LiveTranslateNotice.ClearSubtitle();
+        LiveTranslateNotice.ShowStatus(LiveTranslateCopy.LoadingModel, working: true, progress: null, canCancel: false);
+        Log.Info("live-translate start");
+        _liveTranslate.Start();
+        Nudge();
+        await Task.CompletedTask;
+    }
+
+    void StopLiveTranslate(bool collapseUi)
+    {
+        _ctsLive?.Cancel();
+        _liveTranslate.Stop();
+        if (collapseUi && (_director.LiveTranslateOpen || _director.Mode == IslandMode.LiveTranslate))
+            _director.SetLiveTranslate(false);
+        _settingsWindow?.RefreshFromIsland();
+        Nudge();
+    }
+
+    void OnLiveTranslateStatus(LiveTranslateSnapshot snapshot)
+    {
+        if (snapshot.Phase == LiveTranslatePhase.Off && !_director.LiveTranslateOpen)
+            return;
+        bool working = snapshot.Phase is LiveTranslatePhase.Downloading or LiveTranslatePhase.Loading
+            or LiveTranslatePhase.Listening or LiveTranslatePhase.Recognizing;
+        LiveTranslateNotice.ShowStatus(snapshot.Message, working, snapshot.Progress, snapshot.CanCancel);
+        if (!_director.LiveTranslateOpen && snapshot.Phase is not LiveTranslatePhase.Off)
+            _director.SetLiveTranslate(true);
+        Nudge();
+    }
+
+    void OnLiveTranslateTranscript(string text, string? language)
+    {
+        if (!_director.LiveTranslateOpen)
+            return;
+        var plan = LiveTranslatePolicy.Plan(text, language);
+        if (plan.Decision == LiveTranslateDecision.Empty)
+            return;
+        if (plan.Decision == LiveTranslateDecision.AlreadyChinese)
+        {
+            LiveTranslateNotice.ShowSubtitle(plan.DisplayText, null, alreadyChinese: true);
+            Nudge();
+            return;
+        }
+
+        if (plan.Request is not { } request)
+            return;
+        LiveTranslateNotice.ShowStatus(LiveTranslateCopy.Translating, working: true, progress: null, canCancel: false);
+        Nudge();
+        _ = TranslateLiveAsync(request, plan.DisplayText);
+    }
+
+    async Task TranslateLiveAsync(TranslateRequest request, string original)
+    {
+        try
+        {
+            _ctsLive?.Cancel();
+            _ctsLive = new CancellationTokenSource();
+            var token = _ctsLive.Token;
+            var result = await _translator.TranslateAsync(request, token).ConfigureAwait(true);
+            if (token.IsCancellationRequested || !_director.LiveTranslateOpen)
+                return;
+            LiveTranslateNotice.ShowSubtitle(LiveTranslatePolicy.ForIsland(result), original, alreadyChinese: false);
+            Nudge();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Log.Error("live-translate-text", ex);
+            if (!_director.LiveTranslateOpen)
+                return;
+            LiveTranslateNotice.ShowSubtitle(original, null, alreadyChinese: false);
+            LiveTranslateNotice.ShowStatus(LiveTranslateCopy.TranslateFailed, working: true, progress: null, canCancel: false);
+            Nudge();
+        }
+    }
+
     async Task StartCameraAsync()
     {
         ReleaseCamera(collapseUi: false);
+        StopLiveTranslate(collapseUi: false);
         _director.SetCamera(true);
         CameraNotice.ShowWaiting();
         Nudge();

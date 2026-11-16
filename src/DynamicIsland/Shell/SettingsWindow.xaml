@@ -45,6 +45,19 @@
                     </Grid>
                 </Border>
 
+
+                <TextBlock x:Name="LiveLabel" Text="实时翻译" FontSize="12" Margin="2,0,0,8"/>
+                <Border x:Name="LiveRow" CornerRadius="16" Padding="14,12" Margin="0,0,0,16">
+                    <Grid>
+                        <StackPanel Margin="0,0,56,0">
+                            <TextBlock x:Name="LiveTitle" Text="把系统正在播放的声音译成中文" FontSize="14"/>
+                            <TextBlock x:Name="LiveDetail" Text="捕获的是系统正在播放的视频或音乐里的人声，不是麦克风。第一次需要下载识别模型，之后保存在本机。关闭后不再听声音。" FontSize="12" Margin="0,3,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <Border x:Name="LiveToggle" Width="44" Height="26" CornerRadius="13" HorizontalAlignment="Right" VerticalAlignment="Center" Cursor="Hand">
+                            <Border x:Name="LiveKnob" Width="20" Height="20" CornerRadius="10" HorizontalAlignment="Left" Margin="3,0,0,0"/>
+                        </Border>
+                    </Grid>
+                </Border>
                 <TextBlock x:Name="DirectionLabel" Text="翻译方向" FontSize="12" Margin="2,0,0,8"/>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
                     <Border x:Name="DirAuto" CornerRadius="14" Padding="12,7" Margin="0,0,8,0" Cursor="Hand">
@@ -106,6 +119,9 @@
                     </Border>
                     <Border x:Name="ActCamera" CornerRadius="14" Padding="12,8" Margin="0,0,8,8" Cursor="Hand">
                         <TextBlock x:Name="ActCameraText" Text="摄像头" FontSize="13"/>
+                    </Border>
+                    <Border x:Name="ActLiveTranslate" CornerRadius="14" Padding="12,8" Margin="0,0,8,8" Cursor="Hand">
+                        <TextBlock x:Name="ActLiveTranslateText" Text="实时翻译" FontSize="13"/>
                     </Border>
                     <Border x:Name="ActStopwatch" CornerRadius="14" Padding="12,8" Margin="0,0,8,8" Cursor="Hand">
                         <TextBlock x:Name="ActStopwatchText" Text="秒表" FontSize="13"/>

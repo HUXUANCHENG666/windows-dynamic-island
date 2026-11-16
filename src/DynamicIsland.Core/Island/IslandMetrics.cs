@@ -48,6 +48,9 @@ public static class IslandMetrics
     public const double CameraW = 392;
     public const double CameraH = 248;
 
+    public const double LiveTranslateW = 420;
+    public const double LiveTranslateH = 168;
+
     public const double VerticalWindowWidth = 420;
     public const double VerticalWindowHeight = 560;
 
@@ -81,6 +84,9 @@ public static class IslandMetrics
     public const double VCameraW = 248;
     public const double VCameraH = 420;
 
+    public const double VLiveTranslateW = 236;
+    public const double VLiveTranslateH = 320;
+
     public static readonly IslandFrame StealthDot = new(12, 12, 6, 2);
 
     public static (double Width, double Height) HostDip(IslandOrientation orientation) =>
@@ -110,6 +116,7 @@ public static class IslandMetrics
         IslandMode.Toast => Card(ToastW, ToastH, 40, 3.3),
         IslandMode.Translate => Card(TranslateW, TranslateH, 42, 4.1),
         IslandMode.Camera => Card(CameraW, CameraH, 48, 4.4),
+        IslandMode.LiveTranslate => Card(LiveTranslateW, LiveTranslateH, 42, 4.1),
         _ => Pill(IdleCompactW, IdleCompactH)
     };
 
@@ -129,6 +136,7 @@ public static class IslandMetrics
         IslandMode.Toast => Card(VToastW, VToastH, 36, 3.3),
         IslandMode.Translate => Card(VTranslateW, VTranslateH, 40, 4.1),
         IslandMode.Camera => Card(VCameraW, VCameraH, 44, 4.4),
+        IslandMode.LiveTranslate => Card(VLiveTranslateW, VLiveTranslateH, 40, 4.1),
         _ => Pill(VIdleCompactW, VIdleCompactH)
     };
 

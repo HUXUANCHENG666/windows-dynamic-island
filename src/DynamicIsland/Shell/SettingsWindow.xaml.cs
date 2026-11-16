@@ -35,6 +35,7 @@ public partial class SettingsWindow : Window
         NoticeLabel.Foreground = Theme.Quiet;
         DirectionLabel.Foreground = Theme.Quiet;
         HideLabel.Foreground = Theme.Quiet;
+        LiveLabel.Foreground = Theme.Quiet;
         ToolLabel.Foreground = Theme.Quiet;
         NoticeRow.Background = Theme.Chip;
         NoticeTitle.Foreground = Theme.Title;
@@ -42,6 +43,12 @@ public partial class SettingsWindow : Window
         NoticeDetail.Foreground = Theme.Artist;
         NoticeDetail.FontFamily = _font;
         NoticeKnob.Background = Theme.Title;
+        LiveRow.Background = Theme.Chip;
+        LiveTitle.Foreground = Theme.Title;
+        LiveTitle.FontFamily = _font;
+        LiveDetail.Foreground = Theme.Artist;
+        LiveDetail.FontFamily = _font;
+        LiveKnob.Background = Theme.Title;
         HideHint.Foreground = Theme.Artist;
         HideHint.FontFamily = _font;
         HideNameBox.Background = Theme.Chip;
@@ -72,6 +79,7 @@ public partial class SettingsWindow : Window
         StyleChip(ActTranslate, ActTranslateText);
         StyleChip(ActRecall, ActRecallText);
         StyleChip(ActCamera, ActCameraText);
+        StyleChip(ActLiveTranslate, ActLiveTranslateText);
         StyleChip(ActStopwatch, ActStopwatchText);
         StyleChip(ActFocus, ActFocusText);
         StyleChip(ActLog, ActLogText);
@@ -93,6 +101,12 @@ public partial class SettingsWindow : Window
         {
             e.Handled = true;
             _island.ToggleNotificationCenter();
+            RefreshFromIsland();
+        };
+        LiveToggle.MouseLeftButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            _island.ToggleLiveTranslate();
             RefreshFromIsland();
         };
         HideName.TextChanged += (_, _) =>
@@ -133,6 +147,12 @@ public partial class SettingsWindow : Window
             _island.ToggleCamera();
             RefreshFromIsland();
         };
+        ActLiveTranslate.MouseLeftButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            _island.ToggleLiveTranslate();
+            RefreshFromIsland();
+        };
         ActStopwatch.MouseLeftButtonUp += (_, e) => { e.Handled = true; _island.OpenStopwatch(); };
         ActFocus.MouseLeftButtonUp += (_, e) => { e.Handled = true; _island.OpenCountdown(25); };
         ActLog.MouseLeftButtonUp += (_, e) => { e.Handled = true; _island.OpenLog(); };
@@ -167,6 +187,12 @@ public partial class SettingsWindow : Window
         HideCurrentText.Text = suggest ? $"把刚才的 {_suggested} 加入名单" : "";
 
         ActCameraText.Text = _island.CameraIsOpen ? "关闭摄像头" : "摄像头";
+        ActLiveTranslateText.Text = _island.LiveTranslateIsOpen ? "关闭翻译" : "实时翻译";
+        bool live = _island.LiveTranslateIsOpen;
+        LiveKnob.HorizontalAlignment = live ? HorizontalAlignment.Right : HorizontalAlignment.Left;
+        LiveKnob.Margin = live ? new Thickness(0, 0, 3, 0) : new Thickness(3, 0, 0, 0);
+        LiveToggle.Background = live ? Theme.Title : Theme.Track;
+        LiveKnob.Background = live ? Theme.Ink : Theme.Title;
         ActRecall.Opacity = _island.HasStoredTranslation ? 1 : 0.4;
         ActRecall.IsHitTestVisible = _island.HasStoredTranslation;
 

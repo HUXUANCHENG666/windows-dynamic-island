@@ -127,6 +127,7 @@ sealed class IslandAnimator
         var timer = IslandMetrics.FrameFor(IslandMode.Timer, true, orientation);
         var translate = IslandMetrics.FrameFor(IslandMode.Translate, true, orientation);
         var camera = IslandMetrics.FrameFor(IslandMode.Camera, true, orientation);
+        var live = IslandMetrics.FrameFor(IslandMode.LiveTranslate, true, orientation);
         PlaceFixed(window.ExpandedIdle, Presence(IslandMode.Idle) * expandFade, openShift, allowBlur,
             idle.Width, idle.Height, snapW, snapH);
         PlaceFixed(window.ExpandedMedia, Presence(IslandMode.Media) * expandFade, openShift, allowBlur,
@@ -137,6 +138,8 @@ sealed class IslandAnimator
             translate.Width, translate.Height, snapW, snapH);
         PlaceFixed(window.CameraNotice, Presence(IslandMode.Camera) * expandFade, openShift, allowBlur,
             camera.Width, camera.Height, snapW, snapH);
+        PlaceFixed(window.LiveTranslateNotice, Presence(IslandMode.LiveTranslate) * expandFade, openShift, allowBlur,
+            live.Width, live.Height, snapW, snapH);
         PlaceStretch(window.CompactMedia, Presence(IslandMode.Media) * collapseFade, shutShift, allowBlur, snapW, snapH);
         PlaceStretch(window.CompactTimer, Presence(IslandMode.Timer) * collapseFade, shutShift, allowBlur, snapW, snapH);
         PlaceFill(window.VolumeNotice, Presence(IslandMode.Volume) * expandFade, openShift, allowBlur, snapW, snapH);
