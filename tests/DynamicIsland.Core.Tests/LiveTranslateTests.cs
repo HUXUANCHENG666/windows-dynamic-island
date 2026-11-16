@@ -101,6 +101,10 @@ public class LiveTranslateTests
         Assert.DoesNotContain("Hello", LiveTranslateCopy.NativeLibraryMissing);
         Assert.DoesNotContain("Hello", LiveTranslateCopy.NativeLibraryLoadFailed);
         Assert.DoesNotContain("Hello", LiveTranslateCopy.CpuNotSupported);
+        Assert.DoesNotContain("Hello", LiveTranslateCopy.CaptureNoDevice);
+        Assert.DoesNotContain("Hello", LiveTranslateCopy.CaptureDenied);
+        Assert.DoesNotContain("Hello", LiveTranslateCopy.CaptureFormatUnsupported);
+        Assert.DoesNotContain("Hello", LiveTranslateCopy.CaptureFailedGeneric);
     }
 
     [Fact]
@@ -137,6 +141,49 @@ public class LiveTranslateTests
         Assert.False(LiveTranslateCopy.TryNativeLibraryError(
             new InvalidOperationException("Failed to load the whisper model."), out var model));
         Assert.Equal(LiveTranslateCopy.ModelLoadFailed, model);
+    }
+
+    [Fact]
+    public void WaveFormat_DetectsExtensibleIeeeFloatUsedByWindowsMix()
+    {
+        Assert.True(WaveFormatKind.TryDetect(WaveFormatKind.EncodingIeeeFloat, 32, null, out var ieee));
+        Assert.Equal(WaveKind.Float32, ieee);
+        Assert.True(WaveFormatKind.TryDetect(WaveFormatKind.EncodingPcm, 16, null, out var pcm));
+        Assert.Equal(WaveKind.Pcm16, pcm);
+
+        Assert.True(WaveFormatKind.TryDetect(
+            WaveFormatKind.EncodingExtensible, 32, WaveFormatKind.SubtypeIeeeFloat, out var extFloat));
+        Assert.Equal(WaveKind.Float32, extFloat);
+        Assert.True(WaveFormatKind.TryDetect(
+            WaveFormatKind.EncodingExtensible, 32, null, out var extBare));
+        Assert.Equal(WaveKind.Float32, extBare);
+        Assert.True(WaveFormatKind.TryDetect(
+            WaveFormatKind.EncodingExtensible, 16, WaveFormatKind.SubtypePcm, out var extPcm));
+        Assert.Equal(WaveKind.Pcm16, extPcm);
+
+        Assert.False(WaveFormatKind.TryDetect(WaveFormatKind.EncodingExtensible, 32, WaveFormatKind.SubtypePcm, out _));
+        Assert.False(WaveFormatKind.TryDetect(WaveFormatKind.EncodingIeeeFloat, 16, null, out _));
+        Assert.False(WaveFormatKind.TryDetect(WaveFormatKind.EncodingPcm, 24, null, out _));
+    }
+
+    [Fact]
+    public void CaptureError_MapsDeviceAndPermissionFailures()
+    {
+        Assert.Equal(
+            LiveTranslateCopy.CaptureFormatUnsupported,
+            LiveTranslateCopy.MessageForCaptureException(new InvalidOperationException(LiveTranslateCopy.CaptureFormatUnsupported)));
+        Assert.Equal(
+            LiveTranslateCopy.CaptureNoDevice,
+            LiveTranslateCopy.MessageForCaptureException(new Exception("Element not found") { HResult = unchecked((int)0x80070490) }));
+        Assert.Equal(
+            LiveTranslateCopy.CaptureFailed,
+            LiveTranslateCopy.MessageForCaptureException(new Exception("AUDCLNT_E_DEVICE_IN_USE") { HResult = unchecked((int)0x8889000A) }));
+        Assert.Equal(
+            LiveTranslateCopy.CaptureDenied,
+            LiveTranslateCopy.MessageForCaptureException(new Exception("Access is denied") { HResult = unchecked((int)0x80070005) }));
+        Assert.Equal(
+            LiveTranslateCopy.CaptureFailedGeneric,
+            LiveTranslateCopy.MessageForCaptureException(new InvalidOperationException("something else")));
     }
 
     [Fact]

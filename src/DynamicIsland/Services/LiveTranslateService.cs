@@ -164,7 +164,7 @@ sealed class LiveTranslateService : IDisposable
 
                 Log.Info("live-translate model ready");
                 Publish(new LiveTranslateSnapshot(LiveTranslatePhase.Listening, LiveTranslateCopy.Listening, null, false));
-                _capture.Start();
+                StartCapture();
                 return;
             }
         }
@@ -186,6 +186,17 @@ sealed class LiveTranslateService : IDisposable
                 Publish(new LiveTranslateSnapshot(LiveTranslatePhase.Error, LiveTranslateCopy.DownloadFailed, null, false));
             }
         }
+    }
+
+    void StartCapture()
+    {
+        if (_dispatcher.CheckAccess())
+        {
+            _capture.Start();
+            return;
+        }
+
+        _dispatcher.Invoke(() => _capture.Start());
     }
 
     void OnAudio(float[] samples)

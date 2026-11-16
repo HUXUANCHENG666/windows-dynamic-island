@@ -128,6 +128,47 @@ public static class LiveTranslateCopy
     public const string SwitchingSource = "正在换一个下载源…";
     public const string AlreadyChinese = "已是中文";
     public const string CaptureFailed = "无法捕获系统声音。有的游戏会独占音频设备。";
+    public const string CaptureNoDevice = "没有找到正在使用的播放设备。";
+    public const string CaptureDenied = "系统没有允许捕获播放声音。请在设置里允许桌面应用使用麦克风后再试。";
+    public const string CaptureFormatUnsupported = "播放设备的声音格式暂不支持。";
+    public const string CaptureFailedGeneric = "无法捕获系统声音。请检查系统声音，并在设置里允许桌面应用使用麦克风后再试。";
+
+    public static string MessageForCaptureException(Exception ex)
+    {
+        if (ex is InvalidOperationException && ex.Message == CaptureFormatUnsupported)
+            return CaptureFormatUnsupported;
+
+        var text = ex.ToString();
+        uint hr = unchecked((uint)ex.HResult);
+        if (HasHResult(hr, 0x80070490, 0x80070002) ||
+            text.Contains("Element not found", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("NoEndpoint", StringComparison.OrdinalIgnoreCase))
+            return CaptureNoDevice;
+
+        if (HasHResult(hr, 0x8889000A, 0x88890010) ||
+            text.Contains("DEVICE_IN_USE", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("exclusive", StringComparison.OrdinalIgnoreCase))
+            return CaptureFailed;
+
+        if (HasHResult(hr, 0x80070005) ||
+            text.Contains("Access is denied", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("E_ACCESSDENIED", StringComparison.OrdinalIgnoreCase))
+            return CaptureDenied;
+
+        return CaptureFailedGeneric;
+    }
+
+    static bool HasHResult(uint actual, params uint[] codes)
+    {
+        foreach (var code in codes)
+        {
+            if (actual == code)
+                return true;
+        }
+
+        return false;
+    }
+
     public const string DownloadFailed = "识别模型下载失败。请检查网络后重试。";
     public const string Cancelled = "已取消下载。";
     public const string TranslateFailed = "这一句没有译成。";

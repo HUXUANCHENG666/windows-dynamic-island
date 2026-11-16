@@ -54,13 +54,29 @@ sealed class LoopbackCapture : IDisposable
             var device = _devices.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
             var capture = new WasapiLoopbackCapture(device);
             var format = capture.WaveFormat;
-            var kind = format.Encoding == WaveFormatEncoding.IeeeFloat
-                ? WaveKind.Float32
-                : format.Encoding == WaveFormatEncoding.Pcm && format.BitsPerSample == 16
-                    ? WaveKind.Pcm16
-                    : throw new InvalidOperationException(LiveTranslateCopy.CaptureFailed);
-            if (format.Channels <= 0 || format.SampleRate < 8000)
-                throw new InvalidOperationException(LiveTranslateCopy.CaptureFailed);
+            Guid? subFormat = format is WaveFormatExtensible extensible ? extensible.SubFormat : null;
+            if (format is WaveFormatExtensible rawExtensible)
+            {
+                try
+                {
+                    var standard = rawExtensible.ToStandardWaveFormat();
+                    if (standard != null)
+                        format = standard;
+                }
+                catch
+                {
+                    // 转不成标准格式就继续用原来的标签和子类型判断。
+                }
+            }
+
+            Log.Info(
+                $"live-translate capture format encoding={(int)capture.WaveFormat.Encoding} " +
+                $"rate={format.SampleRate} ch={format.Channels} bits={format.BitsPerSample}");
+            if (format.Channels <= 0 || format.SampleRate < 8000 ||
+                !WaveFormatKind.TryDetect((int)format.Encoding, format.BitsPerSample, subFormat, out var kind))
+            {
+                throw new InvalidOperationException(LiveTranslateCopy.CaptureFormatUnsupported);
+            }
 
             _resampler = new StreamResampler(format.SampleRate, format.Channels, kind);
             capture.DataAvailable += OnData;
@@ -76,7 +92,7 @@ sealed class LoopbackCapture : IDisposable
             Log.Error("live-translate-capture", ex);
             CloseLocked();
             _running = false;
-            Failed?.Invoke(LiveTranslateCopy.CaptureFailed);
+            Failed?.Invoke(LiveTranslateCopy.MessageForCaptureException(ex));
         }
     }
 
