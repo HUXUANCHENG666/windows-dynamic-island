@@ -125,10 +125,18 @@ sealed class LiveTranslateService : IDisposable
                 try
                 {
                     factory = WhisperFactory.FromPath(WhisperModelStore.FilePath);
+                    // FromPath 在原生库加载成功后仍可能接受一份损坏的模型，真正读文件发生在建处理器时。
+                    factory.CreateBuilder();
                 }
                 catch (Exception ex)
                 {
                     Log.Error("live-translate-model", ex);
+                    if (LiveTranslateCopy.TryNativeLibraryError(ex, out var nativeMessage))
+                    {
+                        Publish(new LiveTranslateSnapshot(LiveTranslatePhase.Error, nativeMessage, null, false));
+                        return;
+                    }
+
                     WhisperModelStore.TryDeleteCorrupt();
                     if (retriedLoad)
                     {

@@ -29,8 +29,14 @@ jobs:
       - name: Zip
         shell: pwsh
         run: |
-          Copy-Item packaging/使用说明.txt "${{ runner.temp }}/publish/readme.txt"
-          Compress-Archive -Path "${{ runner.temp }}/publish/DynamicIsland.exe","${{ runner.temp }}/publish/readme.txt" -DestinationPath DynamicIsland-win-x64.zip
+          $publish = "${{ runner.temp }}/publish"
+          Copy-Item packaging/使用说明.txt "$publish/readme.txt"
+          if (-not (Test-Path "$publish/runtimes/win-x64/whisper.dll")) {
+            throw "whisper.dll was not copied beside the published exe."
+          }
+          # Whisper.net looks for natives at ./runtimes/win-x64 next to the exe.
+          # The single-file exe does not extract those files there, so the folder must ship in the zip.
+          Compress-Archive -Path "$publish/DynamicIsland.exe","$publish/readme.txt","$publish/runtimes" -DestinationPath DynamicIsland-win-x64.zip
       - uses: actions/upload-artifact@v4
         with:
           name: DynamicIsland-win-x64

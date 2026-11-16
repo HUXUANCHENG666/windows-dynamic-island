@@ -133,6 +133,41 @@ public static class LiveTranslateCopy
     public const string TranslateFailed = "这一句没有译成。";
     public const string ModelCorrupt = "识别模型不完整，正在重新下载…";
     public const string ModelLoadFailed = "识别模型无法加载。请关掉翻译后再试一次。";
+    public const string NativeLibraryMissing = "识别组件没有装完整。请重新解压整个测试包，让 runtimes 文件夹和程序放在一起。";
+    public const string NativeLibraryLoadFailed = "识别组件加载失败。请安装微软 Visual C++ 可再发行程序包（x64）后再试。";
+    public const string CpuNotSupported = "这台电脑的处理器暂不支持当前识别组件。";
+
+    /// <summary>
+    /// 原生识别库没找到或没加载成功时，不应删模型、也不该再下一次。
+    /// </summary>
+    public static bool TryNativeLibraryError(Exception ex, out string message)
+    {
+        var text = ex.ToString();
+        if (ex is PlatformNotSupportedException
+            || text.Contains("AVX is not supported", StringComparison.OrdinalIgnoreCase))
+        {
+            message = CpuNotSupported;
+            return true;
+        }
+
+        if (ex is FileNotFoundException
+            || text.Contains("Native Library not found", StringComparison.OrdinalIgnoreCase))
+        {
+            message = NativeLibraryMissing;
+            return true;
+        }
+
+        if (ex is DllNotFoundException
+            || ex is BadImageFormatException
+            || text.Contains("Failed to load native whisper library", StringComparison.OrdinalIgnoreCase))
+        {
+            message = NativeLibraryLoadFailed;
+            return true;
+        }
+
+        message = ModelLoadFailed;
+        return false;
+    }
 
     public static string Downloading(double progress) => Downloading(progress, 0, null);
 

@@ -98,6 +98,9 @@ public class LiveTranslateTests
         Assert.DoesNotContain("Hello", LiveTranslateCopy.Connecting);
         Assert.Equal("识别模型不完整，正在重新下载…", LiveTranslateCopy.ModelCorrupt);
         Assert.DoesNotContain("Hello", LiveTranslateCopy.ModelLoadFailed);
+        Assert.DoesNotContain("Hello", LiveTranslateCopy.NativeLibraryMissing);
+        Assert.DoesNotContain("Hello", LiveTranslateCopy.NativeLibraryLoadFailed);
+        Assert.DoesNotContain("Hello", LiveTranslateCopy.CpuNotSupported);
     }
 
     [Fact]
@@ -111,6 +114,29 @@ public class LiveTranslateTests
         Assert.True(WhisperModelFile.LooksValid(57_000_000, "ggmf"u8));
         Assert.True(WhisperModelFile.LooksValid(57_000_000, "ggjt"u8));
         Assert.True(WhisperModelFile.LooksValid(57_000_000, "GGUF"u8));
+        Assert.True(WhisperModelFile.LooksValid(59_707_625, "lmgg"u8));
+        Assert.True(WhisperModelFile.LooksValid(57_000_000, "fmgg"u8));
+        Assert.True(WhisperModelFile.LooksValid(57_000_000, "tjgg"u8));
+    }
+
+    [Fact]
+    public void LoadError_MapsNativeLibraryFailures_WithoutTreatingAsCorruptModel()
+    {
+        Assert.True(LiveTranslateCopy.TryNativeLibraryError(
+            new FileNotFoundException("Native Library not found in default paths."), out var missing));
+        Assert.Equal(LiveTranslateCopy.NativeLibraryMissing, missing);
+
+        Assert.True(LiveTranslateCopy.TryNativeLibraryError(
+            new Exception("Failed to load native whisper library. Error: The specified module could not be found."), out var loadFailed));
+        Assert.Equal(LiveTranslateCopy.NativeLibraryLoadFailed, loadFailed);
+
+        Assert.True(LiveTranslateCopy.TryNativeLibraryError(
+            new PlatformNotSupportedException("AVX is not supported on this platform, and noavx runtime is not available."), out var cpu));
+        Assert.Equal(LiveTranslateCopy.CpuNotSupported, cpu);
+
+        Assert.False(LiveTranslateCopy.TryNativeLibraryError(
+            new InvalidOperationException("Failed to load the whisper model."), out var model));
+        Assert.Equal(LiveTranslateCopy.ModelLoadFailed, model);
     }
 
     [Fact]

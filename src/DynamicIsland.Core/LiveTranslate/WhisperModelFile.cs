@@ -4,6 +4,7 @@ namespace DynamicIsland.Core.LiveTranslate;
 
 /// <summary>
 /// 用文件大小和文件头判断本地 Whisper 模型是否像一份完整模型，避免半截文件被当成可用。
+/// whisper.cpp 把 ggml 魔数写成小端 uint32，磁盘上是 “lmgg”，不是 ASCII “ggml”。
 /// </summary>
 public static class WhisperModelFile
 {
@@ -13,8 +14,11 @@ public static class WhisperModelFile
     static readonly byte[][] Magics =
     {
         Encoding.ASCII.GetBytes("ggml"),
+        Encoding.ASCII.GetBytes("lmgg"), // little-endian 'ggml'
         Encoding.ASCII.GetBytes("ggmf"),
+        Encoding.ASCII.GetBytes("fmgg"),
         Encoding.ASCII.GetBytes("ggjt"),
+        Encoding.ASCII.GetBytes("tjgg"),
         Encoding.ASCII.GetBytes("GGUF")
     };
 
