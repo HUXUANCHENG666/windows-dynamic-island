@@ -100,14 +100,14 @@ sealed class LiveTranslateService : IDisposable
         {
             if (!WhisperModelStore.IsReady())
             {
-                Publish(new LiveTranslateSnapshot(LiveTranslatePhase.Downloading, LiveTranslateCopy.Downloading(0), 0, true));
-                await WhisperModelStore.DownloadAsync((progress, _, _) =>
+                Publish(new LiveTranslateSnapshot(LiveTranslatePhase.Downloading, LiveTranslateCopy.Connecting, 0, true));
+                await WhisperModelStore.DownloadAsync((message, progress) =>
                 {
                     if (generation != _generation)
                         return;
                     Publish(new LiveTranslateSnapshot(
                         LiveTranslatePhase.Downloading,
-                        LiveTranslateCopy.Downloading(progress),
+                        message,
                         progress,
                         true));
                 }, token).ConfigureAwait(false);

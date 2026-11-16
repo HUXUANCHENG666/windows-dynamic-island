@@ -87,10 +87,15 @@ public class LiveTranslateTests
         Assert.Equal("正在下载识别模型…", LiveTranslateCopy.Downloading(0));
         Assert.Equal("正在下载识别模型 42%", LiveTranslateCopy.Downloading(0.42));
         Assert.Equal("正在下载识别模型 100%", LiveTranslateCopy.Downloading(1));
+        Assert.Equal("正在下载识别模型 12.0 MB", LiveTranslateCopy.Downloading(0, 12 * 1024 * 1024, null));
+        Assert.Equal("12.0 MB", LiveTranslateCopy.FormatMegabytes(12 * 1024 * 1024));
+        Assert.Equal("正在连接下载源…", LiveTranslateCopy.Connecting);
+        Assert.Equal("正在换一个下载源…", LiveTranslateCopy.SwitchingSource);
         Assert.Equal(0.25, LiveTranslateCopy.Progress(25, 100), 5);
         Assert.Equal(0, LiveTranslateCopy.Progress(10, null));
         Assert.DoesNotContain("Hello", LiveTranslateCopy.Listening);
         Assert.DoesNotContain("Hello", LiveTranslateCopy.Downloading(0.5));
+        Assert.DoesNotContain("Hello", LiveTranslateCopy.Connecting);
     }
 
     [Fact]

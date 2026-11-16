@@ -28,8 +28,15 @@
             <TextBlock x:Name="Original" FontSize="12" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="36" Visibility="Collapsed"/>
             <TextBlock x:Name="Chinese" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="64" Margin="0,2,0,0"/>
         </StackPanel>
-        <Border x:Name="ProgressHost" Grid.Row="3" Height="4" CornerRadius="2" Margin="0,10,0,0" Visibility="Collapsed">
-            <Border x:Name="ProgressBar" Height="4" CornerRadius="2" HorizontalAlignment="Left" Width="0"/>
+        <Border x:Name="ProgressHost" Grid.Row="3" Height="4" CornerRadius="2" Margin="0,10,0,0" Visibility="Collapsed" ClipToBounds="True">
+            <Grid>
+                <Border x:Name="ProgressBar" Height="4" CornerRadius="2" HorizontalAlignment="Left" Width="0"/>
+                <Border x:Name="IndeterminateBar" Height="4" Width="48" CornerRadius="2" HorizontalAlignment="Left" Visibility="Collapsed">
+                    <Border.RenderTransform>
+                        <TranslateTransform x:Name="IndeterminateShift"/>
+                    </Border.RenderTransform>
+                </Border>
+            </Grid>
         </Border>
     </Grid>
 </UserControl>

@@ -124,6 +124,8 @@ public static class LiveTranslateCopy
     public const string Recognizing = "正在识别…";
     public const string Translating = "正在翻译…";
     public const string LoadingModel = "正在加载识别模型…";
+    public const string Connecting = "正在连接下载源…";
+    public const string SwitchingSource = "正在换一个下载源…";
     public const string AlreadyChinese = "已是中文";
     public const string CaptureFailed = "无法捕获系统声音。有的游戏会独占音频设备。";
     public const string DownloadFailed = "识别模型下载失败。请检查网络后重试。";
@@ -131,12 +133,26 @@ public static class LiveTranslateCopy
     public const string TranslateFailed = "这一句没有译成。";
     public const string ModelCorrupt = "识别模型不完整，请关掉后重新打开，让它再下载一次。";
 
-    public static string Downloading(double progress)
+    public static string Downloading(double progress) => Downloading(progress, 0, null);
+
+    public static string Downloading(double progress, long received, long? total)
     {
-        if (progress <= 0 || double.IsNaN(progress))
-            return "正在下载识别模型…";
-        int percent = (int)Math.Round(Math.Clamp(progress, 0, 1) * 100);
-        return $"正在下载识别模型 {percent}%";
+        if (progress > 0 && !double.IsNaN(progress))
+        {
+            int percent = (int)Math.Round(Math.Clamp(progress, 0, 1) * 100);
+            return $"正在下载识别模型 {percent}%";
+        }
+
+        if (received > 0)
+            return $"正在下载识别模型 {FormatMegabytes(received)}";
+
+        return "正在下载识别模型…";
+    }
+
+    public static string FormatMegabytes(long bytes)
+    {
+        double mb = Math.Max(0, bytes) / (1024.0 * 1024.0);
+        return $"{mb:0.0} MB";
     }
 
     public static double Progress(long received, long? total)

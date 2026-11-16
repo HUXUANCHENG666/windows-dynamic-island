@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using DynamicIsland.Core.LiveTranslate;
 using DynamicIsland.Visuals;
 
@@ -10,6 +11,9 @@ public partial class LiveTranslateView : UserControl
 {
     public event EventHandler? CloseRequested;
     public event EventHandler? CancelRequested;
+
+    double? _progress;
+    Storyboard? _indeterminate;
 
     public LiveTranslateView()
     {
@@ -29,6 +33,8 @@ public partial class LiveTranslateView : UserControl
         Dot.Fill = Theme.Live;
         ProgressHost.Background = Theme.Track;
         ProgressBar.Background = Theme.Live;
+        IndeterminateBar.Background = Theme.Live;
+        ProgressHost.SizeChanged += (_, _) => ApplyProgress(restartIndeterminate: true);
         Ui.Hover(CloseTranslate, Theme.Chip, Theme.ChipHover);
         Ui.Hover(CancelDownload, Theme.Chip, Theme.ChipHover);
         CloseTranslate.MouseLeftButtonUp += (_, e) =>
@@ -58,20 +64,65 @@ public partial class LiveTranslateView : UserControl
         Status.Visibility = string.IsNullOrWhiteSpace(message) ? Visibility.Collapsed : Visibility.Visible;
         Dot.Opacity = working ? 1 : 0.45;
         CancelDownload.Visibility = canCancel ? Visibility.Visible : Visibility.Collapsed;
-        if (progress is double value)
+        _progress = progress;
+        ApplyProgress(restartIndeterminate: false);
+    }
+
+    void ApplyProgress(bool restartIndeterminate)
+    {
+        if (_progress is not double value)
         {
-            ProgressHost.Visibility = Visibility.Visible;
-            ProgressHost.UpdateLayout();
-            double width = Math.Max(0, ProgressHost.ActualWidth * Math.Clamp(value, 0, 1));
-            if (width < 1 && value > 0)
-                width = 8;
-            ProgressBar.Width = width;
-        }
-        else
-        {
+            StopIndeterminate();
             ProgressHost.Visibility = Visibility.Collapsed;
             ProgressBar.Width = 0;
+            return;
         }
+
+        ProgressHost.Visibility = Visibility.Visible;
+        ProgressHost.UpdateLayout();
+        if (value <= 0)
+        {
+            ProgressBar.Width = 0;
+            StartIndeterminate(restartIndeterminate || _indeterminate == null);
+            return;
+        }
+
+        StopIndeterminate();
+        double width = Math.Max(0, ProgressHost.ActualWidth * Math.Clamp(value, 0, 1));
+        if (width < 1)
+            width = 8;
+        ProgressBar.Width = width;
+    }
+
+    void StartIndeterminate(bool restart)
+    {
+        IndeterminateBar.Visibility = Visibility.Visible;
+        if (_indeterminate != null && !restart)
+            return;
+
+        StopIndeterminate(hide: false);
+        double travel = Math.Max(80, ProgressHost.ActualWidth);
+        var anim = new DoubleAnimation
+        {
+            From = -48,
+            To = travel,
+            Duration = TimeSpan.FromSeconds(1.2),
+            RepeatBehavior = RepeatBehavior.Forever,
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseInOut }
+        };
+        Storyboard.SetTarget(anim, IndeterminateShift);
+        Storyboard.SetTargetProperty(anim, new PropertyPath(TranslateTransform.XProperty));
+        _indeterminate = new Storyboard { Children = { anim } };
+        _indeterminate.Begin();
+    }
+
+    void StopIndeterminate(bool hide = true)
+    {
+        _indeterminate?.Stop();
+        _indeterminate = null;
+        IndeterminateShift.X = 0;
+        if (hide)
+            IndeterminateBar.Visibility = Visibility.Collapsed;
     }
 
     public void ShowSubtitle(string chinese, string? original, bool alreadyChinese)
