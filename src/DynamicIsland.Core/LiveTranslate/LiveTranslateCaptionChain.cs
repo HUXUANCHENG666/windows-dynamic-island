@@ -11,7 +11,7 @@ public readonly record struct LiveTranslateCaption(
     bool TranslationFailed);
 
 /// <summary>
-/// 岛上最多显示两条字幕。旧的在上，新的在下。
+/// 岛上最多显示三条字幕。旧的在上，新的在下。
 /// 时间戳是本次打开实时翻译后，从开始听系统声音起算的经过时间；
 /// 如果还没进入收听就出了第一条结果，则从这条结果起算。
 /// 格式为 m:ss，满 10 分钟为 mm:ss，满 1 小时为 h:mm:ss。
@@ -20,7 +20,7 @@ public readonly record struct LiveTranslateCaption(
 /// </summary>
 public sealed class LiveTranslateCaptionChain
 {
-    public const int MaxItems = 2;
+    public const int MaxItems = 3;
 
     readonly List<LiveTranslateCaption> _items = new();
     DateTime? _origin;

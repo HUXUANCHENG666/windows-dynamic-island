@@ -108,8 +108,11 @@ public partial class IslandWindow : Window
         settings.Docks ??= new();
         _settings = new AppSettingsHost(settings);
         InitializeComponent();
-        Width = IslandMetrics.WindowWidth;
-        Height = IslandMetrics.WindowHeight;
+        AppearancePolicy.Sanitize(settings);
+        _animator.Scale = settings.IslandScale;
+        var startupHost = IslandMetrics.HostDip(IslandOrientation.Horizontal, settings.IslandScale);
+        Width = startupHost.Width;
+        Height = startupHost.Height;
         FontFamily = new FontFamily(IslandFonts.Ui);
         Pill.Fill = Theme.IslandFill;
         _pillShadow = new DropShadowEffect
@@ -126,6 +129,7 @@ public partial class IslandWindow : Window
         PillStroke.Stroke = Theme.Hairline;
         PillStroke.StrokeThickness = 1.6;
         ContentHost.Background = Brushes.Transparent;
+        ApplySkin(AppearancePolicy.ParseSkin(settings.IslandSkin));
 
         _announceFinish = _timer.Import(settings.Timer, DateTime.UtcNow);
         _timerPinned = settings.Timer.Pinned || _timer.IsRunning || _timer.IsCompleted;
@@ -384,6 +388,44 @@ public partial class IslandWindow : Window
         Settings.TranslateApiModel = string.IsNullOrWhiteSpace(model) ? null : model.Trim();
         Settings.TranslateApiKey = string.IsNullOrWhiteSpace(key) ? null : key.Trim();
         SettingsStore.Save(Settings);
+    }
+
+    public void SetIslandScale(double scale)
+    {
+        scale = AppearancePolicy.ClampScale(scale);
+        Settings.IslandScale = scale;
+        SettingsStore.Save(Settings);
+        _animator.Scale = scale;
+        _animator.SetTarget(_director.Mode, _director.Expanded, _director.ShowAsDot, _orientation);
+        Position();
+        Nudge();
+    }
+
+    public void SetIslandSkin(IslandSkin skin)
+    {
+        Settings.IslandSkin = AppearancePolicy.ToSetting(skin);
+        SettingsStore.Save(Settings);
+        ApplySkin(skin);
+        Nudge();
+    }
+
+    void ApplySkin(IslandSkin skin)
+    {
+        GlassSkin.Apply(this, skin);
+        if (skin != IslandSkin.Glass)
+            Pill.Effect = _pillShadow;
+    }
+
+    internal void DecorateGlass(Geometry geometry, double width, double height)
+    {
+        bool motion = AppearancePolicy.ParseSkin(Settings.IslandSkin) == IslandSkin.Glass
+            && _director.Expanded
+            && !_director.ShowAsDot
+            && _animator.IsSettled
+            && !_dragging
+            && !_throwActive
+            && !_gliding;
+        GlassSkin.Decorate(this, geometry, width, height, motion);
     }
 
     public void OpenLog()
@@ -997,7 +1039,7 @@ public partial class IslandWindow : Window
         Settings.Docks ??= new();
         _anchor = DockStore.Recall(Settings.Docks, monitor.DeviceName);
         var orientation = Dock.OrientationOf(_anchor);
-        var host = IslandMetrics.HostDip(orientation);
+        var host = IslandMetrics.HostDip(orientation, _animator.Scale);
         Width = host.Width;
         Height = host.Height;
         if (orientation != _orientation)

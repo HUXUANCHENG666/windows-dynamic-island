@@ -20,6 +20,8 @@ public partial class LiveTranslateView : UserControl
         InitializeComponent();
         TitleText.FontFamily = new FontFamily(IslandFonts.Ui);
         Status.FontFamily = TitleText.FontFamily;
+        OldestTime.FontFamily = TitleText.FontFamily;
+        OldestText.FontFamily = TitleText.FontFamily;
         OlderTime.FontFamily = TitleText.FontFamily;
         OlderText.FontFamily = TitleText.FontFamily;
         NewerTime.FontFamily = TitleText.FontFamily;
@@ -29,6 +31,8 @@ public partial class LiveTranslateView : UserControl
         CancelText.FontFamily = TitleText.FontFamily;
         TitleText.Foreground = Theme.Title;
         Status.Foreground = Theme.Artist;
+        OldestTime.Foreground = Theme.Quiet;
+        OldestText.Foreground = Theme.Artist;
         OlderTime.Foreground = Theme.Quiet;
         OlderText.Foreground = Theme.Artist;
         NewerTime.Foreground = Theme.Quiet;
@@ -59,11 +63,13 @@ public partial class LiveTranslateView : UserControl
     public void SetVertical(bool vertical)
     {
         TitleRow.HorizontalAlignment = HorizontalAlignment.Left;
-        OlderText.FontSize = vertical ? 13 : 13;
-        OlderText.MaxHeight = vertical ? 72 : 44;
+        OldestText.FontSize = 13;
+        OlderText.FontSize = 13;
+        OldestText.MaxHeight = vertical ? 64 : 40;
+        OlderText.MaxHeight = vertical ? 64 : 40;
         NewerText.FontSize = vertical ? 15 : 16;
-        NewerText.MaxHeight = vertical ? 88 : 56;
-        NewerOriginal.MaxHeight = vertical ? 52 : 36;
+        NewerText.MaxHeight = vertical ? 80 : 56;
+        NewerOriginal.MaxHeight = vertical ? 48 : 36;
     }
 
     public void ShowStatus(string message, bool working, double? progress, bool canCancel)
@@ -141,34 +147,46 @@ public partial class LiveTranslateView : UserControl
             return;
         }
 
+        OldestBlock.Visibility = Visibility.Collapsed;
+        OlderBlock.Visibility = Visibility.Collapsed;
         if (items.Count == 1)
         {
-            OlderBlock.Visibility = Visibility.Collapsed;
             PaintNewer(items[0]);
             return;
         }
 
-        PaintOlder(items[0]);
-        PaintNewer(items[1]);
+        if (items.Count == 2)
+        {
+            PaintRow(OlderTime, OlderText, OlderBlock, items[0]);
+            PaintNewer(items[1]);
+            return;
+        }
+
+        PaintRow(OldestTime, OldestText, OldestBlock, items[0]);
+        PaintRow(OlderTime, OlderText, OlderBlock, items[1]);
+        PaintNewer(items[^1]);
     }
 
     public void ClearSubtitle()
     {
+        OldestTime.Text = "";
+        OldestText.Text = "";
         OlderTime.Text = "";
         OlderText.Text = "";
         NewerTime.Text = "";
         NewerText.Text = "";
         NewerOriginal.Text = "";
+        OldestBlock.Visibility = Visibility.Collapsed;
         OlderBlock.Visibility = Visibility.Collapsed;
         NewerBlock.Visibility = Visibility.Collapsed;
         NewerOriginal.Visibility = Visibility.Collapsed;
     }
 
-    void PaintOlder(LiveTranslateCaption caption)
+    static void PaintRow(TextBlock time, TextBlock text, StackPanel block, LiveTranslateCaption caption)
     {
-        Ui.Text(OlderTime, caption.Timestamp);
-        Ui.Text(OlderText, caption.Primary);
-        OlderBlock.Visibility = Visibility.Visible;
+        Ui.Text(time, caption.Timestamp);
+        Ui.Text(text, caption.Primary);
+        block.Visibility = Visibility.Visible;
     }
 
     void PaintNewer(LiveTranslateCaption caption)

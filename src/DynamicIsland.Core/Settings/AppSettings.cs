@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DynamicIsland.Core.Island;
 
 namespace DynamicIsland.Core.Settings;
 
@@ -38,6 +39,12 @@ public sealed class AppSettings
 
     public string? TranslateApiKey { get; set; }
 
+    /// <summary>整个岛的缩放，1 为设计尺寸。会记住。</summary>
+    public double IslandScale { get; set; } = AppearancePolicy.DefaultScale;
+
+    /// <summary>岛的皮肤：default 为原来的近黑实心，glass 为液态玻璃。会记住。</summary>
+    public string IslandSkin { get; set; } = AppearancePolicy.DefaultSkinSetting;
+
     /// <summary>用户希望在岛上显示通知中心。默认关，允许之后才会去读。</summary>
     public bool NotificationCenter { get; set; }
 
@@ -61,7 +68,9 @@ public static class SettingsJson
     {
         try
         {
-            return JsonSerializer.Deserialize<AppSettings>(json, Options) ?? new AppSettings();
+            var settings = JsonSerializer.Deserialize<AppSettings>(json, Options) ?? new AppSettings();
+            AppearancePolicy.Sanitize(settings);
+            return settings;
         }
         catch (JsonException)
         {

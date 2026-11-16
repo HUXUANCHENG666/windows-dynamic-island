@@ -417,6 +417,8 @@ public class FeatureTests
             TranslateApiUrl = "https://api.example.com/v1",
             TranslateApiModel = "demo-model",
             TranslateApiKey = "secret-key",
+            IslandScale = 1.15,
+            IslandSkin = "glass",
             NotificationCenter = true,
             NotificationCenterExplained = true,
             HideProcesses = new List<string> { "powerpnt", "vlc" },
@@ -432,6 +434,8 @@ public class FeatureTests
         Assert.Equal("https://api.example.com/v1", loaded.TranslateApiUrl);
         Assert.Equal("demo-model", loaded.TranslateApiModel);
         Assert.Equal("secret-key", loaded.TranslateApiKey);
+        Assert.Equal(1.15, loaded.IslandScale);
+        Assert.Equal("glass", loaded.IslandSkin);
         Assert.True(loaded.NotificationCenter);
         Assert.True(loaded.NotificationCenterExplained);
         Assert.Equal(new[] { "powerpnt", "vlc" }, loaded.HideProcesses);
@@ -441,7 +445,11 @@ public class FeatureTests
         Assert.False(SettingsJson.Deserialize("{}").NotificationCenterExplained);
         Assert.Equal("default", SettingsJson.Deserialize("{}").TranslateApi);
         Assert.Null(SettingsJson.Deserialize("{}").TranslateApiKey);
+        Assert.Equal(1.00, SettingsJson.Deserialize("{}").IslandScale);
+        Assert.Equal("default", SettingsJson.Deserialize("{}").IslandSkin);
         Assert.False(new AppSettings().NotificationCenter);
+        Assert.Equal(1.00, new AppSettings().IslandScale);
+        Assert.Equal("default", new AppSettings().IslandSkin);
         Assert.NotNull(SettingsJson.Deserialize("{}").HideProcesses);
     }
 }

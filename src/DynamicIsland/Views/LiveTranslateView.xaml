@@ -25,9 +25,13 @@
         </Grid>
         <TextBlock x:Name="Status" Grid.Row="1" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap" TextTrimming="CharacterEllipsis"/>
         <StackPanel Grid.Row="2" Margin="0,8,0,0">
+            <StackPanel x:Name="OldestBlock" Visibility="Collapsed" Margin="0,0,0,10">
+                <TextBlock x:Name="OldestTime" FontSize="11" Margin="0,0,0,2"/>
+                <TextBlock x:Name="OldestText" FontSize="13" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="40"/>
+            </StackPanel>
             <StackPanel x:Name="OlderBlock" Visibility="Collapsed" Margin="0,0,0,10">
                 <TextBlock x:Name="OlderTime" FontSize="11" Margin="0,0,0,2"/>
-                <TextBlock x:Name="OlderText" FontSize="13" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="44"/>
+                <TextBlock x:Name="OlderText" FontSize="13" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="40"/>
             </StackPanel>
             <StackPanel x:Name="NewerBlock" Visibility="Collapsed">
                 <TextBlock x:Name="NewerTime" FontSize="11" Margin="0,0,0,2"/>

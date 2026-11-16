@@ -20,6 +20,35 @@
     <Canvas x:Name="Root" ClipToBounds="False">
         <Grid x:Name="PillHost" ClipToBounds="False">
             <Path x:Name="Pill"/>
+            <Grid x:Name="GlassHost" IsHitTestVisible="False" Visibility="Collapsed" ClipToBounds="True">
+                <Path x:Name="GlassScrim"/>
+                <Path x:Name="GlassSpecular"/>
+                <Path x:Name="GlassLip"/>
+                <Ellipse x:Name="GlassBlobA" IsHitTestVisible="False" RenderTransformOrigin="0.5,0.5">
+                    <Ellipse.RenderTransform>
+                        <TransformGroup>
+                            <RotateTransform x:Name="GlassBlobARotate" Angle="-22"/>
+                            <TranslateTransform x:Name="GlassBlobAShift"/>
+                        </TransformGroup>
+                    </Ellipse.RenderTransform>
+                </Ellipse>
+                <Ellipse x:Name="GlassBlobB" IsHitTestVisible="False" RenderTransformOrigin="0.5,0.5">
+                    <Ellipse.RenderTransform>
+                        <TransformGroup>
+                            <RotateTransform x:Name="GlassBlobBRotate" Angle="28"/>
+                            <TranslateTransform x:Name="GlassBlobBShift"/>
+                        </TransformGroup>
+                    </Ellipse.RenderTransform>
+                </Ellipse>
+                <Ellipse x:Name="GlassStreak" IsHitTestVisible="False" RenderTransformOrigin="0.5,0.5">
+                    <Ellipse.RenderTransform>
+                        <TransformGroup>
+                            <RotateTransform x:Name="GlassStreakRotate" Angle="-32"/>
+                            <TranslateTransform x:Name="GlassStreakShift"/>
+                        </TransformGroup>
+                    </Ellipse.RenderTransform>
+                </Ellipse>
+            </Grid>
             <Path x:Name="PillStroke" IsHitTestVisible="False"/>
             <Grid x:Name="ContentHost">
                 <views:CompactMediaView x:Name="CompactMedia"/>

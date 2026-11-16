@@ -434,9 +434,9 @@ public class LiveTranslateTests
         Assert.True(horizontal.Radius > 0);
         Assert.True(vertical.Radius > 0);
         Assert.Equal(520, IslandMetrics.LiveTranslateW);
-        Assert.Equal(248, IslandMetrics.LiveTranslateH);
+        Assert.Equal(328, IslandMetrics.LiveTranslateH);
         Assert.Equal(260, IslandMetrics.VLiveTranslateW);
-        Assert.Equal(440, IslandMetrics.VLiveTranslateH);
+        Assert.Equal(540, IslandMetrics.VLiveTranslateH);
         Assert.True(horizontal.Width + 40 <= IslandMetrics.WindowWidth);
         Assert.True(horizontal.Height + IslandMetrics.TopMargin + 40 <= IslandMetrics.WindowHeight);
         Assert.True(vertical.Width + 40 <= IslandMetrics.VerticalWindowWidth);
@@ -454,7 +454,7 @@ public class LiveTranslateTests
     }
 
     [Fact]
-    public void CaptionChain_ShowsTwoItems_WithSessionElapsedTimestamps()
+    public void CaptionChain_ShowsThreeItems_WithSessionElapsedTimestamps()
     {
         var chain = new LiveTranslateCaptionChain();
         var start = T(0);
@@ -482,12 +482,20 @@ public class LiveTranslateTests
         Assert.Equal("Open the window", chain.Items[1].Original);
 
         int third = chain.AppendFinal("已经是中文了", T(70000), alreadyChinese: true);
-        Assert.Equal(2, chain.Items.Count);
+        Assert.Equal(3, LiveTranslateCaptionChain.MaxItems);
+        Assert.Equal(3, chain.Items.Count);
+        Assert.Equal("你好", chain.Items[0].Primary);
+        Assert.Equal("请打开窗户", chain.Items[1].Primary);
+        Assert.Equal("1:10", chain.Items[2].Timestamp);
+        Assert.Equal("已经是中文了", chain.Items[2].Primary);
+        Assert.True(chain.Items[2].AlreadyChinese);
+        Assert.Equal(third, chain.Items[2].Id);
+
+        chain.Preview("A fourth line", T(80000));
+        Assert.Equal(3, chain.Items.Count);
         Assert.Equal("请打开窗户", chain.Items[0].Primary);
-        Assert.Equal("1:10", chain.Items[1].Timestamp);
         Assert.Equal("已经是中文了", chain.Items[1].Primary);
-        Assert.True(chain.Items[1].AlreadyChinese);
-        Assert.Equal(third, chain.Items[1].Id);
+        Assert.Equal("A fourth line", chain.Items[2].Primary);
 
         chain.Reset();
         Assert.Empty(chain.Items);
@@ -577,6 +585,66 @@ public class LiveTranslateTests
         Assert.Equal("早上好", TranslateApiPolicy.ReadChatCompletion("""{"choices":[{"message":{"content":"早上好"}}]}"""));
         Assert.Null(TranslateApiPolicy.ReadChatCompletion("""{"error":"nope"}"""));
         Assert.Null(TranslateApiPolicy.ReadChatCompletion("not-json"));
+    }
+
+    [Fact]
+    public void Appearance_ClampsScaleAndGrowsTheHost()
+    {
+        Assert.Equal(1.00, AppearancePolicy.DefaultScale);
+        Assert.Equal(0.85, AppearancePolicy.MinScale);
+        Assert.Equal(1.40, AppearancePolicy.MaxScale);
+        Assert.Equal(IslandSkin.Default, AppearancePolicy.ParseSkin(null));
+        Assert.Equal(IslandSkin.Glass, AppearancePolicy.ParseSkin("glass"));
+        Assert.Equal("default", AppearancePolicy.ToSetting(IslandSkin.Default));
+        Assert.Equal(1.00, AppearancePolicy.ClampScale(1));
+        Assert.Equal(1.00, AppearancePolicy.ClampScale(double.NaN));
+        Assert.Equal(1.00, AppearancePolicy.ClampScale(double.PositiveInfinity));
+        Assert.Equal(0.85, AppearancePolicy.ClampScale(0.2));
+        Assert.Equal(1.40, AppearancePolicy.ClampScale(2));
+        Assert.Equal(1.15, AppearancePolicy.ClampScale(1.13));
+        Assert.Equal(1.15, AppearancePolicy.FromPercent(113));
+        Assert.Equal(115, AppearancePolicy.ToPercent(1.13));
+
+        var baseHost = IslandMetrics.HostDip(IslandOrientation.Horizontal);
+        Assert.Equal(IslandMetrics.WindowWidth, baseHost.Width);
+        Assert.Equal(IslandMetrics.WindowHeight, baseHost.Height);
+        Assert.Equal(400, IslandMetrics.WindowHeight);
+        Assert.Equal(600, IslandMetrics.VerticalWindowHeight);
+
+        var grown = IslandMetrics.HostDip(IslandOrientation.Horizontal, 1.4);
+        var live = IslandMetrics.FrameFor(IslandMode.LiveTranslate, true, IslandOrientation.Horizontal, 1.4);
+        var camera = IslandMetrics.FrameFor(IslandMode.Camera, true, IslandOrientation.Horizontal, 1.4);
+        Assert.True(grown.Width > baseHost.Width);
+        Assert.True(grown.Height > baseHost.Height);
+        Assert.True(live.Width + 40 <= grown.Width);
+        Assert.True(live.Height + IslandMetrics.TopMargin * 1.4 + 40 <= grown.Height);
+        Assert.True(camera.Width + 40 <= grown.Width);
+        Assert.True(camera.Height + IslandMetrics.TopMargin * 1.4 + 40 <= grown.Height);
+
+        var vertical = IslandMetrics.HostDip(IslandOrientation.Vertical, 1.4);
+        var vLive = IslandMetrics.FrameFor(IslandMode.LiveTranslate, true, IslandOrientation.Vertical, 1.4);
+        var vMedia = IslandMetrics.FrameFor(IslandMode.Media, true, IslandOrientation.Vertical, 1.4);
+        Assert.True(vLive.Width + 40 <= vertical.Width);
+        Assert.True(vLive.Height + IslandMetrics.TopMargin * 1.4 + 40 <= vertical.Height);
+        Assert.True(vMedia.Width + 40 <= vertical.Width);
+        Assert.True(vMedia.Height + IslandMetrics.TopMargin * 1.4 + 40 <= vertical.Height);
+
+        var unscaled = IslandMetrics.FrameFor(IslandMode.Idle, false);
+        var same = IslandMetrics.FrameFor(IslandMode.Idle, false, IslandOrientation.Horizontal, 1);
+        Assert.Equal(unscaled, same);
+        var bigger = IslandMetrics.FrameFor(IslandMode.Idle, false, IslandOrientation.Horizontal, 1.2);
+        Assert.Equal(unscaled.Width * 1.2, bigger.Width, 5);
+        Assert.Equal(unscaled.Height * 1.2, bigger.Height, 5);
+        Assert.Equal(unscaled.Radius * 1.2, bigger.Radius, 5);
+        Assert.Equal(unscaled.CornerN, bigger.CornerN);
+        Assert.Equal(IslandMetrics.StealthDot.Width * 1.2, IslandMetrics.ScaledDot(1.2).Width, 5);
+
+        var dirty = SettingsJson.Deserialize("""{"islandScale":99,"islandSkin":"neon"}""");
+        Assert.Equal(1.40, dirty.IslandScale);
+        Assert.Equal("default", dirty.IslandSkin);
+        var empty = SettingsJson.Deserialize("{}");
+        Assert.Equal(1.00, empty.IslandScale);
+        Assert.Equal("default", empty.IslandSkin);
     }
 
     static float[] Voice(int frames)

@@ -33,10 +33,26 @@ public partial class SettingsWindow : Window
         CloseButton.Background = Theme.Chip;
         CloseButton.Child.SetValue(TextBlock.ForegroundProperty, Theme.Title);
         NoticeLabel.Foreground = Theme.Quiet;
+        LookLabel.Foreground = Theme.Quiet;
         DirectionLabel.Foreground = Theme.Quiet;
         HideLabel.Foreground = Theme.Quiet;
         LiveLabel.Foreground = Theme.Quiet;
         ToolLabel.Foreground = Theme.Quiet;
+        LookRow.Background = Theme.Chip;
+        ScaleTitle.Foreground = Theme.Title;
+        ScaleTitle.FontFamily = _font;
+        ScaleValue.Foreground = Theme.Artist;
+        ScaleValue.FontFamily = _font;
+        SkinTitle.Foreground = Theme.Title;
+        SkinTitle.FontFamily = _font;
+        SkinDetail.Foreground = Theme.Artist;
+        SkinDetail.FontFamily = _font;
+        ScaleRail.Background = Theme.Track;
+        ScaleFill.Background = Theme.Title;
+        ScaleKnob.Background = Theme.Title;
+        StyleChip(ScaleReset, ScaleResetText);
+        StyleText(SkinDefaultText);
+        StyleText(SkinGlassText);
         NoticeRow.Background = Theme.Chip;
         NoticeTitle.Foreground = Theme.Title;
         NoticeTitle.FontFamily = _font;
@@ -94,6 +110,15 @@ public partial class SettingsWindow : Window
         WireDirection(DirEnZh, TranslateDirection.EnglishToChinese);
         WireApi(ApiDefault, TranslateApiKind.Default);
         WireApi(ApiCustom, TranslateApiKind.Custom);
+        WireSkin(SkinDefault, IslandSkin.Default);
+        WireSkin(SkinGlass, IslandSkin.Glass);
+        WireScale();
+        ScaleReset.MouseLeftButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            _island.SetIslandScale(AppearancePolicy.DefaultScale);
+            RefreshFromIsland();
+        };
         StyleChip(ActTranslate, ActTranslateText);
         StyleChip(ActRecall, ActRecallText);
         StyleChip(ActCamera, ActCameraText);
@@ -210,6 +235,8 @@ public partial class SettingsWindow : Window
         NoticeKnob.Margin = notes ? new Thickness(0, 0, 3, 0) : new Thickness(3, 0, 0, 0);
         NoticeToggle.Background = notes ? Theme.Title : Theme.Track;
         NoticeKnob.Background = notes ? Theme.Ink : Theme.Title;
+
+        PaintAppearance();
 
         var direction = TranslatePolicy.Parse(_island.Settings.TranslateDirection);
         PaintDirection(DirAuto, direction == TranslateDirection.Auto);
@@ -503,6 +530,85 @@ public partial class SettingsWindow : Window
         }
 
         return names;
+    }
+
+    bool _scaleDragging;
+
+    void WireSkin(Border chip, IslandSkin skin)
+    {
+        chip.MouseEnter += (_, _) => chip.Background = Theme.ChipHover;
+        chip.MouseLeave += (_, _) => PaintDirection(chip, SelectedSkin() == skin);
+        chip.MouseLeftButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            _island.SetIslandSkin(skin);
+            RefreshFromIsland();
+        };
+    }
+
+    IslandSkin SelectedSkin() => AppearancePolicy.ParseSkin(_island.Settings.IslandSkin);
+
+    void WireScale()
+    {
+        ScaleTrack.MouseLeftButtonDown += (_, e) =>
+        {
+            e.Handled = true;
+            _scaleDragging = true;
+            ScaleTrack.CaptureMouse();
+            ApplyScaleFromPointer();
+        };
+        ScaleTrack.MouseMove += (_, _) =>
+        {
+            if (_scaleDragging)
+                ApplyScaleFromPointer();
+        };
+        ScaleTrack.MouseLeftButtonUp += (_, e) =>
+        {
+            if (!_scaleDragging)
+                return;
+            e.Handled = true;
+            _scaleDragging = false;
+            if (ScaleTrack.IsMouseCaptured)
+                ScaleTrack.ReleaseMouseCapture();
+            ApplyScaleFromPointer();
+        };
+        ScaleTrack.LostMouseCapture += (_, _) => _scaleDragging = false;
+        ScaleTrack.SizeChanged += (_, _) =>
+        {
+            if (!_scaleDragging)
+                PaintScale(_island.Settings.IslandScale);
+        };
+    }
+
+    void ApplyScaleFromPointer()
+    {
+        double width = Math.Max(18, ScaleTrack.ActualWidth);
+        double rail = Math.Max(1, width - 18);
+        double x = Mouse.GetPosition(ScaleTrack).X - 9;
+        double scale = AppearancePolicy.FromPercent(85 + (Math.Clamp(x, 0, rail) / rail) * 55);
+        PaintScale(scale);
+        _island.SetIslandScale(scale);
+    }
+
+    void PaintAppearance()
+    {
+        if (!_scaleDragging)
+            PaintScale(_island.Settings.IslandScale);
+        var skin = SelectedSkin();
+        PaintDirection(SkinDefault, skin == IslandSkin.Default);
+        PaintDirection(SkinGlass, skin == IslandSkin.Glass);
+    }
+
+    void PaintScale(double scale)
+    {
+        scale = AppearancePolicy.ClampScale(scale);
+        ScaleValue.Text = $"{AppearancePolicy.ToPercent(scale)}%";
+        double width = Math.Max(18, ScaleTrack.ActualWidth);
+        double rail = Math.Max(1, width - 18);
+        double t = (scale - AppearancePolicy.MinScale) / (AppearancePolicy.MaxScale - AppearancePolicy.MinScale);
+        double left = t * rail;
+        ScaleKnob.Margin = new Thickness(left, 0, 0, 0);
+        ScaleFill.Width = left;
     }
 
     void WireApi(Border chip, TranslateApiKind kind)
