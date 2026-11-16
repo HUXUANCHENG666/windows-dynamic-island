@@ -1777,7 +1777,7 @@ public partial class IslandWindow : Window
         }
         else
         {
-            Pill.Effect = _pillShadow;
+            ApplySkin(AppearancePolicy.ParseSkin(Settings.IslandSkin));
             Pill.CacheMode = null;
         }
     }
