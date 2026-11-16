@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Input;
@@ -39,8 +40,8 @@ public partial class IslandWindow : Window
     readonly FullscreenWatcher _watcher = new();
     readonly DynamicIsland.Core.Media.TimelineEstimator _timeline = new();
     CancellationTokenSource? _translateCts;
-    CancellationTokenSource? _ctsLive;
-    int _liveTranslateSeq;
+    readonly Dictionary<int, CancellationTokenSource> _liveTranslateCts = new();
+    readonly Dictionary<int, int> _liveTranslateGen = new();
     TrayController? _tray;
     DispatcherTimer? _slow;
     DispatcherTimer? _topmost;
@@ -605,7 +606,7 @@ public partial class IslandWindow : Window
         _settingsWindow?.Close();
         SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
         _translateCts?.Cancel();
-        _ctsLive?.Cancel();
+        CancelLiveTranslations();
         _notifications.Dispose();
         ReleaseCamera(collapseUi: false);
         StopLiveTranslate(collapseUi: false);
@@ -1181,7 +1182,7 @@ public partial class IslandWindow : Window
     async Task RunTranslationAsync(TranslateRequest request)
     {
         _translateCts?.Cancel();
-        _ctsLive?.Cancel();
+        CancelLiveTranslations();
         _translateCts = new CancellationTokenSource();
         var token = _translateCts.Token;
         TranslateNotice.ShowBusy(request.Clipped);
@@ -1388,7 +1389,7 @@ public partial class IslandWindow : Window
 
     void StopLiveTranslate(bool collapseUi)
     {
-        _ctsLive?.Cancel();
+        CancelLiveTranslations();
         _liveTranslate.Stop();
         _liveCaptions.Reset();
         LiveTranslateNotice.ClearSubtitle();
@@ -1444,12 +1445,14 @@ public partial class IslandWindow : Window
             var again = LiveTranslatePolicy.Plan(recognized, language);
             if (again.Decision == LiveTranslateDecision.Empty)
             {
+                AbandonLiveTranslation(id);
                 LiveTranslateNotice.ShowCaptions(_liveCaptions.Items);
                 Nudge();
                 return;
             }
             if (again.Decision == LiveTranslateDecision.AlreadyChinese)
             {
+                AbandonLiveTranslation(id);
                 _liveCaptions.Complete(id, recognized, null);
                 LiveTranslateNotice.ShowCaptions(_liveCaptions.Items);
                 LiveTranslateNotice.ShowStatus(LiveTranslateCopy.AlreadyChinese, working: true, progress: null, canCancel: false);
@@ -1476,27 +1479,66 @@ public partial class IslandWindow : Window
         _ = TranslateLiveAsync(request, id, recognized, api);
     }
 
+    void CancelLiveTranslations()
+    {
+        foreach (var cts in _liveTranslateCts.Values)
+        {
+            try { cts.Cancel(); }
+            catch { }
+            try { cts.Dispose(); }
+            catch { }
+        }
+
+        _liveTranslateCts.Clear();
+        _liveTranslateGen.Clear();
+    }
+
+    void AbandonLiveTranslation(int captionId)
+    {
+        if (_liveTranslateCts.TryGetValue(captionId, out var cts))
+        {
+            try { cts.Cancel(); }
+            catch { }
+            try { cts.Dispose(); }
+            catch { }
+            _liveTranslateCts.Remove(captionId);
+        }
+
+        _liveTranslateGen[captionId] = _liveTranslateGen.TryGetValue(captionId, out var gen) ? gen + 1 : 1;
+    }
+
     async Task TranslateLiveAsync(TranslateRequest request, int captionId, string original, TranslateApiOptions api)
     {
-        int seq = ++_liveTranslateSeq;
+        int gen = (_liveTranslateGen.TryGetValue(captionId, out var previousGen) ? previousGen : 0) + 1;
+        _liveTranslateGen[captionId] = gen;
+        if (_liveTranslateCts.TryGetValue(captionId, out var previous))
+        {
+            try { previous.Cancel(); }
+            catch { }
+            try { previous.Dispose(); }
+            catch { }
+        }
+
+        var cts = new CancellationTokenSource();
+        _liveTranslateCts[captionId] = cts;
         try
         {
-            _ctsLive?.Cancel();
-            _ctsLive = new CancellationTokenSource();
-            var token = _ctsLive.Token;
-            var result = await _translator.TranslateAsync(request, api, token).ConfigureAwait(true);
-            if (token.IsCancellationRequested || !_director.LiveTranslateOpen)
+            var result = await _translator.TranslateAsync(request, api, cts.Token).ConfigureAwait(true);
+            if (cts.IsCancellationRequested || !_director.LiveTranslateOpen)
+                return;
+            if (!_liveTranslateGen.TryGetValue(captionId, out var current) || current != gen)
                 return;
             if (!_liveCaptions.Complete(captionId, LiveTranslatePolicy.ForIsland(result), original))
                 return;
             LiveTranslateNotice.ShowCaptions(_liveCaptions.Items);
-            LiveTranslateNotice.ShowStatus(LiveTranslateCopy.Listening, working: true, progress: null, canCancel: false);
+            var message = _liveCaptions.HasPending ? LiveTranslateCopy.Translating : LiveTranslateCopy.Listening;
+            LiveTranslateNotice.ShowStatus(message, working: true, progress: null, canCancel: false);
             Nudge();
         }
         catch (OperationCanceledException)
         {
             // A newer request may still own this caption id after a short-fragment merge.
-            if (_director.LiveTranslateOpen && seq == _liveTranslateSeq)
+            if (_director.LiveTranslateOpen && _liveTranslateGen.TryGetValue(captionId, out var current) && current == gen)
                 _liveCaptions.Fail(captionId);
         }
         catch (Exception ex)
@@ -1504,11 +1546,22 @@ public partial class IslandWindow : Window
             Log.Error("live-translate-text", ex);
             if (!_director.LiveTranslateOpen)
                 return;
+            if (!_liveTranslateGen.TryGetValue(captionId, out var current) || current != gen)
+                return;
             _liveCaptions.Fail(captionId);
             LiveTranslateNotice.ShowCaptions(_liveCaptions.Items);
             var message = ex is InvalidOperationException ? ex.Message : LiveTranslateCopy.TranslateFailed;
             LiveTranslateNotice.ShowStatus(message, working: true, progress: null, canCancel: false);
             Nudge();
+        }
+        finally
+        {
+            if (_liveTranslateCts.TryGetValue(captionId, out var owned) && ReferenceEquals(owned, cts))
+            {
+                _liveTranslateCts.Remove(captionId);
+                try { cts.Dispose(); }
+                catch { }
+            }
         }
     }
 
