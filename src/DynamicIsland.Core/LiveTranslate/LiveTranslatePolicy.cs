@@ -132,6 +132,7 @@ public static class LiveTranslateCopy
     public const string CaptureDenied = "系统没有允许捕获播放声音。请在设置里允许桌面应用使用麦克风后再试。";
     public const string CaptureFormatUnsupported = "播放设备的声音格式暂不支持。";
     public const string CaptureFailedGeneric = "无法捕获系统声音。请检查系统声音，并在设置里允许桌面应用使用麦克风后再试。";
+    public const string CaptureOpenFailed = "无法打开系统播放设备。请关掉翻译后再试一次。";
 
     public static string MessageForCaptureException(Exception ex)
     {
@@ -154,6 +155,9 @@ public static class LiveTranslateCopy
             text.Contains("Access is denied", StringComparison.OrdinalIgnoreCase) ||
             text.Contains("E_ACCESSDENIED", StringComparison.OrdinalIgnoreCase))
             return CaptureDenied;
+
+        if (ex is InvalidCastException || HasHResult(hr, 0x80004002))
+            return CaptureOpenFailed;
 
         return CaptureFailedGeneric;
     }

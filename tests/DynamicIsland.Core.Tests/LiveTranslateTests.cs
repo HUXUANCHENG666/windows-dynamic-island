@@ -173,6 +173,62 @@ public class LiveTranslateTests
     }
 
     [Fact]
+    public void WaveFormat_ReadsPcmAndExtensibleLayoutsFromBytes()
+    {
+        var pcm16 = PackWave(1, 2, 48000, 16, 0, null);
+        Assert.True(WaveFormatKind.TryReadLayout(pcm16, out var pcm));
+        Assert.Equal(48000, pcm.SampleRate);
+        Assert.Equal(2, pcm.Channels);
+        Assert.Equal(16, pcm.BitsPerSample);
+        Assert.Equal(4, pcm.BlockAlign);
+        Assert.True(WaveFormatKind.TryDetect(pcm, out var pcmKind));
+        Assert.Equal(WaveKind.Pcm16, pcmKind);
+
+        var ieee = PackWave(3, 2, 44100, 32, 0, null);
+        Assert.True(WaveFormatKind.TryReadLayout(ieee, out var floatLayout));
+        Assert.Equal(44100, floatLayout.SampleRate);
+        Assert.True(WaveFormatKind.TryDetect(floatLayout, out var floatKind));
+        Assert.Equal(WaveKind.Float32, floatKind);
+
+        var ext = PackWave(0xFFFE, 2, 48000, 32, 22, WaveFormatKind.SubtypeIeeeFloat);
+        Assert.True(WaveFormatKind.TryReadLayout(ext, out var extLayout));
+        Assert.Equal(WaveFormatKind.EncodingExtensible, extLayout.Encoding);
+        Assert.Equal(WaveFormatKind.SubtypeIeeeFloat, extLayout.SubFormat);
+        Assert.True(WaveFormatKind.TryDetect(extLayout, out var extKind));
+        Assert.Equal(WaveKind.Float32, extKind);
+
+        var extPcm24 = PackWave(0xFFFE, 2, 48000, 24, 22, WaveFormatKind.SubtypePcm);
+        Assert.True(WaveFormatKind.TryReadLayout(extPcm24, out var pcm24Layout));
+        Assert.True(WaveFormatKind.TryDetect(pcm24Layout, out var pcm24Kind));
+        Assert.Equal(WaveKind.Pcm24, pcm24Kind);
+
+        Assert.False(WaveFormatKind.TryReadLayout(new byte[10], out _));
+        Assert.False(WaveFormatKind.TryReadLayout(PackWave(1, 0, 48000, 16, 0, null), out _));
+    }
+
+    static byte[] PackWave(int encoding, int channels, int rate, int bits, int extra, Guid? subFormat)
+    {
+        int block = Math.Max(1, ((bits + 7) / 8) * Math.Max(1, channels));
+        int size = 18 + extra;
+        var blob = new byte[size];
+        BinaryPrimitives.WriteUInt16LittleEndian(blob.AsSpan(0, 2), (ushort)encoding);
+        BinaryPrimitives.WriteUInt16LittleEndian(blob.AsSpan(2, 2), (ushort)channels);
+        BinaryPrimitives.WriteInt32LittleEndian(blob.AsSpan(4, 4), rate);
+        BinaryPrimitives.WriteInt32LittleEndian(blob.AsSpan(8, 4), rate * block);
+        BinaryPrimitives.WriteUInt16LittleEndian(blob.AsSpan(12, 2), (ushort)block);
+        BinaryPrimitives.WriteUInt16LittleEndian(blob.AsSpan(14, 2), (ushort)bits);
+        BinaryPrimitives.WriteUInt16LittleEndian(blob.AsSpan(16, 2), (ushort)extra);
+        if (extra >= 22 && subFormat is { } guid)
+        {
+            BinaryPrimitives.WriteUInt16LittleEndian(blob.AsSpan(18, 2), (ushort)bits);
+            BinaryPrimitives.WriteUInt32LittleEndian(blob.AsSpan(20, 4), 0);
+            guid.TryWriteBytes(blob.AsSpan(24, 16));
+        }
+
+        return blob;
+    }
+
+    [Fact]
     public void CaptureError_MapsDeviceAndPermissionFailures()
     {
         Assert.Equal(
@@ -187,6 +243,9 @@ public class LiveTranslateTests
         Assert.Equal(
             LiveTranslateCopy.CaptureDenied,
             LiveTranslateCopy.MessageForCaptureException(new Exception("Access is denied") { HResult = unchecked((int)0x80070005) }));
+        Assert.Equal(
+            LiveTranslateCopy.CaptureOpenFailed,
+            LiveTranslateCopy.MessageForCaptureException(new InvalidCastException("Specified cast is not valid.")));
         Assert.Equal(
             LiveTranslateCopy.CaptureFailedGeneric,
             LiveTranslateCopy.MessageForCaptureException(new InvalidOperationException("something else")));

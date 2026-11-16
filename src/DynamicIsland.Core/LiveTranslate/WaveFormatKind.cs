@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+
 namespace DynamicIsland.Core.LiveTranslate;
 
 /// <summary>
@@ -13,6 +15,17 @@ public static class WaveFormatKind
 
     public static readonly Guid SubtypePcm = new("00000001-0000-0010-8000-00aa00389b71");
     public static readonly Guid SubtypeIeeeFloat = new("00000003-0000-0010-8000-00aa00389b71");
+
+    public readonly record struct WaveLayout(
+        int Encoding,
+        int SampleRate,
+        int Channels,
+        int BitsPerSample,
+        int BlockAlign,
+        Guid? SubFormat);
+
+    public static bool TryDetect(in WaveLayout layout, out WaveKind kind) =>
+        TryDetect(layout.Encoding, layout.BitsPerSample, layout.SubFormat, out kind);
 
     public static bool TryDetect(int encoding, int bitsPerSample, Guid? subFormat, out WaveKind kind)
     {
@@ -43,6 +56,36 @@ public static class WaveFormatKind
             default:
                 return false;
         }
+    }
+
+    /// <summary>
+    /// 解析 WAVEFORMATEX 或 WAVEFORMATEXTENSIBLE 的原始字节。
+    /// 至少要有 18 字节；扩展格式的子类型从第 24 字节开始。
+    /// </summary>
+    public static bool TryReadLayout(ReadOnlySpan<byte> blob, out WaveLayout layout)
+    {
+        layout = default;
+        if (blob.Length < 18)
+            return false;
+
+        int encoding = BinaryPrimitives.ReadUInt16LittleEndian(blob);
+        int channels = BinaryPrimitives.ReadUInt16LittleEndian(blob[2..]);
+        int sampleRate = BinaryPrimitives.ReadInt32LittleEndian(blob[4..]);
+        int blockAlign = BinaryPrimitives.ReadUInt16LittleEndian(blob[12..]);
+        int bits = BinaryPrimitives.ReadUInt16LittleEndian(blob[14..]);
+        int extra = BinaryPrimitives.ReadUInt16LittleEndian(blob[16..]);
+
+        Guid? sub = null;
+        if (encoding == EncodingExtensible && extra >= 22 && blob.Length >= 40)
+            sub = new Guid(blob.Slice(24, 16));
+
+        if (sampleRate <= 0 || channels <= 0 || bits <= 0)
+            return false;
+        if (blockAlign <= 0)
+            blockAlign = Math.Max(1, ((bits + 7) / 8) * channels);
+
+        layout = new WaveLayout(encoding, sampleRate, channels, bits, blockAlign, sub);
+        return true;
     }
 
     static bool IsIeeeFloat(int encoding, Guid? subFormat)
