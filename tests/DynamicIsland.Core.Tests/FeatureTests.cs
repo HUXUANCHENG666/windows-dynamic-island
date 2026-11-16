@@ -413,6 +413,10 @@ public class FeatureTests
         {
             Stealth = true,
             TranslateDirection = "zh-en",
+            TranslateApi = "custom",
+            TranslateApiUrl = "https://api.example.com/v1",
+            TranslateApiModel = "demo-model",
+            TranslateApiKey = "secret-key",
             NotificationCenter = true,
             NotificationCenterExplained = true,
             HideProcesses = new List<string> { "powerpnt", "vlc" },
@@ -424,6 +428,10 @@ public class FeatureTests
         var loaded = SettingsJson.Deserialize(SettingsJson.Serialize(settings));
         Assert.True(loaded.Stealth);
         Assert.Equal("zh-en", loaded.TranslateDirection);
+        Assert.Equal("custom", loaded.TranslateApi);
+        Assert.Equal("https://api.example.com/v1", loaded.TranslateApiUrl);
+        Assert.Equal("demo-model", loaded.TranslateApiModel);
+        Assert.Equal("secret-key", loaded.TranslateApiKey);
         Assert.True(loaded.NotificationCenter);
         Assert.True(loaded.NotificationCenterExplained);
         Assert.Equal(new[] { "powerpnt", "vlc" }, loaded.HideProcesses);
@@ -431,6 +439,8 @@ public class FeatureTests
         Assert.False(SettingsJson.Deserialize("{}").Stealth);
         Assert.False(SettingsJson.Deserialize("{}").NotificationCenter);
         Assert.False(SettingsJson.Deserialize("{}").NotificationCenterExplained);
+        Assert.Equal("default", SettingsJson.Deserialize("{}").TranslateApi);
+        Assert.Null(SettingsJson.Deserialize("{}").TranslateApiKey);
         Assert.False(new AppSettings().NotificationCenter);
         Assert.NotNull(SettingsJson.Deserialize("{}").HideProcesses);
     }

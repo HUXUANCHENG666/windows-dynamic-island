@@ -20,14 +20,20 @@ public partial class LiveTranslateView : UserControl
         InitializeComponent();
         TitleText.FontFamily = new FontFamily(IslandFonts.Ui);
         Status.FontFamily = TitleText.FontFamily;
-        Original.FontFamily = TitleText.FontFamily;
-        Chinese.FontFamily = TitleText.FontFamily;
+        OlderTime.FontFamily = TitleText.FontFamily;
+        OlderText.FontFamily = TitleText.FontFamily;
+        NewerTime.FontFamily = TitleText.FontFamily;
+        NewerText.FontFamily = TitleText.FontFamily;
+        NewerOriginal.FontFamily = TitleText.FontFamily;
         CloseText.FontFamily = TitleText.FontFamily;
         CancelText.FontFamily = TitleText.FontFamily;
         TitleText.Foreground = Theme.Title;
         Status.Foreground = Theme.Artist;
-        Original.Foreground = Theme.Quiet;
-        Chinese.Foreground = Theme.Title;
+        OlderTime.Foreground = Theme.Quiet;
+        OlderText.Foreground = Theme.Artist;
+        NewerTime.Foreground = Theme.Quiet;
+        NewerText.Foreground = Theme.Title;
+        NewerOriginal.Foreground = Theme.Quiet;
         CloseText.Foreground = Theme.Title;
         CancelText.Foreground = Theme.Title;
         Dot.Fill = Theme.Live;
@@ -52,10 +58,12 @@ public partial class LiveTranslateView : UserControl
 
     public void SetVertical(bool vertical)
     {
-        TitleRow.HorizontalAlignment = vertical ? HorizontalAlignment.Left : HorizontalAlignment.Left;
-        Chinese.FontSize = vertical ? 15 : 16;
-        Chinese.MaxHeight = vertical ? 96 : 64;
-        Original.MaxHeight = vertical ? 48 : 36;
+        TitleRow.HorizontalAlignment = HorizontalAlignment.Left;
+        OlderText.FontSize = vertical ? 13 : 13;
+        OlderText.MaxHeight = vertical ? 72 : 44;
+        NewerText.FontSize = vertical ? 15 : 16;
+        NewerText.MaxHeight = vertical ? 88 : 56;
+        NewerOriginal.MaxHeight = vertical ? 52 : 36;
     }
 
     public void ShowStatus(string message, bool working, double? progress, bool canCancel)
@@ -125,31 +133,59 @@ public partial class LiveTranslateView : UserControl
             IndeterminateBar.Visibility = Visibility.Collapsed;
     }
 
-    public void ShowSubtitle(string chinese, string? original, bool alreadyChinese)
+    public void ShowCaptions(IReadOnlyList<LiveTranslateCaption> items)
     {
-        Ui.Text(Chinese, chinese);
-        Chinese.Visibility = string.IsNullOrWhiteSpace(chinese) ? Visibility.Collapsed : Visibility.Visible;
-        if (!string.IsNullOrWhiteSpace(original) && !string.Equals(original, chinese, StringComparison.Ordinal))
+        if (items is null || items.Count == 0)
         {
-            Ui.Text(Original, original);
-            Original.Visibility = Visibility.Visible;
-        }
-        else
-        {
-            Original.Visibility = Visibility.Collapsed;
+            ClearSubtitle();
+            return;
         }
 
-        if (alreadyChinese)
-            ShowStatus(LiveTranslateCopy.AlreadyChinese, working: true, progress: null, canCancel: false);
-        else
-            ShowStatus(LiveTranslateCopy.Listening, working: true, progress: null, canCancel: false);
+        if (items.Count == 1)
+        {
+            OlderBlock.Visibility = Visibility.Collapsed;
+            PaintNewer(items[0]);
+            return;
+        }
+
+        PaintOlder(items[0]);
+        PaintNewer(items[1]);
     }
 
     public void ClearSubtitle()
     {
-        Chinese.Text = "";
-        Original.Text = "";
-        Chinese.Visibility = Visibility.Collapsed;
-        Original.Visibility = Visibility.Collapsed;
+        OlderTime.Text = "";
+        OlderText.Text = "";
+        NewerTime.Text = "";
+        NewerText.Text = "";
+        NewerOriginal.Text = "";
+        OlderBlock.Visibility = Visibility.Collapsed;
+        NewerBlock.Visibility = Visibility.Collapsed;
+        NewerOriginal.Visibility = Visibility.Collapsed;
+    }
+
+    void PaintOlder(LiveTranslateCaption caption)
+    {
+        Ui.Text(OlderTime, caption.Timestamp);
+        Ui.Text(OlderText, caption.Primary);
+        OlderBlock.Visibility = Visibility.Visible;
+    }
+
+    void PaintNewer(LiveTranslateCaption caption)
+    {
+        Ui.Text(NewerTime, caption.Timestamp);
+        Ui.Text(NewerText, caption.Primary);
+        NewerBlock.Visibility = Visibility.Visible;
+        if (!string.IsNullOrWhiteSpace(caption.Original)
+            && !string.Equals(caption.Original, caption.Primary, StringComparison.Ordinal))
+        {
+            Ui.Text(NewerOriginal, caption.Original);
+            NewerOriginal.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            NewerOriginal.Text = "";
+            NewerOriginal.Visibility = Visibility.Collapsed;
+        }
     }
 }

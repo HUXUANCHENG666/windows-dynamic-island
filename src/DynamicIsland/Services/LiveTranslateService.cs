@@ -1,6 +1,7 @@
 using System.Windows.Threading;
 using DynamicIsland.Core.LiveTranslate;
 using Whisper.net;
+using Whisper.net.LibraryLoader;
 
 namespace DynamicIsland.Services;
 
@@ -32,6 +33,7 @@ sealed class LiveTranslateService : IDisposable
     readonly object _gate = new();
     CancellationTokenSource? _cts;
     WhisperFactory? _factory;
+    WhisperProcessor? _processor;
     Task? _loop;
     float[]? _queued;
     bool _busy;
@@ -86,6 +88,7 @@ sealed class LiveTranslateService : IDisposable
             _busy = false;
         }
 
+        DisposeProcessor();
         var factory = _factory;
         _factory = null;
         try { factory?.Dispose(); }
@@ -121,12 +124,14 @@ sealed class LiveTranslateService : IDisposable
                 if (generation != _generation)
                     return;
                 Publish(new LiveTranslateSnapshot(LiveTranslatePhase.Loading, LiveTranslateCopy.LoadingModel, null, false));
+                PreferVulkanThenCpu();
                 WhisperFactory factory;
+                WhisperProcessor processor;
                 try
                 {
                     factory = WhisperFactory.FromPath(WhisperModelStore.FilePath);
                     // FromPath 在原生库加载成功后仍可能接受一份损坏的模型，真正读文件发生在建处理器时。
-                    factory.CreateBuilder();
+                    processor = CreateProcessor(factory);
                 }
                 catch (Exception ex)
                 {
@@ -150,19 +155,23 @@ sealed class LiveTranslateService : IDisposable
 
                 if (generation != _generation)
                 {
+                    try { processor.Dispose(); } catch { }
                     factory.Dispose();
                     return;
                 }
 
+                _processor = processor;
                 _factory = factory;
                 if (generation != _generation)
                 {
+                    DisposeProcessor();
                     _factory = null;
                     factory.Dispose();
                     return;
                 }
 
-                Log.Info("live-translate model ready");
+                var runtime = RuntimeOptions.LoadedLibrary?.ToString() ?? "unknown";
+                Log.Info($"live-translate model ready ({runtime})");
                 Publish(new LiveTranslateSnapshot(LiveTranslatePhase.Listening, LiveTranslateCopy.Listening, null, false));
                 StartCapture();
                 return;
@@ -286,22 +295,51 @@ sealed class LiveTranslateService : IDisposable
         if (factory == null || segment.Length < SpeechSegmenter.FrameSamples)
             return (null, null);
 
-        using var processor = factory.CreateBuilder()
-            .WithLanguage("auto")
-            .WithThreads(Math.Max(1, Environment.ProcessorCount / 2))
-            .Build();
+        var processor = _processor ?? CreateProcessor(factory);
+        _processor = processor;
         var parts = new List<string>();
         string? language = null;
-        await foreach (var item in processor.ProcessAsync(segment))
+        try
         {
-            if (!string.IsNullOrWhiteSpace(item.Language))
-                language ??= item.Language;
-            if (!string.IsNullOrWhiteSpace(item.Text))
-                parts.Add(item.Text.Trim());
+            await foreach (var item in processor.ProcessAsync(segment))
+            {
+                if (!string.IsNullOrWhiteSpace(item.Language))
+                    language ??= item.Language;
+                if (!string.IsNullOrWhiteSpace(item.Text))
+                    parts.Add(item.Text.Trim());
+            }
+        }
+        catch
+        {
+            DisposeProcessor();
+            throw;
         }
 
         var text = LiveTranslatePolicy.Collapse(string.Join(" ", parts));
         return (string.IsNullOrWhiteSpace(text) ? null : text, language);
+    }
+
+    static void PreferVulkanThenCpu()
+    {
+        RuntimeOptions.RuntimeLibraryOrder =
+        [
+            RuntimeLibrary.Vulkan,
+            RuntimeLibrary.Cpu
+        ];
+    }
+
+    static WhisperProcessor CreateProcessor(WhisperFactory factory) =>
+        factory.CreateBuilder()
+            .WithLanguage("auto")
+            .WithThreads(Math.Max(1, Environment.ProcessorCount / 2))
+            .Build();
+
+    void DisposeProcessor()
+    {
+        var processor = _processor;
+        _processor = null;
+        try { processor?.Dispose(); }
+        catch { }
     }
 
     void RaiseTranscript(string text, string? language)

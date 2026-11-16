@@ -49,6 +49,22 @@ public partial class SettingsWindow : Window
         LiveDetail.Foreground = Theme.Artist;
         LiveDetail.FontFamily = _font;
         LiveKnob.Background = Theme.Title;
+        ApiLabel.Foreground = Theme.Quiet;
+        ApiUrlLabel.Foreground = Theme.Quiet;
+        ApiModelLabel.Foreground = Theme.Quiet;
+        ApiKeyLabel.Foreground = Theme.Quiet;
+        StyleText(ApiDefaultText);
+        StyleText(ApiCustomText);
+        ApiUrlBox.Background = Theme.Chip;
+        ApiModelBox.Background = Theme.Chip;
+        ApiKeyBox.Background = Theme.Chip;
+        StyleField(ApiUrl, ApiUrlHint);
+        StyleField(ApiModel, ApiModelHint);
+        ApiKey.FontFamily = _font;
+        ApiKey.Foreground = Theme.Title;
+        ApiKey.CaretBrush = Theme.Title;
+        ApiKey.Background = Brushes.Transparent;
+        ApiKey.BorderThickness = new Thickness(0);
         HideHint.Foreground = Theme.Artist;
         HideHint.FontFamily = _font;
         HideNameBox.Background = Theme.Chip;
@@ -76,6 +92,8 @@ public partial class SettingsWindow : Window
         WireDirection(DirAuto, TranslateDirection.Auto);
         WireDirection(DirZhEn, TranslateDirection.ChineseToEnglish);
         WireDirection(DirEnZh, TranslateDirection.EnglishToChinese);
+        WireApi(ApiDefault, TranslateApiKind.Default);
+        WireApi(ApiCustom, TranslateApiKind.Custom);
         StyleChip(ActTranslate, ActTranslateText);
         StyleChip(ActRecall, ActRecallText);
         StyleChip(ActCamera, ActCameraText);
@@ -109,6 +127,21 @@ public partial class SettingsWindow : Window
             _island.ToggleLiveTranslate();
             RefreshFromIsland();
         };
+        ApiUrl.TextChanged += (_, _) =>
+        {
+            ApiUrlHint.Visibility = string.IsNullOrEmpty(ApiUrl.Text) ? Visibility.Visible : Visibility.Collapsed;
+            PersistApi(rememberFields: true);
+        };
+        ApiModel.TextChanged += (_, _) =>
+        {
+            ApiModelHint.Visibility = string.IsNullOrEmpty(ApiModel.Text) ? Visibility.Visible : Visibility.Collapsed;
+            PersistApi(rememberFields: true);
+        };
+        ApiKey.PasswordChanged += (_, _) => PersistApi(rememberFields: true);
+        ApiUrl.LostFocus += (_, _) => PersistApi(rememberFields: true);
+        ApiModel.LostFocus += (_, _) => PersistApi(rememberFields: true);
+        ApiKey.LostFocus += (_, _) => PersistApi(rememberFields: true);
+        Closed += (_, _) => PersistApi(rememberFields: true);
         HideName.TextChanged += (_, _) =>
             HideNameHint.Visibility = string.IsNullOrEmpty(HideName.Text) ? Visibility.Visible : Visibility.Collapsed;
         HideName.KeyDown += (_, e) =>
@@ -164,6 +197,8 @@ public partial class SettingsWindow : Window
             style |= NativeMethods.WS_EX_TOOLWINDOW;
             style &= ~NativeMethods.WS_EX_APPWINDOW;
             NativeMethods.SetWindowLongPtr(source.Handle, NativeMethods.GWL_EXSTYLE, new IntPtr(style));
+            double work = SystemParameters.WorkArea.Height;
+            BodyScroll.MaxHeight = Math.Max(280, work - 140);
         };
         RefreshFromIsland();
     }
@@ -180,6 +215,31 @@ public partial class SettingsWindow : Window
         PaintDirection(DirAuto, direction == TranslateDirection.Auto);
         PaintDirection(DirZhEn, direction == TranslateDirection.ChineseToEnglish);
         PaintDirection(DirEnZh, direction == TranslateDirection.EnglishToChinese);
+
+        var api = TranslateApiPolicy.Parse(_island.Settings.TranslateApi);
+        PaintDirection(ApiDefault, api == TranslateApiKind.Default);
+        PaintDirection(ApiCustom, api == TranslateApiKind.Custom);
+        ApiFields.Visibility = api == TranslateApiKind.Custom ? Visibility.Visible : Visibility.Collapsed;
+        if (!ApiUrl.IsKeyboardFocusWithin)
+        {
+            var url = _island.Settings.TranslateApiUrl ?? "";
+            if (ApiUrl.Text != url)
+                ApiUrl.Text = url;
+        }
+        if (!ApiModel.IsKeyboardFocusWithin)
+        {
+            var model = _island.Settings.TranslateApiModel ?? "";
+            if (ApiModel.Text != model)
+                ApiModel.Text = model;
+        }
+        if (!ApiKey.IsKeyboardFocusWithin)
+        {
+            var key = _island.Settings.TranslateApiKey ?? "";
+            if (ApiKey.Password != key)
+                ApiKey.Password = key;
+        }
+        ApiUrlHint.Visibility = string.IsNullOrEmpty(ApiUrl.Text) ? Visibility.Visible : Visibility.Collapsed;
+        ApiModelHint.Visibility = string.IsNullOrEmpty(ApiModel.Text) ? Visibility.Visible : Visibility.Collapsed;
 
         var names = _island.Settings.HideProcesses ?? new List<string>();
         bool suggest = _suggested.Length > 0 && !HidePolicy.IsListed(names, _suggested);
@@ -264,7 +324,7 @@ public partial class SettingsWindow : Window
     {
         while (source != null)
         {
-            if (source is TextBox)
+            if (source is TextBox || source is PasswordBox)
                 return true;
             if (source is FrameworkElement element && element.Cursor == Cursors.Hand)
                 return true;
@@ -443,6 +503,41 @@ public partial class SettingsWindow : Window
         }
 
         return names;
+    }
+
+    void WireApi(Border chip, TranslateApiKind kind)
+    {
+        chip.MouseEnter += (_, _) => chip.Background = Theme.ChipHover;
+        chip.MouseLeave += (_, _) => PaintDirection(chip, SelectedApi() == kind);
+        chip.MouseLeftButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            PersistApi(kind, rememberFields: true);
+            RefreshFromIsland();
+        };
+    }
+
+    void PersistApi(bool rememberFields) => PersistApi(SelectedApi(), rememberFields);
+
+    void PersistApi(TranslateApiKind kind, bool rememberFields)
+    {
+        string? url = rememberFields ? ApiUrl.Text : _island.Settings.TranslateApiUrl;
+        string? model = rememberFields ? ApiModel.Text : _island.Settings.TranslateApiModel;
+        string? key = rememberFields ? ApiKey.Password : _island.Settings.TranslateApiKey;
+        _island.SetTranslateApi(kind, url, model, key);
+    }
+
+    TranslateApiKind SelectedApi() => TranslateApiPolicy.Parse(_island.Settings.TranslateApi);
+
+    void StyleField(TextBox box, TextBlock hint)
+    {
+        box.FontFamily = _font;
+        box.Foreground = Theme.Title;
+        box.CaretBrush = Theme.Title;
+        box.Background = Brushes.Transparent;
+        box.BorderThickness = new Thickness(0);
+        hint.Foreground = Theme.Quiet;
+        hint.FontFamily = _font;
     }
 
     void WireDirection(Border chip, TranslateDirection direction)

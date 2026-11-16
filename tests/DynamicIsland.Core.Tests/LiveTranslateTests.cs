@@ -18,6 +18,11 @@ public class LiveTranslateTests
         var loaded = SettingsJson.Deserialize("{}");
         Assert.False(new AppSettings().Stealth);
         Assert.Equal("auto", loaded.TranslateDirection);
+        Assert.Equal("default", loaded.TranslateApi);
+        Assert.Null(loaded.TranslateApiUrl);
+        Assert.Null(loaded.TranslateApiModel);
+        Assert.Null(loaded.TranslateApiKey);
+        Assert.Equal("default", new AppSettings().TranslateApi);
     }
 
     [Fact]
@@ -105,6 +110,10 @@ public class LiveTranslateTests
         Assert.DoesNotContain("Hello", LiveTranslateCopy.CaptureDenied);
         Assert.DoesNotContain("Hello", LiveTranslateCopy.CaptureFormatUnsupported);
         Assert.DoesNotContain("Hello", LiveTranslateCopy.CaptureFailedGeneric);
+        Assert.Equal("请先在设置里填写接口地址、模型和密钥", LiveTranslateCopy.ApiNotConfigured);
+        Assert.DoesNotContain("Hello", LiveTranslateCopy.ApiNotConfigured);
+        Assert.DoesNotContain("sk-", LiveTranslateCopy.ApiNotConfigured);
+        Assert.DoesNotContain("Hello", LiveTranslateCopy.ApiRejected);
     }
 
     [Fact]
@@ -424,6 +433,150 @@ public class LiveTranslateTests
         Assert.Equal(IslandMetrics.VLiveTranslateH, vertical.Height);
         Assert.True(horizontal.Radius > 0);
         Assert.True(vertical.Radius > 0);
+        Assert.Equal(520, IslandMetrics.LiveTranslateW);
+        Assert.Equal(248, IslandMetrics.LiveTranslateH);
+        Assert.Equal(260, IslandMetrics.VLiveTranslateW);
+        Assert.Equal(440, IslandMetrics.VLiveTranslateH);
+        Assert.True(horizontal.Width + 40 <= IslandMetrics.WindowWidth);
+        Assert.True(horizontal.Height + IslandMetrics.TopMargin + 40 <= IslandMetrics.WindowHeight);
+        Assert.True(vertical.Width + 40 <= IslandMetrics.VerticalWindowWidth);
+        Assert.True(vertical.Height + IslandMetrics.TopMargin + 40 <= IslandMetrics.VerticalWindowHeight);
+    }
+
+    [Fact]
+    public void Segmenter_UsesShorterHangoverAndMaxUtterance()
+    {
+        Assert.Equal(320, SpeechSegmenter.FrameSamples);
+        Assert.Equal(18, SpeechSegmenter.HangoverFrames);
+        Assert.Equal(200, SpeechSegmenter.MaxSpeechFrames);
+        Assert.Equal(360, SpeechSegmenter.HangoverFrames * 20);
+        Assert.Equal(4000, SpeechSegmenter.MaxSpeechFrames * 20);
+    }
+
+    [Fact]
+    public void CaptionChain_ShowsTwoItems_WithSessionElapsedTimestamps()
+    {
+        var chain = new LiveTranslateCaptionChain();
+        var start = T(0);
+        chain.MarkListening(start);
+
+        int first = chain.Preview("Hello there", T(5000));
+        Assert.True(chain.HasPending);
+        Assert.Equal("0:05", Assert.Single(chain.Items).Timestamp);
+        Assert.Equal("Hello there", chain.Items[0].Primary);
+        Assert.True(chain.Items[0].TranslationPending);
+
+        Assert.True(chain.Complete(first, "你好", "Hello there"));
+        Assert.False(chain.HasPending);
+        Assert.Equal("你好", chain.Items[0].Primary);
+        Assert.Equal("Hello there", chain.Items[0].Original);
+
+        int second = chain.Preview("Open the window", T(18000));
+        Assert.Equal(2, chain.Items.Count);
+        Assert.Equal("0:05", chain.Items[0].Timestamp);
+        Assert.Equal("你好", chain.Items[0].Primary);
+        Assert.Equal("0:18", chain.Items[1].Timestamp);
+        Assert.Equal("Open the window", chain.Items[1].Primary);
+        Assert.True(chain.Complete(second, "请打开窗户", "Open the window"));
+        Assert.Equal("请打开窗户", chain.Items[1].Primary);
+        Assert.Equal("Open the window", chain.Items[1].Original);
+
+        int third = chain.AppendFinal("已经是中文了", T(70000), alreadyChinese: true);
+        Assert.Equal(2, chain.Items.Count);
+        Assert.Equal("请打开窗户", chain.Items[0].Primary);
+        Assert.Equal("1:10", chain.Items[1].Timestamp);
+        Assert.Equal("已经是中文了", chain.Items[1].Primary);
+        Assert.True(chain.Items[1].AlreadyChinese);
+        Assert.Equal(third, chain.Items[1].Id);
+
+        chain.Reset();
+        Assert.Empty(chain.Items);
+        chain.MarkListening(T(100000));
+        int again = chain.Preview("Again", T(101000));
+        Assert.Equal("0:01", Assert.Single(chain.Items).Timestamp);
+        Assert.NotEqual(first, again);
+        Assert.False(chain.Complete(first, "旧的不应写入", null));
+        Assert.Equal("Again", chain.Items[0].Primary);
+    }
+
+    [Fact]
+    public void CaptionChain_PreviewThenFail_KeepsRecognizedText()
+    {
+        var chain = new LiveTranslateCaptionChain();
+        chain.MarkListening(T(0));
+        int id = chain.Preview("Bonjour", T(2000));
+        Assert.Equal("0:02", chain.Items[0].Timestamp);
+        Assert.True(chain.Fail(id));
+        Assert.Equal("Bonjour", chain.Items[0].Primary);
+        Assert.True(chain.Items[0].TranslationFailed);
+        Assert.False(chain.Items[0].TranslationPending);
+        Assert.False(chain.Complete(99, "忽略", null));
+    }
+
+    [Fact]
+    public void CaptionChain_FormatElapsed_UsesMinutesAndSeconds()
+    {
+        Assert.Equal("0:00", LiveTranslateCaptionChain.FormatElapsed(TimeSpan.Zero));
+        Assert.Equal("0:09", LiveTranslateCaptionChain.FormatElapsed(TimeSpan.FromSeconds(9)));
+        Assert.Equal("1:05", LiveTranslateCaptionChain.FormatElapsed(TimeSpan.FromSeconds(65)));
+        Assert.Equal("10:00", LiveTranslateCaptionChain.FormatElapsed(TimeSpan.FromMinutes(10)));
+        Assert.Equal("1:00:00", LiveTranslateCaptionChain.FormatElapsed(TimeSpan.FromHours(1)));
+        Assert.Equal("0:00", LiveTranslateCaptionChain.FormatElapsed(TimeSpan.FromSeconds(-3)));
+    }
+
+    [Fact]
+    public void TranslateApi_JoinsOpenAiCompatibleUrls_AndRejectsNonLocalHttp()
+    {
+        Assert.Equal(TranslateApiKind.Default, TranslateApiPolicy.Parse(null));
+        Assert.Equal(TranslateApiKind.Default, TranslateApiPolicy.Parse("default"));
+        Assert.Equal(TranslateApiKind.Custom, TranslateApiPolicy.Parse("custom"));
+        Assert.Equal("custom", TranslateApiPolicy.ToSetting(TranslateApiKind.Custom));
+
+        Assert.True(TranslateApiPolicy.TryNormalizeEndpoint("https://api.example.com", out var bare, out _));
+        Assert.Equal("https://api.example.com/v1/chat/completions", bare);
+        Assert.True(TranslateApiPolicy.TryNormalizeEndpoint("https://api.example.com/", out var slash, out _));
+        Assert.Equal("https://api.example.com/v1/chat/completions", slash);
+        Assert.True(TranslateApiPolicy.TryNormalizeEndpoint("https://api.example.com/v1", out var v1, out _));
+        Assert.Equal("https://api.example.com/v1/chat/completions", v1);
+        Assert.True(TranslateApiPolicy.TryNormalizeEndpoint("https://api.example.com/v1/", out var v1slash, out _));
+        Assert.Equal("https://api.example.com/v1/chat/completions", v1slash);
+        Assert.True(TranslateApiPolicy.TryNormalizeEndpoint("https://openrouter.example/api/v1", out var nested, out _));
+        Assert.Equal("https://openrouter.example/api/v1/chat/completions", nested);
+        Assert.True(TranslateApiPolicy.TryNormalizeEndpoint("https://api.example.com/v1/chat/completions", out var full, out _));
+        Assert.Equal("https://api.example.com/v1/chat/completions", full);
+        Assert.True(TranslateApiPolicy.TryNormalizeEndpoint("http://127.0.0.1:11434/v1", out var loopback, out _));
+        Assert.Equal("http://127.0.0.1:11434/v1/chat/completions", loopback);
+        Assert.True(TranslateApiPolicy.TryNormalizeEndpoint("http://localhost:8080", out var local, out _));
+        Assert.Equal("http://localhost:8080/v1/chat/completions", local);
+        Assert.True(TranslateApiPolicy.TryNormalizeEndpoint("http://[::1]:1234/v1", out var v6, out _));
+        Assert.Equal("http://[::1]:1234/v1/chat/completions", v6);
+
+        Assert.False(TranslateApiPolicy.TryNormalizeEndpoint("", out _, out var missing));
+        Assert.Equal("missing", missing);
+        Assert.False(TranslateApiPolicy.TryNormalizeEndpoint("not a url", out _, out var invalid));
+        Assert.Equal("invalid", invalid);
+        Assert.False(TranslateApiPolicy.TryNormalizeEndpoint("http://192.168.1.10:8080/v1", out _, out var scheme));
+        Assert.Equal("scheme", scheme);
+        Assert.False(TranslateApiPolicy.TryNormalizeEndpoint("ftp://api.example.com", out _, out _));
+
+        var ready = TranslateApiPolicy.From("custom", "https://api.example.com/v1", "demo-model", "secret");
+        Assert.True(TranslateApiPolicy.IsReady(ready));
+        Assert.False(TranslateApiPolicy.IsReady(TranslateApiPolicy.From("custom", "https://api.example.com/v1", "demo-model", "")));
+        Assert.True(TranslateApiPolicy.IsReady(TranslateApiPolicy.From("default", null, null, null)));
+    }
+
+    [Fact]
+    public void TranslateApi_BuildsChatBody_WithoutTheKey()
+    {
+        var body = TranslateApiPolicy.ChatCompletionsBody("demo-model", "Hello world");
+        Assert.Contains("demo-model", body, StringComparison.Ordinal);
+        Assert.Contains("Hello world", body, StringComparison.Ordinal);
+        Assert.Contains("简体中文", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret", body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Authorization", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("早上好", TranslateApiPolicy.ReadChatCompletion("""{"choices":[{"message":{"content":"早上好"}}]}"""));
+        Assert.Null(TranslateApiPolicy.ReadChatCompletion("""{"error":"nope"}"""));
+        Assert.Null(TranslateApiPolicy.ReadChatCompletion("not-json"));
     }
 
     static float[] Voice(int frames)

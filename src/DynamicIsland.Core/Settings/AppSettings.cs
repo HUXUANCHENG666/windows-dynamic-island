@@ -28,6 +28,16 @@ public sealed class AppSettings
     public List<MonitorDock> Docks { get; set; } = new();
     public string TranslateDirection { get; set; } = "auto";
 
+    /// <summary>实时翻译用的接口：default 为 MyMemory，custom 为 OpenAI 兼容的对话接口。会记住。</summary>
+    public string TranslateApi { get; set; } = "default";
+
+    /// <summary>自定义接口的基础地址，例如 https://api.example.com/v1。</summary>
+    public string? TranslateApiUrl { get; set; }
+
+    public string? TranslateApiModel { get; set; }
+
+    public string? TranslateApiKey { get; set; }
+
     /// <summary>用户希望在岛上显示通知中心。默认关，允许之后才会去读。</summary>
     public bool NotificationCenter { get; set; }
 

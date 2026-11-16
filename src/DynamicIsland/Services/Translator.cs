@@ -1,32 +1,89 @@
 using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
+using DynamicIsland.Core.LiveTranslate;
 using DynamicIsland.Core.Translation;
 
 namespace DynamicIsland.Services;
 
 sealed class Translator : IDisposable
 {
-    readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(8) };
+    readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(20) };
 
     public Translator()
     {
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("DynamicIsland/1.1");
     }
 
-    public async Task<string> TranslateAsync(TranslateRequest request, CancellationToken cancellation)
+    public Task<string> TranslateAsync(TranslateRequest request, CancellationToken cancellation) =>
+        TranslateAsync(request, new TranslateApiOptions(TranslateApiKind.Default, null, null, null), cancellation);
+
+    public async Task<string> TranslateAsync(TranslateRequest request, TranslateApiOptions api, CancellationToken cancellation)
+    {
+        if (api.Kind == TranslateApiKind.Custom)
+            return await TranslateWithModelAsync(request, api, cancellation).ConfigureAwait(false);
+        return await TranslateWithMemoryAsync(request, cancellation).ConfigureAwait(false);
+    }
+
+    async Task<string> TranslateWithMemoryAsync(TranslateRequest request, CancellationToken cancellation)
     {
         var url = "https://api.mymemory.translated.net/get?q="
             + Uri.EscapeDataString(request.Text)
             + "&langpair="
             + Uri.EscapeDataString(request.Source + "|" + request.Target);
-        using var response = await _http.GetAsync(url, cancellation).ConfigureAwait(false);
-        var body = await response.Content.ReadAsStringAsync(cancellation).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        timeout.CancelAfter(TimeSpan.FromSeconds(8));
+        try
+        {
+            using var response = await _http.GetAsync(url, timeout.Token).ConfigureAwait(false);
+            var body = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+                throw new InvalidOperationException("翻译服务暂时连不上。检查网络后再试。");
+            return ReadMemory(body);
+        }
+        catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
+        {
             throw new InvalidOperationException("翻译服务暂时连不上。检查网络后再试。");
-        return Read(body);
+        }
     }
 
-    static string Read(string body)
+    async Task<string> TranslateWithModelAsync(TranslateRequest request, TranslateApiOptions api, CancellationToken cancellation)
+    {
+        if (!TranslateApiPolicy.TryNormalizeEndpoint(api.BaseUrl, out var url, out var error)
+            || string.IsNullOrWhiteSpace(api.Model)
+            || string.IsNullOrWhiteSpace(api.ApiKey))
+        {
+            throw new InvalidOperationException(
+                error == "scheme" ? LiveTranslateCopy.ApiRejected : LiveTranslateCopy.ApiNotConfigured);
+        }
+
+        using var message = new HttpRequestMessage(HttpMethod.Post, url);
+        message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", api.ApiKey.Trim());
+        message.Content = new StringContent(
+            TranslateApiPolicy.ChatCompletionsBody(api.Model, request.Text),
+            Encoding.UTF8,
+            "application/json");
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        timeout.CancelAfter(TimeSpan.FromSeconds(TranslateApiPolicy.CustomTimeoutSeconds));
+        try
+        {
+            using var response = await _http.SendAsync(message, timeout.Token).ConfigureAwait(false);
+            var body = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+                throw new InvalidOperationException("翻译服务暂时连不上。检查网络后再试。");
+            var text = TranslateApiPolicy.ReadChatCompletion(body);
+            if (string.IsNullOrWhiteSpace(text))
+                throw new InvalidOperationException("没有得到译文。可以过一会儿再试。");
+            return text;
+        }
+        catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
+        {
+            throw new InvalidOperationException("翻译服务暂时连不上。检查网络后再试。");
+        }
+    }
+
+    static string ReadMemory(string body)
     {
         try
         {

@@ -16,13 +16,13 @@ public readonly record struct LiveTranslatePlan(
 
 /// <summary>
 /// 实时翻译默认关，也不会记住上次有没有开。打开之后才捕获系统正在播放的声音。
-/// 识别出的中文直接显示，不再送去翻译。外语才整理成发往 MyMemory 的请求，目标固定是简体中文。
+/// 识别出的中文直接显示，不再送去翻译。外语才整理成翻译请求，目标固定是简体中文。
 /// </summary>
 public static class LiveTranslatePolicy
 {
     public const bool EnabledByDefault = false;
     public const bool PersistsAcrossLaunches = false;
-    public const int MaxDisplayChars = 80;
+    public const int MaxDisplayChars = 96;
 
     public static bool IsChineseLanguage(string? whisperLanguage)
     {
@@ -176,6 +176,8 @@ public static class LiveTranslateCopy
     public const string DownloadFailed = "识别模型下载失败。请检查网络后重试。";
     public const string Cancelled = "已取消下载。";
     public const string TranslateFailed = "这一句没有译成。";
+    public const string ApiNotConfigured = "请先在设置里填写接口地址、模型和密钥";
+    public const string ApiRejected = "这个接口地址不能用。请填写 https 地址，或本机的 http 地址。";
     public const string ModelCorrupt = "识别模型不完整，正在重新下载…";
     public const string ModelLoadFailed = "识别模型无法加载。请关掉翻译后再试一次。";
     public const string NativeLibraryMissing = "识别组件没有装完整。请重新解压整个测试包，让 runtimes 文件夹和程序放在一起。";

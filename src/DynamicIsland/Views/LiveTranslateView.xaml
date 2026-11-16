@@ -24,9 +24,16 @@
             </StackPanel>
         </Grid>
         <TextBlock x:Name="Status" Grid.Row="1" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap" TextTrimming="CharacterEllipsis"/>
-        <StackPanel Grid.Row="2" Margin="0,6,0,0" VerticalAlignment="Center">
-            <TextBlock x:Name="Original" FontSize="12" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="36" Visibility="Collapsed"/>
-            <TextBlock x:Name="Chinese" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="64" Margin="0,2,0,0"/>
+        <StackPanel Grid.Row="2" Margin="0,8,0,0">
+            <StackPanel x:Name="OlderBlock" Visibility="Collapsed" Margin="0,0,0,10">
+                <TextBlock x:Name="OlderTime" FontSize="11" Margin="0,0,0,2"/>
+                <TextBlock x:Name="OlderText" FontSize="13" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="44"/>
+            </StackPanel>
+            <StackPanel x:Name="NewerBlock" Visibility="Collapsed">
+                <TextBlock x:Name="NewerTime" FontSize="11" Margin="0,0,0,2"/>
+                <TextBlock x:Name="NewerText" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="56"/>
+                <TextBlock x:Name="NewerOriginal" FontSize="12" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="36" Margin="0,2,0,0" Visibility="Collapsed"/>
+            </StackPanel>
         </StackPanel>
         <Border x:Name="ProgressHost" Grid.Row="3" Height="4" CornerRadius="2" Margin="0,10,0,0" Visibility="Collapsed" ClipToBounds="True">
             <Grid>

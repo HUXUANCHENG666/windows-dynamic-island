@@ -35,6 +35,7 @@ public partial class IslandWindow : Window
     readonly TranslateSession _translate = new();
     readonly CameraSession _camera;
     readonly LiveTranslateService _liveTranslate;
+    readonly LiveTranslateCaptionChain _liveCaptions = new();
     readonly FullscreenWatcher _watcher = new();
     readonly DynamicIsland.Core.Media.TimelineEstimator _timeline = new();
     CancellationTokenSource? _translateCts;
@@ -374,6 +375,15 @@ public partial class IslandWindow : Window
         Settings.TranslateDirection = DynamicIsland.Core.Translation.TranslatePolicy.ToSetting(direction);
         SettingsStore.Save(Settings);
         TranslateNotice.SetDirection(direction);
+    }
+
+    public void SetTranslateApi(TranslateApiKind kind, string? url, string? model, string? key)
+    {
+        Settings.TranslateApi = TranslateApiPolicy.ToSetting(kind);
+        Settings.TranslateApiUrl = string.IsNullOrWhiteSpace(url) ? null : url.Trim();
+        Settings.TranslateApiModel = string.IsNullOrWhiteSpace(model) ? null : model.Trim();
+        Settings.TranslateApiKey = string.IsNullOrWhiteSpace(key) ? null : key.Trim();
+        SettingsStore.Save(Settings);
     }
 
     public void OpenLog()
@@ -1304,6 +1314,7 @@ public partial class IslandWindow : Window
     {
         StopLiveTranslate(collapseUi: false);
         _director.SetLiveTranslate(true);
+        _liveCaptions.Reset();
         LiveTranslateNotice.ClearSubtitle();
         LiveTranslateNotice.ShowStatus(LiveTranslateCopy.LoadingModel, working: true, progress: null, canCancel: false);
         Log.Info("live-translate start");
@@ -1316,6 +1327,8 @@ public partial class IslandWindow : Window
     {
         _ctsLive?.Cancel();
         _liveTranslate.Stop();
+        _liveCaptions.Reset();
+        LiveTranslateNotice.ClearSubtitle();
         if (collapseUi && (_director.LiveTranslateOpen || _director.Mode == IslandMode.LiveTranslate))
             _director.SetLiveTranslate(false);
         _settingsWindow?.RefreshFromIsland();
@@ -1326,9 +1339,14 @@ public partial class IslandWindow : Window
     {
         if (snapshot.Phase == LiveTranslatePhase.Off && !_director.LiveTranslateOpen)
             return;
+        if (snapshot.Phase == LiveTranslatePhase.Listening)
+            _liveCaptions.MarkListening(DateTime.UtcNow);
         bool working = snapshot.Phase is LiveTranslatePhase.Downloading or LiveTranslatePhase.Loading
             or LiveTranslatePhase.Listening or LiveTranslatePhase.Recognizing;
-        LiveTranslateNotice.ShowStatus(snapshot.Message, working, snapshot.Progress, snapshot.CanCancel);
+        var message = snapshot.Message;
+        if (snapshot.Phase == LiveTranslatePhase.Listening && _liveCaptions.HasPending)
+            message = LiveTranslateCopy.Translating;
+        LiveTranslateNotice.ShowStatus(message, working, snapshot.Progress, snapshot.CanCancel);
         if (!_director.LiveTranslateOpen && snapshot.Phase is not LiveTranslatePhase.Off)
             _director.SetLiveTranslate(true);
         Nudge();
@@ -1341,43 +1359,67 @@ public partial class IslandWindow : Window
         var plan = LiveTranslatePolicy.Plan(text, language);
         if (plan.Decision == LiveTranslateDecision.Empty)
             return;
+
+        var now = DateTime.UtcNow;
         if (plan.Decision == LiveTranslateDecision.AlreadyChinese)
         {
-            LiveTranslateNotice.ShowSubtitle(plan.DisplayText, null, alreadyChinese: true);
+            _liveCaptions.AppendFinal(plan.DisplayText, now, alreadyChinese: true);
+            LiveTranslateNotice.ShowCaptions(_liveCaptions.Items);
+            LiveTranslateNotice.ShowStatus(LiveTranslateCopy.AlreadyChinese, working: true, progress: null, canCancel: false);
             Nudge();
             return;
         }
 
         if (plan.Request is not { } request)
             return;
+
+        int id = _liveCaptions.Preview(plan.DisplayText, now);
+        LiveTranslateNotice.ShowCaptions(_liveCaptions.Items);
+        var api = TranslateApiPolicy.From(Settings.TranslateApi, Settings.TranslateApiUrl, Settings.TranslateApiModel, Settings.TranslateApiKey);
+        if (!TranslateApiPolicy.IsReady(api))
+        {
+            _liveCaptions.Fail(id);
+            LiveTranslateNotice.ShowCaptions(_liveCaptions.Items);
+            LiveTranslateNotice.ShowStatus(LiveTranslateCopy.ApiNotConfigured, working: true, progress: null, canCancel: false);
+            Nudge();
+            return;
+        }
+
         LiveTranslateNotice.ShowStatus(LiveTranslateCopy.Translating, working: true, progress: null, canCancel: false);
         Nudge();
-        _ = TranslateLiveAsync(request, plan.DisplayText);
+        _ = TranslateLiveAsync(request, id, plan.DisplayText, api);
     }
 
-    async Task TranslateLiveAsync(TranslateRequest request, string original)
+    async Task TranslateLiveAsync(TranslateRequest request, int captionId, string original, TranslateApiOptions api)
     {
         try
         {
             _ctsLive?.Cancel();
             _ctsLive = new CancellationTokenSource();
             var token = _ctsLive.Token;
-            var result = await _translator.TranslateAsync(request, token).ConfigureAwait(true);
+            var result = await _translator.TranslateAsync(request, api, token).ConfigureAwait(true);
             if (token.IsCancellationRequested || !_director.LiveTranslateOpen)
                 return;
-            LiveTranslateNotice.ShowSubtitle(LiveTranslatePolicy.ForIsland(result), original, alreadyChinese: false);
+            if (!_liveCaptions.Complete(captionId, LiveTranslatePolicy.ForIsland(result), original))
+                return;
+            LiveTranslateNotice.ShowCaptions(_liveCaptions.Items);
+            LiveTranslateNotice.ShowStatus(LiveTranslateCopy.Listening, working: true, progress: null, canCancel: false);
             Nudge();
         }
         catch (OperationCanceledException)
         {
+            if (_director.LiveTranslateOpen)
+                _liveCaptions.Fail(captionId);
         }
         catch (Exception ex)
         {
             Log.Error("live-translate-text", ex);
             if (!_director.LiveTranslateOpen)
                 return;
-            LiveTranslateNotice.ShowSubtitle(original, null, alreadyChinese: false);
-            LiveTranslateNotice.ShowStatus(LiveTranslateCopy.TranslateFailed, working: true, progress: null, canCancel: false);
+            _liveCaptions.Fail(captionId);
+            LiveTranslateNotice.ShowCaptions(_liveCaptions.Items);
+            var message = ex is InvalidOperationException ? ex.Message : LiveTranslateCopy.TranslateFailed;
+            LiveTranslateNotice.ShowStatus(message, working: true, progress: null, canCancel: false);
             Nudge();
         }
     }
