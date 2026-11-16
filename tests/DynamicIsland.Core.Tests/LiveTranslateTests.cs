@@ -96,6 +96,21 @@ public class LiveTranslateTests
         Assert.DoesNotContain("Hello", LiveTranslateCopy.Listening);
         Assert.DoesNotContain("Hello", LiveTranslateCopy.Downloading(0.5));
         Assert.DoesNotContain("Hello", LiveTranslateCopy.Connecting);
+        Assert.Equal("识别模型不完整，正在重新下载…", LiveTranslateCopy.ModelCorrupt);
+        Assert.DoesNotContain("Hello", LiveTranslateCopy.ModelLoadFailed);
+    }
+
+    [Fact]
+    public void ModelFile_RejectsWrongSizeOrMagic_AndAcceptsGgmlHeader()
+    {
+        Assert.False(WhisperModelFile.LooksValid(100, "ggml"u8));
+        Assert.False(WhisperModelFile.LooksValid(50_000_000, "HTML"u8));
+        Assert.False(WhisperModelFile.LooksValid(50_000_000, "ggm"u8));
+        Assert.False(WhisperModelFile.LooksValid(200_000_000, "ggml"u8));
+        Assert.True(WhisperModelFile.LooksValid(57_000_000, "ggml"u8));
+        Assert.True(WhisperModelFile.LooksValid(57_000_000, "ggmf"u8));
+        Assert.True(WhisperModelFile.LooksValid(57_000_000, "ggjt"u8));
+        Assert.True(WhisperModelFile.LooksValid(57_000_000, "GGUF"u8));
     }
 
     [Fact]

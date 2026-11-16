@@ -131,7 +131,8 @@ public static class LiveTranslateCopy
     public const string DownloadFailed = "识别模型下载失败。请检查网络后重试。";
     public const string Cancelled = "已取消下载。";
     public const string TranslateFailed = "这一句没有译成。";
-    public const string ModelCorrupt = "识别模型不完整，请关掉后重新打开，让它再下载一次。";
+    public const string ModelCorrupt = "识别模型不完整，正在重新下载…";
+    public const string ModelLoadFailed = "识别模型无法加载。请关掉翻译后再试一次。";
 
     public static string Downloading(double progress) => Downloading(progress, 0, null);
 

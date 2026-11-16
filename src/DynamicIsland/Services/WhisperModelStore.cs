@@ -12,8 +12,8 @@ namespace DynamicIsland.Services;
 static class WhisperModelStore
 {
     public const string FileName = "ggml-base-q5_1.bin";
-    public const long MinBytes = 40_000_000;
-    public const long MaxBytes = 90_000_000;
+    public const long MinBytes = WhisperModelFile.MinBytes;
+    public const long MaxBytes = WhisperModelFile.MaxBytes;
     public static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(10);
     public static readonly TimeSpan HeaderTimeout = TimeSpan.FromSeconds(15);
     public static readonly TimeSpan StallTimeout = TimeSpan.FromSeconds(20);
@@ -32,18 +32,7 @@ static class WhisperModelStore
 
     public static string FilePath => IOPath.Combine(DirectoryPath, FileName);
 
-    public static bool IsReady()
-    {
-        try
-        {
-            var info = new FileInfo(FilePath);
-            return info.Exists && info.Length >= MinBytes && info.Length <= MaxBytes;
-        }
-        catch
-        {
-            return false;
-        }
-    }
+    public static bool IsReady() => WhisperModelFile.LooksValid(FilePath);
 
     public static async Task DownloadAsync(Action<string, double> progress, CancellationToken cancellation)
     {
@@ -67,8 +56,7 @@ static class WhisperModelStore
                 if (File.Exists(partial))
                     File.Delete(partial);
                 await PullAsync(url, partial, progress, cancellation).ConfigureAwait(false);
-                var info = new FileInfo(partial);
-                if (!info.Exists || info.Length < MinBytes || info.Length > MaxBytes)
+                if (!WhisperModelFile.LooksValid(partial))
                     throw new InvalidOperationException(LiveTranslateCopy.DownloadFailed);
                 if (File.Exists(FilePath))
                     File.Delete(FilePath);
@@ -93,15 +81,8 @@ static class WhisperModelStore
 
     public static void TryDeleteCorrupt()
     {
-        try
-        {
-            if (File.Exists(FilePath) && !IsReady())
-                File.Delete(FilePath);
-        }
-        catch (Exception ex)
-        {
-            Log.Error("live-translate-model", ex);
-        }
+        TryDelete(FilePath);
+        TryDelete(FilePath + ".partial");
     }
 
     static async Task PullAsync(string url, string destination, Action<string, double> progress, CancellationToken cancellation)

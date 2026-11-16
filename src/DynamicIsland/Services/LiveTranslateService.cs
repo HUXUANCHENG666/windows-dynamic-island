@@ -98,55 +98,67 @@ sealed class LiveTranslateService : IDisposable
     {
         try
         {
-            if (!WhisperModelStore.IsReady())
+            bool retriedLoad = false;
+            while (true)
             {
-                Publish(new LiveTranslateSnapshot(LiveTranslatePhase.Downloading, LiveTranslateCopy.Connecting, 0, true));
-                await WhisperModelStore.DownloadAsync((message, progress) =>
+                if (!WhisperModelStore.IsReady())
                 {
-                    if (generation != _generation)
+                    var startMessage = retriedLoad ? LiveTranslateCopy.ModelCorrupt : LiveTranslateCopy.Connecting;
+                    Publish(new LiveTranslateSnapshot(LiveTranslatePhase.Downloading, startMessage, 0, true));
+                    await WhisperModelStore.DownloadAsync((message, progress) =>
+                    {
+                        if (generation != _generation)
+                            return;
+                        Publish(new LiveTranslateSnapshot(
+                            LiveTranslatePhase.Downloading,
+                            message,
+                            progress,
+                            true));
+                    }, token).ConfigureAwait(false);
+                }
+
+                token.ThrowIfCancellationRequested();
+                if (generation != _generation)
+                    return;
+                Publish(new LiveTranslateSnapshot(LiveTranslatePhase.Loading, LiveTranslateCopy.LoadingModel, null, false));
+                WhisperFactory factory;
+                try
+                {
+                    factory = WhisperFactory.FromPath(WhisperModelStore.FilePath);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error("live-translate-model", ex);
+                    WhisperModelStore.TryDeleteCorrupt();
+                    if (retriedLoad)
+                    {
+                        Publish(new LiveTranslateSnapshot(LiveTranslatePhase.Error, LiveTranslateCopy.ModelLoadFailed, null, false));
                         return;
-                    Publish(new LiveTranslateSnapshot(
-                        LiveTranslatePhase.Downloading,
-                        message,
-                        progress,
-                        true));
-                }, token).ConfigureAwait(false);
-            }
+                    }
 
-            token.ThrowIfCancellationRequested();
-            if (generation != _generation)
-                return;
-            Publish(new LiveTranslateSnapshot(LiveTranslatePhase.Loading, LiveTranslateCopy.LoadingModel, null, false));
-            WhisperFactory factory;
-            try
-            {
-                factory = WhisperFactory.FromPath(WhisperModelStore.FilePath);
-            }
-            catch (Exception ex)
-            {
-                Log.Error("live-translate-model", ex);
-                WhisperModelStore.TryDeleteCorrupt();
-                Publish(new LiveTranslateSnapshot(LiveTranslatePhase.Error, LiveTranslateCopy.ModelCorrupt, null, false));
-                return;
-            }
+                    retriedLoad = true;
+                    continue;
+                }
 
-            if (generation != _generation)
-            {
-                factory.Dispose();
+                if (generation != _generation)
+                {
+                    factory.Dispose();
+                    return;
+                }
+
+                _factory = factory;
+                if (generation != _generation)
+                {
+                    _factory = null;
+                    factory.Dispose();
+                    return;
+                }
+
+                Log.Info("live-translate model ready");
+                Publish(new LiveTranslateSnapshot(LiveTranslatePhase.Listening, LiveTranslateCopy.Listening, null, false));
+                _capture.Start();
                 return;
             }
-
-            _factory = factory;
-            if (generation != _generation)
-            {
-                _factory = null;
-                factory.Dispose();
-                return;
-            }
-
-            Log.Info("live-translate model ready");
-            Publish(new LiveTranslateSnapshot(LiveTranslatePhase.Listening, LiveTranslateCopy.Listening, null, false));
-            _capture.Start();
         }
         catch (OperationCanceledException)
         {
