@@ -10,17 +10,22 @@ public readonly record struct LiveTranslateCaption(
     bool TranslationPending,
     bool TranslationFailed);
 
+public readonly record struct CaptionUpdate(int Id, string Recognized, bool Merged);
+
 /// <summary>
-/// 岛上最多显示三条字幕。旧的在上，新的在下。
-/// 时间戳是本次打开实时翻译后，从开始听系统声音起算的经过时间；
-/// 如果还没进入收听就出了第一条结果，则从这条结果起算。
+/// 本次打开实时翻译后，最多记住 40 条字幕。旧的在上，新的在下。
+/// 岛上大约能同时看见三句，更早的可以滑回去看。关闭或重新打开会清空。
+/// 时间戳从开始听系统声音起算；还没进入收听就出了第一条时，从这条起算。
 /// 格式为 m:ss，满 10 分钟为 mm:ss，满 1 小时为 h:mm:ss。
-/// 关闭或重新打开会清空，并从 0 重新计。
 /// 识别一出来先作为预览写入，译文到达后再替换该条的中文；失败则保留识别文字。
+/// 很短的后续碎片（一两词），且上一句还没有句末标点时，会接到上一句，避免单字把整句挤走。
 /// </summary>
 public sealed class LiveTranslateCaptionChain
 {
-    public const int MaxItems = 3;
+    public const int MaxItems = 40;
+    public const int MaxMergeWords = 2;
+
+    static readonly char[] SentenceStops = ['.', '。', '!', '?', '！', '？', '…'];
 
     readonly List<LiveTranslateCaption> _items = new();
     DateTime? _origin;
@@ -51,18 +56,24 @@ public sealed class LiveTranslateCaptionChain
 
     public void MarkListening(DateTime utcNow) => _origin ??= utcNow;
 
-    public int Preview(string text, DateTime utcNow)
+    public CaptionUpdate Preview(string text, DateTime utcNow)
     {
+        if (TryMerge(text, alreadyChinese: false, out var merged))
+            return merged;
+
         var caption = Create(text, original: null, alreadyChinese: false, pending: true, failed: false, utcNow);
         Append(caption);
-        return caption.Id;
+        return new CaptionUpdate(caption.Id, caption.Primary, false);
     }
 
-    public int AppendFinal(string text, DateTime utcNow, bool alreadyChinese = false)
+    public CaptionUpdate AppendFinal(string text, DateTime utcNow, bool alreadyChinese = false)
     {
+        if (TryMerge(text, alreadyChinese, out var merged))
+            return merged;
+
         var caption = Create(text, original: null, alreadyChinese, pending: false, failed: false, utcNow);
         Append(caption);
-        return caption.Id;
+        return new CaptionUpdate(caption.Id, caption.Primary, false);
     }
 
     public bool Complete(int id, string primary, string? original)
@@ -103,6 +114,63 @@ public sealed class LiveTranslateCaptionChain
         return true;
     }
 
+    public string? RecognizedText(int id)
+    {
+        int index = IndexOf(id);
+        if (index < 0)
+            return null;
+        var item = _items[index];
+        return string.IsNullOrWhiteSpace(item.Original) ? item.Primary : item.Original;
+    }
+
+    public static bool ShouldMerge(string? previous, string incoming)
+    {
+        if (string.IsNullOrWhiteSpace(previous) || string.IsNullOrWhiteSpace(incoming))
+            return false;
+        if (EndsWithSentenceStop(previous))
+            return false;
+        return WordCount(incoming) > 0 && WordCount(incoming) <= MaxMergeWords;
+    }
+
+    public static string Combine(string previous, string incoming)
+    {
+        var left = LiveTranslatePolicy.Collapse(previous);
+        var right = LiveTranslatePolicy.Collapse(incoming);
+        if (left.Length == 0)
+            return right;
+        if (right.Length == 0)
+            return left;
+        if (NeedsSpace(left, right))
+            return left + " " + right;
+        return left + right;
+    }
+
+    public static bool EndsWithSentenceStop(string text)
+    {
+        var trimmed = text.TrimEnd();
+        if (trimmed.Length == 0)
+            return false;
+        if (trimmed.EndsWith("...", StringComparison.Ordinal) || trimmed.EndsWith("……", StringComparison.Ordinal))
+            return true;
+        return SentenceStops.Contains(trimmed[^1]);
+    }
+
+    public static int WordCount(string text)
+    {
+        var trimmed = LiveTranslatePolicy.Collapse(text);
+        if (trimmed.Length == 0)
+            return 0;
+        if (trimmed.Contains(' '))
+            return trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
+        foreach (var c in trimmed)
+        {
+            if (IsLatinLetter(c))
+                return 1;
+        }
+
+        return (trimmed.Length + 1) / 2;
+    }
+
     public static string FormatElapsed(TimeSpan elapsed)
     {
         if (elapsed < TimeSpan.Zero)
@@ -114,6 +182,57 @@ public sealed class LiveTranslateCaptionChain
         if (hours > 0)
             return $"{hours}:{minutes:00}:{seconds:00}";
         return $"{total / 60}:{seconds:00}";
+    }
+
+    bool TryMerge(string text, bool alreadyChinese, out CaptionUpdate update)
+    {
+        update = default;
+        if (_items.Count == 0)
+            return false;
+
+        int index = _items.Count - 1;
+        var last = _items[index];
+        var recognized = string.IsNullOrWhiteSpace(last.Original) ? last.Primary : last.Original;
+        if (!ShouldMerge(recognized, text))
+            return false;
+
+        var combined = Combine(recognized, text);
+        combined = LiveTranslatePolicy.ForIsland(combined);
+        if (alreadyChinese || last.AlreadyChinese)
+        {
+            _items[index] = last with
+            {
+                Primary = combined,
+                Original = null,
+                AlreadyChinese = true,
+                TranslationPending = false,
+                TranslationFailed = false
+            };
+        }
+        else if (last.TranslationPending || last.TranslationFailed || string.IsNullOrWhiteSpace(last.Original))
+        {
+            _items[index] = last with
+            {
+                Primary = combined,
+                Original = null,
+                AlreadyChinese = false,
+                TranslationPending = true,
+                TranslationFailed = false
+            };
+        }
+        else
+        {
+            _items[index] = last with
+            {
+                Original = combined,
+                AlreadyChinese = false,
+                TranslationPending = true,
+                TranslationFailed = false
+            };
+        }
+
+        update = new CaptionUpdate(last.Id, combined, true);
+        return true;
     }
 
     void Append(LiveTranslateCaption caption)
@@ -150,4 +269,16 @@ public sealed class LiveTranslateCaptionChain
 
         return -1;
     }
+
+    static bool NeedsSpace(string left, string right)
+    {
+        char a = left[^1];
+        char b = right[0];
+        if (char.IsWhiteSpace(a) || char.IsWhiteSpace(b))
+            return false;
+        return IsLatinLetter(a) || IsLatinLetter(b) || (char.IsDigit(a) && char.IsDigit(b));
+    }
+
+    static bool IsLatinLetter(char c) =>
+        c is (>= 'A' and <= 'Z') or (>= 'a' and <= 'z');
 }

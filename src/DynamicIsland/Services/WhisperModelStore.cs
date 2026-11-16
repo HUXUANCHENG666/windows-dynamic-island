@@ -11,7 +11,7 @@ namespace DynamicIsland.Services;
 /// </summary>
 static class WhisperModelStore
 {
-    public const string FileName = "ggml-base-q5_1.bin";
+    public const string FileName = WhisperModelFile.FileName;
     public const long MinBytes = WhisperModelFile.MinBytes;
     public const long MaxBytes = WhisperModelFile.MaxBytes;
     public static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(10);
@@ -22,9 +22,9 @@ static class WhisperModelStore
     // 国内访问 huggingface.co 经常会一直挂住而不报错，所以镜像放在最前，并给连接/停顿设短超时。
     public static readonly string[] Sources =
     {
-        "https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin",
-        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin",
-        "https://huggingface.co/sandrohanea/whisper.net/resolve/v5/q5_1/ggml-base.bin"
+        "https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin",
+        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin",
+        "https://huggingface.co/sandrohanea/whisper.net/resolve/v5/q5_1/ggml-small.bin"
     };
 
     public static string DirectoryPath =>
@@ -32,7 +32,13 @@ static class WhisperModelStore
 
     public static string FilePath => IOPath.Combine(DirectoryPath, FileName);
 
-    public static bool IsReady() => WhisperModelFile.LooksValid(FilePath);
+    public static bool IsReady()
+    {
+        if (!WhisperModelFile.LooksValid(FilePath))
+            return false;
+        TryDeleteLegacy();
+        return true;
+    }
 
     public static async Task DownloadAsync(Action<string, double> progress, CancellationToken cancellation)
     {
@@ -61,6 +67,9 @@ static class WhisperModelStore
                 if (File.Exists(FilePath))
                     File.Delete(FilePath);
                 File.Move(partial, FilePath);
+                if (!WhisperModelFile.LooksValid(FilePath))
+                    throw new InvalidOperationException(LiveTranslateCopy.DownloadFailed);
+                TryDeleteLegacy();
                 return;
             }
             catch (OperationCanceledException)
@@ -157,6 +166,11 @@ static class WhisperModelStore
         {
             throw new TimeoutException("下载长时间没有进度。");
         }
+    }
+
+    static void TryDeleteLegacy()
+    {
+        TryDelete(IOPath.Combine(DirectoryPath, WhisperModelFile.LegacyFileName));
     }
 
     static void TryDelete(string path)

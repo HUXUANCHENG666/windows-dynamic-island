@@ -40,6 +40,7 @@ public partial class IslandWindow : Window
     readonly DynamicIsland.Core.Media.TimelineEstimator _timeline = new();
     CancellationTokenSource? _translateCts;
     CancellationTokenSource? _ctsLive;
+    int _liveTranslateSeq;
     TrayController? _tray;
     DispatcherTimer? _slow;
     DispatcherTimer? _topmost;
@@ -938,10 +939,17 @@ public partial class IslandWindow : Window
                 break;
             case NativeMethods.WM_LBUTTONDOWN:
                 var press = HitTranslation();
-                if (press == DynamicIsland.Core.Translation.TranslationHit.ResultText)
+                if (press == DynamicIsland.Core.Translation.TranslationHit.ResultText || HitCaptionScroll())
                     _director.SetTranslationSelection(true);
                 if (DynamicIsland.Core.Translation.TranslationGesture.ShouldArmDrag(press, _director.SelectionHold))
                     ArmDrag();
+                break;
+            case NativeMethods.WM_MOUSEWHEEL:
+                if (HitCaptionScroll())
+                {
+                    LiveTranslateNotice.TryWheel(NativeMethods.SignedHigh(wParam));
+                    handled = true;
+                }
                 break;
             case NativeMethods.WM_LBUTTONUP:
                 bool selecting = _director.SelectionHold;
@@ -1268,6 +1276,19 @@ public partial class IslandWindow : Window
             SyncLoops();
     }
 
+    bool HitCaptionScroll()
+    {
+        if (!_director.LiveTranslateOpen || !LiveTranslateNotice.IsVisible)
+            return false;
+        if (!NativeMethods.GetCursorPos(out var point))
+            return false;
+        if (HitElement(LiveTranslateNotice.CloseTranslate, point))
+            return false;
+        if (LiveTranslateNotice.CancelDownload.IsVisible && HitElement(LiveTranslateNotice.CancelDownload, point))
+            return false;
+        return HitElement(LiveTranslateNotice.CaptionScroll, point);
+    }
+
     DynamicIsland.Core.Translation.TranslationHit HitTranslation()
     {
         if (!TranslateNotice.ResultIsSelectable || !_director.IsShowingTranslation)
@@ -1415,7 +1436,30 @@ public partial class IslandWindow : Window
         if (plan.Request is not { } request)
             return;
 
-        int id = _liveCaptions.Preview(plan.DisplayText, now);
+        var edit = _liveCaptions.Preview(plan.DisplayText, now);
+        int id = edit.Id;
+        var recognized = edit.Recognized;
+        if (edit.Merged)
+        {
+            var again = LiveTranslatePolicy.Plan(recognized, language);
+            if (again.Decision == LiveTranslateDecision.Empty)
+            {
+                LiveTranslateNotice.ShowCaptions(_liveCaptions.Items);
+                Nudge();
+                return;
+            }
+            if (again.Decision == LiveTranslateDecision.AlreadyChinese)
+            {
+                _liveCaptions.Complete(id, recognized, null);
+                LiveTranslateNotice.ShowCaptions(_liveCaptions.Items);
+                LiveTranslateNotice.ShowStatus(LiveTranslateCopy.AlreadyChinese, working: true, progress: null, canCancel: false);
+                Nudge();
+                return;
+            }
+            if (again.Request is { } rebuilt)
+                request = rebuilt;
+        }
+
         LiveTranslateNotice.ShowCaptions(_liveCaptions.Items);
         var api = TranslateApiPolicy.From(Settings.TranslateApi, Settings.TranslateApiUrl, Settings.TranslateApiModel, Settings.TranslateApiKey);
         if (!TranslateApiPolicy.IsReady(api))
@@ -1429,11 +1473,12 @@ public partial class IslandWindow : Window
 
         LiveTranslateNotice.ShowStatus(LiveTranslateCopy.Translating, working: true, progress: null, canCancel: false);
         Nudge();
-        _ = TranslateLiveAsync(request, id, plan.DisplayText, api);
+        _ = TranslateLiveAsync(request, id, recognized, api);
     }
 
     async Task TranslateLiveAsync(TranslateRequest request, int captionId, string original, TranslateApiOptions api)
     {
+        int seq = ++_liveTranslateSeq;
         try
         {
             _ctsLive?.Cancel();
@@ -1450,7 +1495,8 @@ public partial class IslandWindow : Window
         }
         catch (OperationCanceledException)
         {
-            if (_director.LiveTranslateOpen)
+            // A newer request may still own this caption id after a short-fragment merge.
+            if (_director.LiveTranslateOpen && seq == _liveTranslateSeq)
                 _liveCaptions.Fail(captionId);
         }
         catch (Exception ex)

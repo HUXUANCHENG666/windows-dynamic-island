@@ -27,6 +27,7 @@ static class NativeMethods
 
     public const int WM_NCHITTEST = 0x0084;
     public const int WM_LBUTTONDOWN = 0x0201;
+    public const int WM_MOUSEWHEEL = 0x020A;
     public const int WM_MOUSEMOVE = 0x0200;
     public const int WM_CAPTURECHANGED = 0x0215;
     public const int WM_CLIPBOARDUPDATE = 0x031D;

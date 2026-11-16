@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using DynamicIsland.Core.LiveTranslate;
@@ -12,32 +13,25 @@ public partial class LiveTranslateView : UserControl
     public event EventHandler? CloseRequested;
     public event EventHandler? CancelRequested;
 
+    const double ScrollLine = 48;
+    const double StickSlack = 8;
+
     double? _progress;
     Storyboard? _indeterminate;
+    bool _vertical;
+    bool _stickToEnd = true;
+    bool _programmaticScroll;
+    IReadOnlyList<LiveTranslateCaption>? _items;
 
     public LiveTranslateView()
     {
         InitializeComponent();
         TitleText.FontFamily = new FontFamily(IslandFonts.Ui);
         Status.FontFamily = TitleText.FontFamily;
-        OldestTime.FontFamily = TitleText.FontFamily;
-        OldestText.FontFamily = TitleText.FontFamily;
-        OlderTime.FontFamily = TitleText.FontFamily;
-        OlderText.FontFamily = TitleText.FontFamily;
-        NewerTime.FontFamily = TitleText.FontFamily;
-        NewerText.FontFamily = TitleText.FontFamily;
-        NewerOriginal.FontFamily = TitleText.FontFamily;
         CloseText.FontFamily = TitleText.FontFamily;
         CancelText.FontFamily = TitleText.FontFamily;
         TitleText.Foreground = Theme.Title;
         Status.Foreground = Theme.Artist;
-        OldestTime.Foreground = Theme.Quiet;
-        OldestText.Foreground = Theme.Artist;
-        OlderTime.Foreground = Theme.Quiet;
-        OlderText.Foreground = Theme.Artist;
-        NewerTime.Foreground = Theme.Quiet;
-        NewerText.Foreground = Theme.Title;
-        NewerOriginal.Foreground = Theme.Quiet;
         CloseText.Foreground = Theme.Title;
         CancelText.Foreground = Theme.Title;
         Dot.Fill = Theme.Live;
@@ -45,6 +39,7 @@ public partial class LiveTranslateView : UserControl
         ProgressBar.Background = Theme.Live;
         IndeterminateBar.Background = Theme.Live;
         ProgressHost.SizeChanged += (_, _) => ApplyProgress(restartIndeterminate: true);
+        CaptionScroll.Background = Brushes.Transparent;
         Ui.Hover(CloseTranslate, Theme.Chip, Theme.ChipHover);
         Ui.Hover(CancelDownload, Theme.Chip, Theme.ChipHover);
         CloseTranslate.MouseLeftButtonUp += (_, e) =>
@@ -63,13 +58,11 @@ public partial class LiveTranslateView : UserControl
     public void SetVertical(bool vertical)
     {
         TitleRow.HorizontalAlignment = HorizontalAlignment.Left;
-        OldestText.FontSize = 13;
-        OlderText.FontSize = 13;
-        OldestText.MaxHeight = vertical ? 64 : 40;
-        OlderText.MaxHeight = vertical ? 64 : 40;
-        NewerText.FontSize = vertical ? 15 : 16;
-        NewerText.MaxHeight = vertical ? 80 : 56;
-        NewerOriginal.MaxHeight = vertical ? 48 : 36;
+        if (_vertical == vertical)
+            return;
+        _vertical = vertical;
+        if (_items is { Count: > 0 } items)
+            ShowCaptions(items);
     }
 
     public void ShowStatus(string message, bool working, double? progress, bool canCancel)
@@ -141,69 +134,112 @@ public partial class LiveTranslateView : UserControl
 
     public void ShowCaptions(IReadOnlyList<LiveTranslateCaption> items)
     {
+        _items = items;
         if (items is null || items.Count == 0)
         {
             ClearSubtitle();
             return;
         }
 
-        OldestBlock.Visibility = Visibility.Collapsed;
-        OlderBlock.Visibility = Visibility.Collapsed;
-        if (items.Count == 1)
-        {
-            PaintNewer(items[0]);
-            return;
-        }
+        double keep = CaptionScroll.VerticalOffset;
+        CaptionList.Children.Clear();
+        for (int i = 0; i < items.Count; i++)
+            CaptionList.Children.Add(BuildRow(items[i], newest: i == items.Count - 1));
 
-        if (items.Count == 2)
-        {
-            PaintRow(OlderTime, OlderText, OlderBlock, items[0]);
-            PaintNewer(items[1]);
-            return;
-        }
-
-        PaintRow(OldestTime, OldestText, OldestBlock, items[0]);
-        PaintRow(OlderTime, OlderText, OlderBlock, items[1]);
-        PaintNewer(items[^1]);
+        CaptionScroll.UpdateLayout();
+        if (_stickToEnd)
+            StickToEnd();
+        else
+            RestoreOffset(keep);
     }
 
     public void ClearSubtitle()
     {
-        OldestTime.Text = "";
-        OldestText.Text = "";
-        OlderTime.Text = "";
-        OlderText.Text = "";
-        NewerTime.Text = "";
-        NewerText.Text = "";
-        NewerOriginal.Text = "";
-        OldestBlock.Visibility = Visibility.Collapsed;
-        OlderBlock.Visibility = Visibility.Collapsed;
-        NewerBlock.Visibility = Visibility.Collapsed;
-        NewerOriginal.Visibility = Visibility.Collapsed;
+        _items = null;
+        CaptionList.Children.Clear();
+        _stickToEnd = true;
+        RestoreOffset(0);
     }
 
-    static void PaintRow(TextBlock time, TextBlock text, StackPanel block, LiveTranslateCaption caption)
+    public void TryWheel(int delta)
     {
+        if (!CaptionScroll.IsVisible)
+            return;
+        double step = delta / 120.0 * ScrollLine;
+        double max = Math.Max(0, CaptionScroll.ExtentHeight - CaptionScroll.ViewportHeight);
+        CaptionScroll.ScrollToVerticalOffset(Math.Clamp(CaptionScroll.VerticalOffset - step, 0, max));
+    }
+
+    void OnCaptionScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        if (_programmaticScroll)
+            return;
+        _stickToEnd = CaptionScroll.VerticalOffset + CaptionScroll.ViewportHeight >= CaptionScroll.ExtentHeight - StickSlack;
+    }
+
+    void OnCaptionMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        TryWheel(e.Delta);
+        e.Handled = true;
+    }
+
+    void StickToEnd()
+    {
+        _programmaticScroll = true;
+        CaptionScroll.UpdateLayout();
+        double max = Math.Max(0, CaptionScroll.ExtentHeight - CaptionScroll.ViewportHeight);
+        CaptionScroll.ScrollToVerticalOffset(max);
+        _programmaticScroll = false;
+        _stickToEnd = true;
+    }
+
+    void RestoreOffset(double offset)
+    {
+        _programmaticScroll = true;
+        CaptionScroll.UpdateLayout();
+        double max = Math.Max(0, CaptionScroll.ExtentHeight - CaptionScroll.ViewportHeight);
+        CaptionScroll.ScrollToVerticalOffset(Math.Clamp(offset, 0, max));
+        _programmaticScroll = false;
+    }
+
+    FrameworkElement BuildRow(LiveTranslateCaption caption, bool newest)
+    {
+        var block = new StackPanel { Margin = new Thickness(0, 0, 0, newest ? 0 : 10) };
+        var time = new TextBlock
+        {
+            FontFamily = TitleText.FontFamily,
+            FontSize = 11,
+            Foreground = Theme.Quiet,
+            Margin = new Thickness(0, 0, 0, 2),
+            TextWrapping = TextWrapping.NoWrap
+        };
+        var text = new TextBlock
+        {
+            FontFamily = TitleText.FontFamily,
+            FontSize = newest ? (_vertical ? 15 : 16) : 13,
+            FontWeight = newest ? FontWeights.SemiBold : FontWeights.Normal,
+            Foreground = newest ? Theme.Title : Theme.Artist,
+            TextWrapping = TextWrapping.Wrap
+        };
         Ui.Text(time, caption.Timestamp);
         Ui.Text(text, caption.Primary);
-        block.Visibility = Visibility.Visible;
-    }
-
-    void PaintNewer(LiveTranslateCaption caption)
-    {
-        Ui.Text(NewerTime, caption.Timestamp);
-        Ui.Text(NewerText, caption.Primary);
-        NewerBlock.Visibility = Visibility.Visible;
+        block.Children.Add(time);
+        block.Children.Add(text);
         if (!string.IsNullOrWhiteSpace(caption.Original)
             && !string.Equals(caption.Original, caption.Primary, StringComparison.Ordinal))
         {
-            Ui.Text(NewerOriginal, caption.Original);
-            NewerOriginal.Visibility = Visibility.Visible;
+            var original = new TextBlock
+            {
+                FontFamily = TitleText.FontFamily,
+                FontSize = 12,
+                Foreground = Theme.Quiet,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 2, 0, 0)
+            };
+            Ui.Text(original, caption.Original);
+            block.Children.Add(original);
         }
-        else
-        {
-            NewerOriginal.Text = "";
-            NewerOriginal.Visibility = Visibility.Collapsed;
-        }
+
+        return block;
     }
 }

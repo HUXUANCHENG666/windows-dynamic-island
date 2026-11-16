@@ -332,6 +332,9 @@ sealed class LiveTranslateService : IDisposable
         factory.CreateBuilder()
             .WithLanguage("auto")
             .WithThreads(Math.Max(1, Environment.ProcessorCount / 2))
+            .WithMaxLastTextTokens(256)
+            .WithBeamSearchSamplingStrategy(beam => beam.WithBeamSize(3))
+            .WithTemperature(0)
             .Build();
 
     void DisposeProcessor()

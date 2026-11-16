@@ -8,8 +8,11 @@ namespace DynamicIsland.Core.LiveTranslate;
 /// </summary>
 public static class WhisperModelFile
 {
-    public const long MinBytes = 40_000_000;
-    public const long MaxBytes = 90_000_000;
+    public const string FileName = "ggml-small-q5_1.bin";
+    public const string LegacyFileName = "ggml-base-q5_1.bin";
+    public const long ExpectedBytes = 190_085_487;
+    public const long MinBytes = 150_000_000;
+    public const long MaxBytes = 230_000_000;
 
     static readonly byte[][] Magics =
     {

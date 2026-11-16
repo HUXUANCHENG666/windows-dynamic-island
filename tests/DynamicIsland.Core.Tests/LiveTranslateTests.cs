@@ -119,17 +119,26 @@ public class LiveTranslateTests
     [Fact]
     public void ModelFile_RejectsWrongSizeOrMagic_AndAcceptsGgmlHeader()
     {
+        Assert.Equal("ggml-small-q5_1.bin", WhisperModelFile.FileName);
+        Assert.Equal("ggml-base-q5_1.bin", WhisperModelFile.LegacyFileName);
+        Assert.Equal(190_085_487, WhisperModelFile.ExpectedBytes);
+        Assert.Equal(150_000_000, WhisperModelFile.MinBytes);
+        Assert.Equal(230_000_000, WhisperModelFile.MaxBytes);
         Assert.False(WhisperModelFile.LooksValid(100, "ggml"u8));
         Assert.False(WhisperModelFile.LooksValid(50_000_000, "HTML"u8));
         Assert.False(WhisperModelFile.LooksValid(50_000_000, "ggm"u8));
-        Assert.False(WhisperModelFile.LooksValid(200_000_000, "ggml"u8));
-        Assert.True(WhisperModelFile.LooksValid(57_000_000, "ggml"u8));
-        Assert.True(WhisperModelFile.LooksValid(57_000_000, "ggmf"u8));
-        Assert.True(WhisperModelFile.LooksValid(57_000_000, "ggjt"u8));
-        Assert.True(WhisperModelFile.LooksValid(57_000_000, "GGUF"u8));
-        Assert.True(WhisperModelFile.LooksValid(59_707_625, "lmgg"u8));
-        Assert.True(WhisperModelFile.LooksValid(57_000_000, "fmgg"u8));
-        Assert.True(WhisperModelFile.LooksValid(57_000_000, "tjgg"u8));
+        Assert.False(WhisperModelFile.LooksValid(57_000_000, "ggml"u8));
+        Assert.False(WhisperModelFile.LooksValid(59_707_625, "lmgg"u8));
+        Assert.False(WhisperModelFile.LooksValid(149_999_999, "ggml"u8));
+        Assert.False(WhisperModelFile.LooksValid(230_000_001, "ggml"u8));
+        Assert.True(WhisperModelFile.LooksValid(200_000_000, "ggml"u8));
+        Assert.True(WhisperModelFile.LooksValid(190_085_487, "ggml"u8));
+        Assert.True(WhisperModelFile.LooksValid(190_085_487, "ggmf"u8));
+        Assert.True(WhisperModelFile.LooksValid(190_085_487, "ggjt"u8));
+        Assert.True(WhisperModelFile.LooksValid(190_085_487, "GGUF"u8));
+        Assert.True(WhisperModelFile.LooksValid(190_085_487, "lmgg"u8));
+        Assert.True(WhisperModelFile.LooksValid(190_085_487, "fmgg"u8));
+        Assert.True(WhisperModelFile.LooksValid(190_085_487, "tjgg"u8));
     }
 
     [Fact]
@@ -444,23 +453,23 @@ public class LiveTranslateTests
     }
 
     [Fact]
-    public void Segmenter_UsesShorterHangoverAndMaxUtterance()
+    public void Segmenter_UsesLongerHangoverAndMaxUtterance()
     {
         Assert.Equal(320, SpeechSegmenter.FrameSamples);
-        Assert.Equal(18, SpeechSegmenter.HangoverFrames);
-        Assert.Equal(200, SpeechSegmenter.MaxSpeechFrames);
-        Assert.Equal(360, SpeechSegmenter.HangoverFrames * 20);
-        Assert.Equal(4000, SpeechSegmenter.MaxSpeechFrames * 20);
+        Assert.Equal(25, SpeechSegmenter.HangoverFrames);
+        Assert.Equal(400, SpeechSegmenter.MaxSpeechFrames);
+        Assert.Equal(500, SpeechSegmenter.HangoverFrames * 20);
+        Assert.Equal(8000, SpeechSegmenter.MaxSpeechFrames * 20);
     }
 
     [Fact]
-    public void CaptionChain_ShowsThreeItems_WithSessionElapsedTimestamps()
+    public void CaptionChain_KeepsSessionElapsedTimestamps_AndDoesNotDropEarlyItems()
     {
         var chain = new LiveTranslateCaptionChain();
         var start = T(0);
         chain.MarkListening(start);
 
-        int first = chain.Preview("Hello there", T(5000));
+        int first = chain.Preview("Hello there", T(5000)).Id;
         Assert.True(chain.HasPending);
         Assert.Equal("0:05", Assert.Single(chain.Items).Timestamp);
         Assert.Equal("Hello there", chain.Items[0].Primary);
@@ -471,7 +480,7 @@ public class LiveTranslateTests
         Assert.Equal("你好", chain.Items[0].Primary);
         Assert.Equal("Hello there", chain.Items[0].Original);
 
-        int second = chain.Preview("Open the window", T(18000));
+        int second = chain.Preview("Open the window", T(18000)).Id;
         Assert.Equal(2, chain.Items.Count);
         Assert.Equal("0:05", chain.Items[0].Timestamp);
         Assert.Equal("你好", chain.Items[0].Primary);
@@ -481,8 +490,8 @@ public class LiveTranslateTests
         Assert.Equal("请打开窗户", chain.Items[1].Primary);
         Assert.Equal("Open the window", chain.Items[1].Original);
 
-        int third = chain.AppendFinal("已经是中文了", T(70000), alreadyChinese: true);
-        Assert.Equal(3, LiveTranslateCaptionChain.MaxItems);
+        int third = chain.AppendFinal("已经是中文了", T(70000), alreadyChinese: true).Id;
+        Assert.Equal(40, LiveTranslateCaptionChain.MaxItems);
         Assert.Equal(3, chain.Items.Count);
         Assert.Equal("你好", chain.Items[0].Primary);
         Assert.Equal("请打开窗户", chain.Items[1].Primary);
@@ -492,15 +501,16 @@ public class LiveTranslateTests
         Assert.Equal(third, chain.Items[2].Id);
 
         chain.Preview("A fourth line", T(80000));
-        Assert.Equal(3, chain.Items.Count);
-        Assert.Equal("请打开窗户", chain.Items[0].Primary);
-        Assert.Equal("已经是中文了", chain.Items[1].Primary);
-        Assert.Equal("A fourth line", chain.Items[2].Primary);
+        Assert.Equal(4, chain.Items.Count);
+        Assert.Equal("你好", chain.Items[0].Primary);
+        Assert.Equal("请打开窗户", chain.Items[1].Primary);
+        Assert.Equal("已经是中文了", chain.Items[2].Primary);
+        Assert.Equal("A fourth line", chain.Items[3].Primary);
 
         chain.Reset();
         Assert.Empty(chain.Items);
         chain.MarkListening(T(100000));
-        int again = chain.Preview("Again", T(101000));
+        int again = chain.Preview("Again", T(101000)).Id;
         Assert.Equal("0:01", Assert.Single(chain.Items).Timestamp);
         Assert.NotEqual(first, again);
         Assert.False(chain.Complete(first, "旧的不应写入", null));
@@ -512,7 +522,7 @@ public class LiveTranslateTests
     {
         var chain = new LiveTranslateCaptionChain();
         chain.MarkListening(T(0));
-        int id = chain.Preview("Bonjour", T(2000));
+        int id = chain.Preview("Bonjour", T(2000)).Id;
         Assert.Equal("0:02", chain.Items[0].Timestamp);
         Assert.True(chain.Fail(id));
         Assert.Equal("Bonjour", chain.Items[0].Primary);
@@ -530,6 +540,81 @@ public class LiveTranslateTests
         Assert.Equal("10:00", LiveTranslateCaptionChain.FormatElapsed(TimeSpan.FromMinutes(10)));
         Assert.Equal("1:00:00", LiveTranslateCaptionChain.FormatElapsed(TimeSpan.FromHours(1)));
         Assert.Equal("0:00", LiveTranslateCaptionChain.FormatElapsed(TimeSpan.FromSeconds(-3)));
+    }
+
+    [Fact]
+    public void CaptionChain_KeepsFortyItems_AndCompletesOlderAfterOverflow()
+    {
+        var chain = new LiveTranslateCaptionChain();
+        chain.MarkListening(T(0));
+        var ids = new int[42];
+        for (int i = 0; i < 42; i++)
+            ids[i] = chain.Preview($"Line {i + 1} is long enough", T(1000 * (i + 1))).Id;
+
+        Assert.Equal(40, chain.Items.Count);
+        Assert.Equal("Line 3 is long enough", chain.Items[0].Primary);
+        Assert.Equal("Line 42 is long enough", chain.Items[^1].Primary);
+        Assert.False(chain.Complete(ids[0], "不应写入已丢掉的第一句", "Line 1 is long enough"));
+        Assert.False(chain.Complete(ids[1], "不应写入已丢掉的第二句", "Line 2 is long enough"));
+        Assert.True(chain.Complete(ids[2], "第三句仍可更新", "Line 3 is long enough"));
+        Assert.Equal("第三句仍可更新", chain.Items[0].Primary);
+        Assert.Equal("Line 3 is long enough", chain.Items[0].Original);
+        Assert.Equal(ids[2], chain.Items[0].Id);
+        Assert.True(chain.Complete(ids[41], "最新一句", "Line 42 is long enough"));
+        Assert.Equal("最新一句", chain.Items[^1].Primary);
+    }
+
+    [Fact]
+    public void CaptionChain_MergesShortFragment_UnlessPreviousEndedASentence()
+    {
+        Assert.True(LiveTranslateCaptionChain.ShouldMerge("Open the window", "please"));
+        Assert.True(LiveTranslateCaptionChain.ShouldMerge("请打开窗", "户吧"));
+        Assert.False(LiveTranslateCaptionChain.ShouldMerge("Open the window.", "please"));
+        Assert.False(LiveTranslateCaptionChain.ShouldMerge("请打开窗户。", "好的"));
+        Assert.False(LiveTranslateCaptionChain.ShouldMerge("Wait…", "now"));
+        Assert.False(LiveTranslateCaptionChain.ShouldMerge("Hello there", "this is a much longer follow up"));
+        Assert.Equal("Open the window please", LiveTranslateCaptionChain.Combine("Open the window", "please"));
+        Assert.Equal("请打开窗户吧", LiveTranslateCaptionChain.Combine("请打开窗", "户吧"));
+        Assert.Equal(1, LiveTranslateCaptionChain.WordCount("please"));
+        Assert.Equal(2, LiveTranslateCaptionChain.WordCount("thank you"));
+        Assert.Equal(1, LiveTranslateCaptionChain.WordCount("户吧"));
+
+        var chain = new LiveTranslateCaptionChain();
+        chain.MarkListening(T(0));
+        int first = chain.Preview("Open the window", T(1000)).Id;
+        var merged = chain.Preview("please", T(2000));
+        Assert.True(merged.Merged);
+        Assert.Equal(first, merged.Id);
+        Assert.Equal("Open the window please", merged.Recognized);
+        Assert.Single(chain.Items);
+        Assert.Equal("Open the window please", chain.Items[0].Primary);
+        Assert.True(chain.Items[0].TranslationPending);
+        Assert.True(chain.Complete(first, "请打开窗户", "Open the window please"));
+        Assert.Equal("请打开窗户", chain.Items[0].Primary);
+        Assert.Equal("Open the window please", chain.Items[0].Original);
+
+        var later = chain.Preview("Thanks a lot for this", T(4000));
+        Assert.False(later.Merged);
+        Assert.NotEqual(first, later.Id);
+        Assert.Equal(2, chain.Items.Count);
+
+        var ended = new LiveTranslateCaptionChain();
+        ended.MarkListening(T(0));
+        int done = ended.Preview("We are done.", T(1000)).Id;
+        var next = ended.Preview("Go", T(2000));
+        Assert.False(next.Merged);
+        Assert.NotEqual(done, next.Id);
+        Assert.Equal(2, ended.Items.Count);
+
+        var chinese = new LiveTranslateCaptionChain();
+        chinese.MarkListening(T(0));
+        int zh = chinese.AppendFinal("请打开窗", T(1000), alreadyChinese: true).Id;
+        var zhMerge = chinese.AppendFinal("户吧", T(2000), alreadyChinese: true);
+        Assert.True(zhMerge.Merged);
+        Assert.Equal(zh, zhMerge.Id);
+        Assert.Equal("请打开窗户吧", zhMerge.Recognized);
+        Assert.Single(chinese.Items);
+        Assert.True(chinese.Items[0].AlreadyChinese);
     }
 
     [Fact]

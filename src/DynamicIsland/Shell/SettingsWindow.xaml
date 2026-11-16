@@ -82,7 +82,7 @@
                     <Grid>
                         <StackPanel Margin="0,0,56,0">
                             <TextBlock x:Name="LiveTitle" Text="把系统正在播放的声音译成中文" FontSize="14"/>
-                            <TextBlock x:Name="LiveDetail" Text="捕获的是系统正在播放的视频或音乐里的人声，不是麦克风。第一次需要下载识别模型，之后保存在本机。关闭后不再听声音。" FontSize="12" Margin="0,3,0,0" TextWrapping="Wrap"/>
+                            <TextBlock x:Name="LiveDetail" Text="捕获的是系统正在播放的视频或音乐里的人声，不是麦克风。第一次需要下载约 181 MB 的识别模型，之后保存在本机。关闭后不再听声音。" FontSize="12" Margin="0,3,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
                         <Border x:Name="LiveToggle" Width="44" Height="26" CornerRadius="13" HorizontalAlignment="Right" VerticalAlignment="Center" Cursor="Hand">
                             <Border x:Name="LiveKnob" Width="20" Height="20" CornerRadius="10" HorizontalAlignment="Left" Margin="3,0,0,0"/>

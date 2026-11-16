@@ -2,6 +2,64 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              Focusable="False">
+    <UserControl.Resources>
+        <SolidColorBrush x:Key="CaptionThumbBrush" Color="#80FFFFFF"/>
+        <Style x:Key="CaptionPageButton" TargetType="RepeatButton">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="IsTabStop" Value="False"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RepeatButton">
+                        <Border Background="Transparent"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="CaptionThumb" TargetType="Thumb">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="IsTabStop" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Border Background="{StaticResource CaptionThumbBrush}"
+                                CornerRadius="3"
+                                Margin="0,1"
+                                SnapsToDevicePixels="True"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="CaptionScrollBar" TargetType="ScrollBar">
+            <Setter Property="Stylus.IsPressAndHoldEnabled" Value="False"/>
+            <Setter Property="Width" Value="6"/>
+            <Setter Property="MinWidth" Value="6"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Foreground" Value="#80FFFFFF"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Grid Background="Transparent">
+                            <Track x:Name="PART_Track" IsDirectionReversed="True" Focusable="False">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="ScrollBar.PageUpCommand" Style="{StaticResource CaptionPageButton}"/>
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="ScrollBar.PageDownCommand" Style="{StaticResource CaptionPageButton}"/>
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Style="{StaticResource CaptionThumb}"/>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
     <Grid Margin="16,12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -24,21 +82,22 @@
             </StackPanel>
         </Grid>
         <TextBlock x:Name="Status" Grid.Row="1" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap" TextTrimming="CharacterEllipsis"/>
-        <StackPanel Grid.Row="2" Margin="0,8,0,0">
-            <StackPanel x:Name="OldestBlock" Visibility="Collapsed" Margin="0,0,0,10">
-                <TextBlock x:Name="OldestTime" FontSize="11" Margin="0,0,0,2"/>
-                <TextBlock x:Name="OldestText" FontSize="13" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="40"/>
-            </StackPanel>
-            <StackPanel x:Name="OlderBlock" Visibility="Collapsed" Margin="0,0,0,10">
-                <TextBlock x:Name="OlderTime" FontSize="11" Margin="0,0,0,2"/>
-                <TextBlock x:Name="OlderText" FontSize="13" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="40"/>
-            </StackPanel>
-            <StackPanel x:Name="NewerBlock" Visibility="Collapsed">
-                <TextBlock x:Name="NewerTime" FontSize="11" Margin="0,0,0,2"/>
-                <TextBlock x:Name="NewerText" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="56"/>
-                <TextBlock x:Name="NewerOriginal" FontSize="12" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="36" Margin="0,2,0,0" Visibility="Collapsed"/>
-            </StackPanel>
-        </StackPanel>
+        <ScrollViewer x:Name="CaptionScroll"
+                      Grid.Row="2"
+                      Margin="0,8,0,0"
+                      Padding="0,0,4,0"
+                      HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollBarVisibility="Auto"
+                      PanningMode="VerticalOnly"
+                      Focusable="False"
+                      CanContentScroll="False"
+                      ScrollChanged="OnCaptionScrollChanged"
+                      PreviewMouseWheel="OnCaptionMouseWheel">
+            <ScrollViewer.Resources>
+                <Style TargetType="ScrollBar" BasedOn="{StaticResource CaptionScrollBar}"/>
+            </ScrollViewer.Resources>
+            <StackPanel x:Name="CaptionList"/>
+        </ScrollViewer>
         <Border x:Name="ProgressHost" Grid.Row="3" Height="4" CornerRadius="2" Margin="0,10,0,0" Visibility="Collapsed" ClipToBounds="True">
             <Grid>
                 <Border x:Name="ProgressBar" Height="4" CornerRadius="2" HorizontalAlignment="Left" Width="0"/>
