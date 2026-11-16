@@ -5,7 +5,9 @@ namespace DynamicIsland.Core.LiveTranslate;
 public enum WaveKind
 {
     Float32,
-    Pcm16
+    Pcm16,
+    Pcm24,
+    Pcm32
 }
 
 /// <summary>
@@ -41,6 +43,8 @@ public sealed class StreamResampler
     {
         WaveKind.Float32 => 4 * channels,
         WaveKind.Pcm16 => 2 * channels,
+        WaveKind.Pcm24 => 3 * channels,
+        WaveKind.Pcm32 => 4 * channels,
         _ => throw new ArgumentOutOfRangeException(nameof(kind))
     };
 
@@ -95,14 +99,24 @@ public sealed class StreamResampler
 
     float Sample(ReadOnlySpan<byte> raw, int frameOffset, int channel)
     {
-        if (_kind == WaveKind.Float32)
+        switch (_kind)
         {
-            int at = frameOffset + channel * 4;
-            return BinaryPrimitives.ReadSingleLittleEndian(raw.Slice(at, 4));
+            case WaveKind.Float32:
+                return BinaryPrimitives.ReadSingleLittleEndian(raw.Slice(frameOffset + channel * 4, 4));
+            case WaveKind.Pcm16:
+                return BinaryPrimitives.ReadInt16LittleEndian(raw.Slice(frameOffset + channel * 2, 2)) / 32768f;
+            case WaveKind.Pcm24:
+            {
+                int at = frameOffset + channel * 3;
+                int sample = raw[at] | (raw[at + 1] << 8) | (raw[at + 2] << 16);
+                if ((sample & 0x800000) != 0)
+                    sample |= unchecked((int)0xFF000000);
+                return sample / 8388608f;
+            }
+            case WaveKind.Pcm32:
+                return BinaryPrimitives.ReadInt32LittleEndian(raw.Slice(frameOffset + channel * 4, 4)) / 2147483648f;
+            default:
+                return 0;
         }
-
-        int pos = frameOffset + channel * 2;
-        short pcm = BinaryPrimitives.ReadInt16LittleEndian(raw.Slice(pos, 2));
-        return pcm / 32768f;
     }
 }

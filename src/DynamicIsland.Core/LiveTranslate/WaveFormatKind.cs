@@ -3,6 +3,7 @@ namespace DynamicIsland.Core.LiveTranslate;
 /// <summary>
 /// 识别播放设备交出来的 PCM 格式。Windows 共享模式的混音几乎都是
 /// WAVEFORMATEXTENSIBLE，标签是 0xFFFE，真正的类型在子类型里。
+/// 蓝牙耳机、部分声卡还会给出 24 位或 32 位整数 PCM，不能只认 32 位浮点和 16 位整数。
 /// </summary>
 public static class WaveFormatKind
 {
@@ -25,13 +26,23 @@ public static class WaveFormatKind
             return true;
         }
 
-        if (IsPcm(encoding, subFormat) && bitsPerSample == 16)
-        {
-            kind = WaveKind.Pcm16;
-            return true;
-        }
+        if (!IsPcm(encoding, subFormat))
+            return false;
 
-        return false;
+        switch (bitsPerSample)
+        {
+            case 16:
+                kind = WaveKind.Pcm16;
+                return true;
+            case 24:
+                kind = WaveKind.Pcm24;
+                return true;
+            case 32:
+                kind = WaveKind.Pcm32;
+                return true;
+            default:
+                return false;
+        }
     }
 
     static bool IsIeeeFloat(int encoding, Guid? subFormat)

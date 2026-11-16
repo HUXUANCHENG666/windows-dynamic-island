@@ -160,10 +160,16 @@ public class LiveTranslateTests
         Assert.True(WaveFormatKind.TryDetect(
             WaveFormatKind.EncodingExtensible, 16, WaveFormatKind.SubtypePcm, out var extPcm));
         Assert.Equal(WaveKind.Pcm16, extPcm);
+        Assert.True(WaveFormatKind.TryDetect(
+            WaveFormatKind.EncodingExtensible, 32, WaveFormatKind.SubtypePcm, out var extPcm32));
+        Assert.Equal(WaveKind.Pcm32, extPcm32);
+        Assert.True(WaveFormatKind.TryDetect(WaveFormatKind.EncodingPcm, 24, null, out var pcm24));
+        Assert.Equal(WaveKind.Pcm24, pcm24);
+        Assert.True(WaveFormatKind.TryDetect(WaveFormatKind.EncodingPcm, 32, null, out var pcm32));
+        Assert.Equal(WaveKind.Pcm32, pcm32);
 
-        Assert.False(WaveFormatKind.TryDetect(WaveFormatKind.EncodingExtensible, 32, WaveFormatKind.SubtypePcm, out _));
         Assert.False(WaveFormatKind.TryDetect(WaveFormatKind.EncodingIeeeFloat, 16, null, out _));
-        Assert.False(WaveFormatKind.TryDetect(WaveFormatKind.EncodingPcm, 24, null, out _));
+        Assert.False(WaveFormatKind.TryDetect(WaveFormatKind.EncodingPcm, 8, null, out _));
     }
 
     [Fact]
@@ -221,6 +227,34 @@ public class LiveTranslateTests
         resampler.Push(second, output);
         Assert.NotEmpty(output);
         Assert.InRange(output[0], 0.49f, 0.51f);
+    }
+
+    [Fact]
+    public void Resampler_ReadsPackedPcm24AndPcm32()
+    {
+        const int sourceRate = 16000;
+        var pcm24 = new byte[6];
+        // two mono frames of 0x400000 = 0.5
+        pcm24[0] = 0x00;
+        pcm24[1] = 0x00;
+        pcm24[2] = 0x40;
+        pcm24[3] = 0x00;
+        pcm24[4] = 0x00;
+        pcm24[5] = 0x40;
+        var resampler24 = new StreamResampler(sourceRate, 1, WaveKind.Pcm24);
+        var output24 = new List<float>();
+        resampler24.Push(pcm24, output24);
+        Assert.NotEmpty(output24);
+        Assert.InRange(output24[0], 0.49f, 0.51f);
+
+        var pcm32 = new byte[8];
+        BinaryPrimitives.WriteInt32LittleEndian(pcm32.AsSpan(0, 4), 0x40000000);
+        BinaryPrimitives.WriteInt32LittleEndian(pcm32.AsSpan(4, 4), 0x40000000);
+        var resampler32 = new StreamResampler(sourceRate, 1, WaveKind.Pcm32);
+        var output32 = new List<float>();
+        resampler32.Push(pcm32, output32);
+        Assert.NotEmpty(output32);
+        Assert.InRange(output32[0], 0.49f, 0.51f);
     }
 
     [Fact]
