@@ -60,7 +60,7 @@
                                 <TextBlock x:Name="SkinGlassText" Text="液态玻璃" FontSize="13"/>
                             </Border>
                         </StackPanel>
-                        <TextBlock x:Name="SkinDetail" Text="液态玻璃会透过岛身看到后面的桌面，文字仍保持清晰。" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                        <TextBlock x:Name="SkinDetail" Text="液态玻璃像一滴水：中间略厚、边缘更透，能看到后面的桌面，文字仍保持清晰。" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
                 </Border>
                 <TextBlock x:Name="NoticeLabel" Text="通知" FontSize="12" Margin="2,0,0,8"/>
