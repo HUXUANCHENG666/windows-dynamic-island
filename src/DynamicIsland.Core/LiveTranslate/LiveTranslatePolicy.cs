@@ -22,7 +22,7 @@ public static class LiveTranslatePolicy
 {
     public const bool EnabledByDefault = false;
     public const bool PersistsAcrossLaunches = false;
-    public const int MaxDisplayChars = 96;
+    public const int MaxDisplayChars = 220;
 
     public static bool IsChineseLanguage(string? whisperLanguage)
     {
@@ -122,6 +122,7 @@ public static class LiveTranslateCopy
     public const string Cancel = "取消";
     public const string Listening = "正在听系统声音…";
     public const string Recognizing = "正在识别…";
+    public const string Recording = "正在出字…";
     public const string Translating = "正在翻译…";
     public const string LoadingModel = "正在加载识别模型…";
     public const string Connecting = "正在连接下载源…";

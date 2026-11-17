@@ -33,9 +33,10 @@ sealed class LiveTranslateService : IDisposable
     readonly object _gate = new();
     CancellationTokenSource? _cts;
     WhisperFactory? _factory;
-    WhisperProcessor? _processor;
+    WhisperProcessor? _streamProcessor;
+    WhisperProcessor? _finalProcessor;
     Task? _loop;
-    float[]? _queued;
+    readonly RecognitionWorkQueue _queue = new();
     bool _busy;
     int _generation;
 
@@ -48,7 +49,7 @@ sealed class LiveTranslateService : IDisposable
 
     public bool IsRunning { get; private set; }
     public event Action<LiveTranslateSnapshot>? Status;
-    public event Action<string, string?>? Transcript;
+    public event Action<string, string?, bool>? Transcript;
 
     public void Start()
     {
@@ -84,7 +85,7 @@ sealed class LiveTranslateService : IDisposable
         _segmenter.Reset();
         lock (_gate)
         {
-            _queued = null;
+            while (_queue.Dequeue() is not null) { }
             _busy = false;
         }
 
@@ -131,7 +132,7 @@ sealed class LiveTranslateService : IDisposable
                 {
                     factory = WhisperFactory.FromPath(WhisperModelStore.FilePath);
                     // FromPath 在原生库加载成功后仍可能接受一份损坏的模型，真正读文件发生在建处理器时。
-                    processor = CreateProcessor(factory);
+                    processor = CreateProcessor(factory, accurate: true);
                 }
                 catch (Exception ex)
                 {
@@ -160,7 +161,7 @@ sealed class LiveTranslateService : IDisposable
                     return;
                 }
 
-                _processor = processor;
+                _finalProcessor = processor;
                 _factory = factory;
                 if (generation != _generation)
                 {
@@ -212,10 +213,10 @@ sealed class LiveTranslateService : IDisposable
     {
         if (!IsRunning || _factory == null)
             return;
-        IReadOnlyList<float[]> segments;
+        IReadOnlyList<SpeechChunk> chunks;
         try
         {
-            segments = _segmenter.Push(samples);
+            chunks = _segmenter.Push(samples);
         }
         catch (Exception ex)
         {
@@ -223,18 +224,19 @@ sealed class LiveTranslateService : IDisposable
             return;
         }
 
-        foreach (var segment in segments)
-            Enqueue(segment);
+        foreach (var chunk in chunks)
+            Enqueue(chunk);
     }
 
-    void Enqueue(float[] segment)
+    void Enqueue(SpeechChunk chunk)
     {
         bool start = false;
+        SpeechChunk work = chunk;
         lock (_gate)
         {
             if (_busy)
             {
-                _queued = segment;
+                _queue.Enqueue(chunk);
                 return;
             }
 
@@ -243,10 +245,10 @@ sealed class LiveTranslateService : IDisposable
         }
 
         if (start)
-            _ = Task.Run(() => RecognizeAsync(segment));
+            _ = Task.Run(() => RecognizeAsync(work));
     }
 
-    async Task RecognizeAsync(float[] segment)
+    async Task RecognizeAsync(SpeechChunk chunk)
     {
         try
         {
@@ -254,24 +256,25 @@ sealed class LiveTranslateService : IDisposable
             {
                 if (!IsRunning)
                     return;
-                Publish(new LiveTranslateSnapshot(LiveTranslatePhase.Recognizing, LiveTranslateCopy.Recognizing, null, false));
-                var (text, language) = await TranscribeAsync(segment).ConfigureAwait(false);
+                var status = chunk.Final ? LiveTranslateCopy.Recognizing : LiveTranslateCopy.Recording;
+                Publish(new LiveTranslateSnapshot(LiveTranslatePhase.Recognizing, status, null, false));
+                var (text, language) = await TranscribeAsync(chunk).ConfigureAwait(false);
                 if (!IsRunning)
                     return;
                 if (LiveTranslatePolicy.IsUsableTranscript(text))
-                    RaiseTranscript(text!, language);
+                    RaiseTranscript(text!, language, chunk.Final);
                 Publish(new LiveTranslateSnapshot(LiveTranslatePhase.Listening, LiveTranslateCopy.Listening, null, false));
 
                 lock (_gate)
                 {
-                    if (_queued == null)
+                    var next = _queue.Dequeue();
+                    if (next is null)
                     {
                         _busy = false;
                         return;
                     }
 
-                    segment = _queued;
-                    _queued = null;
+                    chunk = next.Value;
                 }
             }
         }
@@ -281,7 +284,7 @@ sealed class LiveTranslateService : IDisposable
             lock (_gate)
             {
                 _busy = false;
-                _queued = null;
+                while (_queue.Dequeue() is not null) { }
             }
 
             if (IsRunning)
@@ -289,14 +292,16 @@ sealed class LiveTranslateService : IDisposable
         }
     }
 
-    async Task<(string? Text, string? Language)> TranscribeAsync(float[] segment)
+    async Task<(string? Text, string? Language)> TranscribeAsync(SpeechChunk chunk)
     {
         var factory = _factory;
+        var segment = chunk.Samples;
         if (factory == null || segment.Length < SpeechSegmenter.FrameSamples)
             return (null, null);
 
-        var processor = _processor ?? CreateProcessor(factory);
-        _processor = processor;
+        var processor = chunk.Final
+            ? (_finalProcessor ??= CreateProcessor(factory, accurate: true))
+            : (_streamProcessor ??= CreateProcessor(factory, accurate: false));
         var parts = new List<string>();
         string? language = null;
         try
@@ -311,7 +316,7 @@ sealed class LiveTranslateService : IDisposable
         }
         catch
         {
-            DisposeProcessor();
+            DisposeProcessor(chunk.Final);
             throw;
         }
 
@@ -328,29 +333,45 @@ sealed class LiveTranslateService : IDisposable
         ];
     }
 
-    static WhisperProcessor CreateProcessor(WhisperFactory factory) =>
-        factory.CreateBuilder()
+    static WhisperProcessor CreateProcessor(WhisperFactory factory, bool accurate)
+    {
+        var builder = factory.CreateBuilder()
             .WithLanguage("auto")
             .WithThreads(Math.Max(1, Environment.ProcessorCount / 2))
             .WithMaxLastTextTokens(256)
-            .WithBeamSearchSamplingStrategy(beam => beam.WithBeamSize(3))
-            .WithTemperature(0)
-            .Build();
+            .WithTemperature(0);
+        if (accurate)
+            builder = builder.WithBeamSearchSamplingStrategy(beam => beam.WithBeamSize(3));
+        return builder.Build();
+    }
 
     void DisposeProcessor()
     {
-        var processor = _processor;
-        _processor = null;
-        try { processor?.Dispose(); }
-        catch { }
+        DisposeProcessor(final: true);
+        DisposeProcessor(final: false);
     }
 
-    void RaiseTranscript(string text, string? language)
+    void DisposeProcessor(bool final)
+    {
+        if (final)
+        {
+            var processor = _finalProcessor;
+            _finalProcessor = null;
+            try { processor?.Dispose(); } catch { }
+            return;
+        }
+
+        var stream = _streamProcessor;
+        _streamProcessor = null;
+        try { stream?.Dispose(); } catch { }
+    }
+
+    void RaiseTranscript(string text, string? language, bool final)
     {
         _dispatcher.BeginInvoke(() =>
         {
             if (IsRunning)
-                Transcript?.Invoke(text, language);
+                Transcript?.Invoke(text, language, final);
         });
     }
 

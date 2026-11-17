@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
@@ -56,6 +57,8 @@ static class GlassSkin
         {
             StopMotion(window, reset: true);
             window.GlassHost.Visibility = Visibility.Collapsed;
+            UpdateRefraction(window, null);
+            SetFlow(window, 0, 0, false);
             window.Pill.Fill = Theme.IslandFill;
             window.PillStroke.Stroke = Theme.Hairline;
             window.PillStroke.StrokeThickness = 1.6;
@@ -154,6 +157,27 @@ static class GlassSkin
         window.GlassBlobBShift.Y = 0;
         window.GlassStreakShift.X = 0;
         window.GlassStreakShift.Y = 0;
+        SetFlow(window, 0, 0, false);
+    }
+
+    public static void UpdateRefraction(IslandWindow window, ImageSource? image)
+    {
+        window.GlassRefraction.Source = image;
+        window.GlassRefraction.Visibility = image == null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    public static void SetFlow(IslandWindow window, double vx, double vy, bool moving)
+    {
+        double lagX = moving ? Math.Clamp(-vx * 0.035, -28, 28) : 0;
+        double lagY = moving ? Math.Clamp(-vy * 0.035, -28, 28) : 0;
+        window.GlassBeadLag.X = lagX * 0.45;
+        window.GlassBeadLag.Y = lagY * 0.45;
+        window.GlassBlobALag.X = lagX;
+        window.GlassBlobALag.Y = lagY;
+        window.GlassBlobBLag.X = lagX * 0.8;
+        window.GlassBlobBLag.Y = lagY * 0.8;
+        window.GlassStreakLag.X = lagX * 1.15;
+        window.GlassStreakLag.Y = lagY * 1.15;
     }
 
     static DoubleAnimation Drift(TranslateTransform target, DependencyProperty property, double from, double to, double seconds)

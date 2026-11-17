@@ -1,17 +1,20 @@
 namespace DynamicIsland.Core.LiveTranslate;
 
 /// <summary>
-/// 用短时能量把连续的系统声音切成一句一句。太短的噪声丢掉，太长的在上限处切开，
-/// 这样字幕可以边说边更新，而不必等整段节目结束。
+/// 从连续的系统声音里取出当前这句话的音频。说话过程中会定期交出一份还在增长的片段，
+/// 好让识别像会议记录一样持续出字；停顿够长或达到上限时再交终稿，去翻译。
 /// </summary>
+public readonly record struct SpeechChunk(int UtteranceId, float[] Samples, bool Final);
+
 public sealed class SpeechSegmenter
 {
     public const int SampleRate = StreamResampler.TargetRate;
     public const int FrameSamples = 320;
     public const float SpeechRms = 0.015f;
-    public const int HangoverFrames = 25; // 20 ms/frame ≈ 500 ms of trailing silence
+    public const int HangoverFrames = 40; // 20 ms/frame ≈ 800 ms of trailing silence
     public const int MinSpeechFrames = 20;
-    public const int MaxSpeechFrames = 400; // 20 ms/frame ≈ 8 s, so a longer thought can finish
+    public const int PartialFrames = 25; // 20 ms/frame ≈ 0.5 s between live captions
+    public const int MaxSpeechFrames = 750; // 20 ms/frame ≈ 15 s, a longer thought can finish
     public const int PrerollFrames = 10;
 
     readonly List<float> _pending = new();
@@ -20,32 +23,34 @@ public sealed class SpeechSegmenter
     bool _inSpeech;
     int _hangover;
     int _speechFrames;
+    int _lastPartialFrames;
+    int _utteranceId = 1;
 
-    public IReadOnlyList<float[]> Push(ReadOnlySpan<float> samples)
+    public IReadOnlyList<SpeechChunk> Push(ReadOnlySpan<float> samples)
     {
         if (samples.Length > 0)
             _pending.AddRange(samples.ToArray());
 
-        List<float[]>? segments = null;
+        List<SpeechChunk>? chunks = null;
         while (_pending.Count >= FrameSamples)
         {
             var frame = _pending.GetRange(0, FrameSamples);
             _pending.RemoveRange(0, FrameSamples);
-            var segment = Accept(frame);
-            if (segment is null)
+            var chunk = Accept(frame);
+            if (chunk is null)
                 continue;
-            segments ??= new List<float[]>();
-            segments.Add(segment);
+            chunks ??= new List<SpeechChunk>();
+            chunks.Add(chunk.Value);
         }
 
-        return segments ?? (IReadOnlyList<float[]>)Array.Empty<float[]>();
+        return chunks ?? (IReadOnlyList<SpeechChunk>)Array.Empty<SpeechChunk>();
     }
 
-    public float[]? Flush()
+    public SpeechChunk? Flush()
     {
-        float[]? tail = null;
+        SpeechChunk? tail = null;
         if (_inSpeech && _speechFrames >= MinSpeechFrames)
-            tail = _utterance.ToArray();
+            tail = new SpeechChunk(_utteranceId, _utterance.ToArray(), Final: true);
         Reset();
         return tail;
     }
@@ -58,9 +63,11 @@ public sealed class SpeechSegmenter
         _inSpeech = false;
         _hangover = 0;
         _speechFrames = 0;
+        _lastPartialFrames = 0;
+        _utteranceId++;
     }
 
-    float[]? Accept(List<float> frame)
+    SpeechChunk? Accept(List<float> frame)
     {
         bool voiced = Rms(frame) >= SpeechRms;
         if (!_inSpeech)
@@ -71,10 +78,11 @@ public sealed class SpeechSegmenter
             _inSpeech = true;
             _hangover = HangoverFrames;
             _speechFrames = 1;
+            _lastPartialFrames = 0;
             foreach (var sample in _preroll)
                 _utterance.Add(sample);
             _preroll.Clear();
-            return MaybeCut();
+            return MaybeEmit(forceFinal: UtteranceFrames() >= MaxSpeechFrames);
         }
 
         _utterance.AddRange(frame);
@@ -92,24 +100,33 @@ public sealed class SpeechSegmenter
             return Finish(force: true);
         if (!voiced && _hangover <= 0)
             return Finish(force: false);
-        return null;
+        return MaybePartial();
     }
 
-    float[]? MaybeCut()
+    SpeechChunk? MaybeEmit(bool forceFinal) =>
+        forceFinal ? Finish(force: true) : MaybePartial();
+
+    SpeechChunk? MaybePartial()
     {
-        if (UtteranceFrames() < MaxSpeechFrames)
+        if (!_inSpeech || _speechFrames < PartialFrames)
             return null;
-        return Finish(force: true);
+        if (_speechFrames - _lastPartialFrames < PartialFrames)
+            return null;
+        _lastPartialFrames = _speechFrames;
+        return new SpeechChunk(_utteranceId, _utterance.ToArray(), Final: false);
     }
 
     int UtteranceFrames() => _utterance.Count / FrameSamples;
 
-    float[]? Finish(bool force)
+    SpeechChunk? Finish(bool force)
     {
         var data = _utterance.ToArray();
         bool keep = _speechFrames >= MinSpeechFrames;
+        int id = _utteranceId;
         _utterance.Clear();
         _preroll.Clear();
+        _lastPartialFrames = 0;
+        _utteranceId++;
         if (force)
         {
             _inSpeech = true;
@@ -123,7 +140,7 @@ public sealed class SpeechSegmenter
             _speechFrames = 0;
         }
 
-        return keep ? data : null;
+        return keep ? new SpeechChunk(id, data, Final: true) : null;
     }
 
     void RememberPreroll(List<float> frame)

@@ -22,6 +22,7 @@
             <Path x:Name="Pill"/>
             <Grid x:Name="GlassHost" IsHitTestVisible="False" Visibility="Collapsed" ClipToBounds="True">
                 <Path x:Name="GlassScrim"/>
+                <Image x:Name="GlassRefraction" Stretch="Fill" IsHitTestVisible="False" SnapsToDevicePixels="True"/>
                 <Path x:Name="GlassThickness"/>
                 <Path x:Name="GlassSpecular"/>
                 <Path x:Name="GlassLip"/>
@@ -30,6 +31,7 @@
                         <TransformGroup>
                             <RotateTransform Angle="-18"/>
                             <TranslateTransform x:Name="GlassBeadShift"/>
+                            <TranslateTransform x:Name="GlassBeadLag"/>
                         </TransformGroup>
                     </Ellipse.RenderTransform>
                 </Ellipse>
@@ -38,6 +40,7 @@
                         <TransformGroup>
                             <RotateTransform x:Name="GlassBlobARotate" Angle="-22"/>
                             <TranslateTransform x:Name="GlassBlobAShift"/>
+                            <TranslateTransform x:Name="GlassBlobALag"/>
                         </TransformGroup>
                     </Ellipse.RenderTransform>
                 </Ellipse>
@@ -46,6 +49,7 @@
                         <TransformGroup>
                             <RotateTransform x:Name="GlassBlobBRotate" Angle="28"/>
                             <TranslateTransform x:Name="GlassBlobBShift"/>
+                            <TranslateTransform x:Name="GlassBlobBLag"/>
                         </TransformGroup>
                     </Ellipse.RenderTransform>
                 </Ellipse>
@@ -54,6 +58,7 @@
                         <TransformGroup>
                             <RotateTransform x:Name="GlassStreakRotate" Angle="-32"/>
                             <TranslateTransform x:Name="GlassStreakShift"/>
+                            <TranslateTransform x:Name="GlassStreakLag"/>
                         </TransformGroup>
                     </Ellipse.RenderTransform>
                 </Ellipse>

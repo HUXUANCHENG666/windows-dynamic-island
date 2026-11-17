@@ -8,7 +8,8 @@ public readonly record struct LiveTranslateCaption(
     string? Original,
     bool AlreadyChinese,
     bool TranslationPending,
-    bool TranslationFailed);
+    bool TranslationFailed,
+    bool Open);
 
 public readonly record struct CaptionUpdate(int Id, string Recognized, bool Merged);
 
@@ -17,8 +18,9 @@ public readonly record struct CaptionUpdate(int Id, string Recognized, bool Merg
 /// 岛上大约能同时看见三句，更早的可以滑回去看。关闭或重新打开会清空。
 /// 时间戳从开始听系统声音起算；还没进入收听就出了第一条时，从这条起算。
 /// 格式为 m:ss，满 10 分钟为 mm:ss，满 1 小时为 h:mm:ss。
-/// 识别一出来先作为预览写入，译文到达后再替换该条的中文；失败则保留识别文字。
-/// 很短的后续碎片（一两词），且上一句还没有句末标点时，会接到上一句，避免单字把整句挤走。
+/// 说话过程中同一句话会持续更新同一条字幕（Open），像会议记录一样先出字；
+/// 这句话结束后再去翻译，译文到达后替换该条的中文，失败则保留识别文字。
+/// 若上一句已经收束但没有句末标点，很短的后续碎片仍会接到上一句。
 /// </summary>
 public sealed class LiveTranslateCaptionChain
 {
@@ -56,24 +58,86 @@ public sealed class LiveTranslateCaptionChain
 
     public void MarkListening(DateTime utcNow) => _origin ??= utcNow;
 
-    public CaptionUpdate Preview(string text, DateTime utcNow)
-    {
-        if (TryMerge(text, alreadyChinese: false, out var merged))
-            return merged;
+    public CaptionUpdate Preview(string text, DateTime utcNow) =>
+        Accept(text, utcNow, final: true, alreadyChinese: false);
 
-        var caption = Create(text, original: null, alreadyChinese: false, pending: true, failed: false, utcNow);
+    public CaptionUpdate AppendFinal(string text, DateTime utcNow, bool alreadyChinese = false) =>
+        Accept(text, utcNow, final: true, alreadyChinese: alreadyChinese);
+
+    /// <summary>
+    /// 写入或更新当前这句话。说话过程中就会去翻译，不必等这句停稳；final 为 true 时收束这一行。
+    /// 当前句还开着时，用最新的整句识别结果替换，而不是把字再拼到后面。
+    /// 若这行已经有译文，先保留它，等新的译文到了再换。
+    /// </summary>
+    public CaptionUpdate Accept(string text, DateTime utcNow, bool final, bool alreadyChinese = false)
+    {
+        var display = LiveTranslatePolicy.ForIsland(text);
+        if (_items.Count > 0)
+        {
+            int index = _items.Count - 1;
+            var last = _items[index];
+            var recognized = string.IsNullOrWhiteSpace(last.Original) ? last.Primary : last.Original;
+            if (last.Open || ShouldMerge(recognized, display))
+            {
+                var combined = last.Open ? display : Combine(recognized, display);
+                combined = LiveTranslatePolicy.ForIsland(combined);
+                Write(index, last, combined, final, alreadyChinese || last.AlreadyChinese);
+                return new CaptionUpdate(last.Id, combined, true);
+            }
+        }
+
+        var caption = Create(
+            display,
+            original: null,
+            alreadyChinese,
+            pending: !alreadyChinese,
+            failed: false,
+            open: !final,
+            utcNow);
         Append(caption);
         return new CaptionUpdate(caption.Id, caption.Primary, false);
     }
 
-    public CaptionUpdate AppendFinal(string text, DateTime utcNow, bool alreadyChinese = false)
+    void Write(int index, LiveTranslateCaption last, string combined, bool final, bool alreadyChinese)
     {
-        if (TryMerge(text, alreadyChinese, out var merged))
-            return merged;
+        if (alreadyChinese)
+        {
+            _items[index] = last with
+            {
+                Primary = combined,
+                Original = null,
+                AlreadyChinese = true,
+                TranslationPending = false,
+                TranslationFailed = false,
+                Open = !final
+            };
+            return;
+        }
 
-        var caption = Create(text, original: null, alreadyChinese, pending: false, failed: false, utcNow);
-        Append(caption);
-        return new CaptionUpdate(caption.Id, caption.Primary, false);
+        bool hadTranslation = !string.IsNullOrWhiteSpace(last.Original);
+        if (!final)
+        {
+            _items[index] = last with
+            {
+                Primary = hadTranslation ? last.Primary : combined,
+                Original = hadTranslation ? combined : null,
+                AlreadyChinese = false,
+                TranslationPending = true,
+                TranslationFailed = false,
+                Open = true
+            };
+            return;
+        }
+
+        _items[index] = last with
+        {
+            Primary = hadTranslation ? last.Primary : combined,
+            Original = hadTranslation ? combined : null,
+            AlreadyChinese = false,
+            TranslationPending = true,
+            TranslationFailed = false,
+            Open = false
+        };
     }
 
     public bool Complete(int id, string primary, string? original)
@@ -184,57 +248,6 @@ public sealed class LiveTranslateCaptionChain
         return $"{total / 60}:{seconds:00}";
     }
 
-    bool TryMerge(string text, bool alreadyChinese, out CaptionUpdate update)
-    {
-        update = default;
-        if (_items.Count == 0)
-            return false;
-
-        int index = _items.Count - 1;
-        var last = _items[index];
-        var recognized = string.IsNullOrWhiteSpace(last.Original) ? last.Primary : last.Original;
-        if (!ShouldMerge(recognized, text))
-            return false;
-
-        var combined = Combine(recognized, text);
-        combined = LiveTranslatePolicy.ForIsland(combined);
-        if (alreadyChinese || last.AlreadyChinese)
-        {
-            _items[index] = last with
-            {
-                Primary = combined,
-                Original = null,
-                AlreadyChinese = true,
-                TranslationPending = false,
-                TranslationFailed = false
-            };
-        }
-        else if (last.TranslationPending || last.TranslationFailed || string.IsNullOrWhiteSpace(last.Original))
-        {
-            _items[index] = last with
-            {
-                Primary = combined,
-                Original = null,
-                AlreadyChinese = false,
-                TranslationPending = true,
-                TranslationFailed = false
-            };
-        }
-        else
-        {
-            _items[index] = last with
-            {
-                Original = combined,
-                AlreadyChinese = false,
-                TranslationPending = true,
-                TranslationFailed = false
-            };
-        }
-
-        update = new CaptionUpdate(last.Id, combined, true);
-        return true;
-    }
-
     void Append(LiveTranslateCaption caption)
     {
         _items.Add(caption);
@@ -242,7 +255,7 @@ public sealed class LiveTranslateCaptionChain
             _items.RemoveAt(0);
     }
 
-    LiveTranslateCaption Create(string text, string? original, bool alreadyChinese, bool pending, bool failed, DateTime utcNow)
+    LiveTranslateCaption Create(string text, string? original, bool alreadyChinese, bool pending, bool failed, bool open, DateTime utcNow)
     {
         _origin ??= utcNow;
         var elapsed = utcNow - _origin.Value;
@@ -256,7 +269,8 @@ public sealed class LiveTranslateCaptionChain
             original,
             alreadyChinese,
             pending,
-            failed);
+            failed,
+            open);
     }
 
     int IndexOf(int id)

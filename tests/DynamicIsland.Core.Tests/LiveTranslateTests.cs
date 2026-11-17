@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Linq;
 using DynamicIsland.Core.Island;
 using DynamicIsland.Core.LiveTranslate;
 using DynamicIsland.Core.Settings;
@@ -341,13 +342,14 @@ public class LiveTranslateTests
         var silence = new float[SpeechSegmenter.FrameSamples * 20];
         Assert.Empty(segmenter.Push(silence));
 
-        var speech = Voice(SpeechSegmenter.MinSpeechFrames + 5);
+        var speech = Voice(SpeechSegmenter.PartialFrames - 1);
         Assert.Empty(segmenter.Push(speech));
 
         var pause = new float[SpeechSegmenter.FrameSamples * SpeechSegmenter.HangoverFrames];
         var segments = segmenter.Push(pause);
         var segment = Assert.Single(segments);
-        Assert.True(segment.Length >= SpeechSegmenter.FrameSamples * SpeechSegmenter.MinSpeechFrames);
+        Assert.True(segment.Final);
+        Assert.True(segment.Samples.Length >= SpeechSegmenter.FrameSamples * SpeechSegmenter.MinSpeechFrames);
     }
 
     [Fact]
@@ -361,8 +363,10 @@ public class LiveTranslateTests
 
         var longLived = new SpeechSegmenter();
         var segments = longLived.Push(Voice(SpeechSegmenter.MaxSpeechFrames + 8));
-        Assert.NotEmpty(segments);
-        Assert.True(segments[0].Length >= SpeechSegmenter.FrameSamples * SpeechSegmenter.MaxSpeechFrames);
+        Assert.Contains(segments, chunk => !chunk.Final);
+        var cut = Assert.Single(segments, chunk => chunk.Final);
+        Assert.True(cut.Samples.Length >= SpeechSegmenter.FrameSamples * SpeechSegmenter.MaxSpeechFrames);
+        Assert.All(segments.Where(chunk => !chunk.Final), chunk => Assert.Equal(cut.UtteranceId, chunk.UtteranceId));
     }
 
     [Fact]
@@ -456,10 +460,68 @@ public class LiveTranslateTests
     public void Segmenter_UsesLongerHangoverAndMaxUtterance()
     {
         Assert.Equal(320, SpeechSegmenter.FrameSamples);
-        Assert.Equal(25, SpeechSegmenter.HangoverFrames);
-        Assert.Equal(400, SpeechSegmenter.MaxSpeechFrames);
-        Assert.Equal(500, SpeechSegmenter.HangoverFrames * 20);
-        Assert.Equal(8000, SpeechSegmenter.MaxSpeechFrames * 20);
+        Assert.Equal(40, SpeechSegmenter.HangoverFrames);
+        Assert.Equal(25, SpeechSegmenter.PartialFrames);
+        Assert.Equal(750, SpeechSegmenter.MaxSpeechFrames);
+        Assert.Equal(800, SpeechSegmenter.HangoverFrames * 20);
+        Assert.Equal(500, SpeechSegmenter.PartialFrames * 20);
+        Assert.Equal(15000, SpeechSegmenter.MaxSpeechFrames * 20);
+    }
+
+    [Fact]
+    public void Segmenter_EmitsGrowingPartialsThenFinalAfterHangover()
+    {
+        var segmenter = new SpeechSegmenter();
+        var first = Assert.Single(segmenter.Push(Voice(SpeechSegmenter.PartialFrames)));
+        Assert.False(first.Final);
+        Assert.Equal(1, first.UtteranceId);
+
+        Assert.Empty(segmenter.Push(Voice(SpeechSegmenter.PartialFrames - 1)));
+
+        var second = Assert.Single(segmenter.Push(Voice(1)));
+        Assert.False(second.Final);
+        Assert.Equal(first.UtteranceId, second.UtteranceId);
+        Assert.True(second.Samples.Length > first.Samples.Length);
+
+        var ended = Assert.Single(segmenter.Push(new float[SpeechSegmenter.FrameSamples * SpeechSegmenter.HangoverFrames]));
+        Assert.True(ended.Final);
+        Assert.Equal(first.UtteranceId, ended.UtteranceId);
+        Assert.True(ended.Samples.Length >= second.Samples.Length);
+    }
+
+    [Fact]
+    public void RecognitionQueue_KeepsLatestPartial_AndDoesNotDropAFinal()
+    {
+        var queue = new RecognitionWorkQueue();
+        queue.Enqueue(new SpeechChunk(1, new float[1], Final: false));
+        queue.Enqueue(new SpeechChunk(1, new float[2], Final: false));
+        Assert.Equal(1, queue.Count);
+        var partial = queue.Dequeue();
+        Assert.NotNull(partial);
+        Assert.False(partial.Value.Final);
+        Assert.Equal(2, partial.Value.Samples.Length);
+        Assert.Equal(0, queue.Count);
+
+        queue.Enqueue(new SpeechChunk(2, new float[3], Final: false));
+        queue.Enqueue(new SpeechChunk(2, new float[4], Final: true));
+        Assert.Equal(1, queue.Count);
+        var final = queue.Dequeue();
+        Assert.NotNull(final);
+        Assert.True(final.Value.Final);
+        Assert.Equal(4, final.Value.Samples.Length);
+
+        queue.Enqueue(new SpeechChunk(3, new float[5], Final: true));
+        queue.Enqueue(new SpeechChunk(3, new float[6], Final: false));
+        queue.Enqueue(new SpeechChunk(4, new float[7], Final: false));
+        Assert.Equal(2, queue.Count);
+        var kept = queue.Dequeue();
+        Assert.NotNull(kept);
+        Assert.True(kept.Value.Final);
+        Assert.Equal(3, kept.Value.UtteranceId);
+        var next = queue.Dequeue();
+        Assert.NotNull(next);
+        Assert.False(next.Value.Final);
+        Assert.Equal(4, next.Value.UtteranceId);
     }
 
     [Fact]
@@ -615,6 +677,56 @@ public class LiveTranslateTests
         Assert.Equal("请打开窗户吧", zhMerge.Recognized);
         Assert.Single(chinese.Items);
         Assert.True(chinese.Items[0].AlreadyChinese);
+    }
+
+    [Fact]
+    public void CaptionChain_UpdatesOpenLineInPlace_AndTranslatesWhileSpeaking()
+    {
+        var chain = new LiveTranslateCaptionChain();
+        chain.MarkListening(T(0));
+        var first = chain.Accept("Hello", T(1000), final: false);
+        Assert.False(first.Merged);
+        Assert.Single(chain.Items);
+        Assert.Equal("Hello", chain.Items[0].Primary);
+        Assert.True(chain.Items[0].Open);
+        Assert.True(chain.Items[0].TranslationPending);
+
+        var second = chain.Accept("Hello there", T(2000), final: false);
+        Assert.True(second.Merged);
+        Assert.Equal(first.Id, second.Id);
+        Assert.Single(chain.Items);
+        Assert.Equal("Hello there", chain.Items[0].Primary);
+        Assert.True(chain.Items[0].Open);
+        Assert.True(chain.Items[0].TranslationPending);
+
+        Assert.True(chain.Complete(first.Id, "你好", "Hello there"));
+        Assert.True(chain.Items[0].Open);
+        Assert.False(chain.Items[0].TranslationPending);
+        Assert.Equal("你好", chain.Items[0].Primary);
+        Assert.Equal("Hello there", chain.Items[0].Original);
+
+        var third = chain.Accept("Hello there everyone", T(2500), final: false);
+        Assert.True(third.Merged);
+        Assert.Equal(first.Id, third.Id);
+        Assert.Equal("你好", chain.Items[0].Primary);
+        Assert.Equal("Hello there everyone", chain.Items[0].Original);
+        Assert.True(chain.Items[0].Open);
+        Assert.True(chain.Items[0].TranslationPending);
+
+        var done = chain.Accept("Hello there everyone", T(3000), final: true);
+        Assert.True(done.Merged);
+        Assert.Equal(first.Id, done.Id);
+        Assert.Equal("你好", chain.Items[0].Primary);
+        Assert.Equal("Hello there everyone", chain.Items[0].Original);
+        Assert.False(chain.Items[0].Open);
+        Assert.True(chain.Items[0].TranslationPending);
+
+        var next = chain.Accept("Next topic starts now", T(4000), final: false);
+        Assert.False(next.Merged);
+        Assert.NotEqual(first.Id, next.Id);
+        Assert.Equal(2, chain.Items.Count);
+        Assert.True(chain.Items[1].Open);
+        Assert.True(chain.Items[1].TranslationPending);
     }
 
     [Fact]
