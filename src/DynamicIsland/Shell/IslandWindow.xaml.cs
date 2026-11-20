@@ -123,6 +123,15 @@ public partial class IslandWindow : Window
         settings.Docks ??= new();
         _settings = new AppSettingsHost(settings);
         InitializeComponent();
+        _refraction.FrameReady = () =>
+        {
+            if (_shutdown || Dispatcher.HasShutdownStarted) return;
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (!_shutdown && _refraction.PresentReady())
+                    GlassSkin.UpdateRefraction(this, _refraction.Image, _refraction.Shade, _refraction.GpuImage);
+            }, DispatcherPriority.Render);
+        };
         PillHost.RenderTransform = _pillScale;
         AppearancePolicy.Sanitize(settings);
         _animator.Scale = settings.IslandScale;
@@ -1036,33 +1045,16 @@ public partial class IslandWindow : Window
         int visualLeft = pillLeft + (int)Math.Round(originX * pillW * (1 - scaleX) * dpi);
         int visualTop = pillTop + (int)Math.Round(originY * pillH * (1 - scaleY) * dpi);
 
-        // 先用当前流体和上一帧周围图出画面，不等待 BitBlt。
         _optics.Step(dt, visualLeft, visualTop, visualW, visualH, dpi);
         var optics = _optics.Frame(visualW / (double)pillWidth, visualH / (double)pillHeight);
+        double age = _lastCaptureUtc == default ? double.MaxValue : (DateTime.UtcNow - _lastCaptureUtc).TotalSeconds;
+        // Start capture first. Worker consumes its completion directly, not last tick's UI-dispatched pad.
+        if (GlassWork.ShouldCapture(moving, resizing, age, _refraction.CaptureInFlight) &&
+            _refraction.TryBeginCapture(pillLeft, pillTop, pillWidth, pillHeight, visualLeft, visualTop, visualW, visualH, radius * dpi, dpi))
+            _lastCaptureUtc = DateTime.UtcNow;
         if (_refraction.TryPresent(pillWidth, pillHeight, radius * dpi, _liquid, moving, dpi, visualLeft, visualTop, visualW / (double)pillWidth, visualH / (double)pillHeight, optics))
             GlassSkin.UpdateRefraction(this, _refraction.Image, _refraction.Shade, _refraction.GpuImage);
 
-        double age = _lastCaptureUtc == default
-            ? double.MaxValue
-            : (DateTime.UtcNow - _lastCaptureUtc).TotalSeconds;
-        if (!GlassWork.ShouldCapture(moving, resizing, age, _refraction.CaptureInFlight))
-            return;
-
-        _lastCaptureUtc = DateTime.UtcNow;
-        _refraction.TryBeginCapture(pillLeft, pillTop, pillWidth, pillHeight, visualLeft, visualTop, visualW, visualH, radius * dpi, dpi, ok =>
-        {
-            if (_shutdown || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
-                return;
-            Dispatcher.BeginInvoke(() =>
-            {
-                if (_shutdown) return;
-                if (ok)
-                    _refraction.CompleteCapture();
-                else
-                    _refraction.AbandonCapture();
-                // 用当前形状再画一帧，不要沿用开始捕获时的旧尺寸（展开动画中会变）。
-            }, DispatcherPriority.Background);
-        });
     }
 
     static bool DockedTop(DockAnchor anchor) =>

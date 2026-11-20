@@ -69,7 +69,7 @@ async Task Check(string label, int w, int h, double r, double dpi, int[] source,
     var deadline = Stopwatch.StartNew();
     while (actual == null && deadline.Elapsed.TotalSeconds < 15)
     {
-        if (!gpu.TryPresent(source, w + 2 * pad, h + 2 * pad, w, h, w, h, r, field, false, dpi, r, shiftX, shiftY, id, 100 + cases, scaleX, scaleY, optics, liveInterior))
+        if (!gpu.TryPresent(source, w + 2 * pad, h + 2 * pad, w, h, w, h, r, field, false, dpi, r, shiftX, shiftY, id, 100 + cases, scaleX, scaleY, optics, liveInterior, new(w,h,17,23,scaleX,scaleY)))
             throw new InvalidOperationException("WARP lag render/readback device failure.");
         var candidate = gpu.TakeFrame();
         if (candidate?.Started == id) actual = candidate;
@@ -80,6 +80,7 @@ async Task Check(string label, int w, int h, double r, double dpi, int[] source,
     using (actual)
     {
         if (actual.Width != w || actual.Height != h) throw new Exception("Lag readback dimensions differ.");
+        if (actual.Geometry != new GlassFrameGeometry(w,h,17,23,scaleX,scaleY)) throw new Exception("Readback lost original geometry stamp.");
         int max = 0, bad = 0, at = 0, ev = 0, av = 0;
         for (int i = 0; i < expected.Length; i++)
         {
@@ -153,6 +154,15 @@ foreach (double dpi in new[] { 1.0, 1.5 })
     int w = (int)(320 * dpi), h = (int)(140 * dpi);
     double r = 35 * dpi;
     await Check($"lag-live dpi={dpi}", w, h, r, dpi, FillLive(w, h, r, 0), null, 0, 0, 1, 1, new LiquidOpticsFrame(18 * dpi, 0, 1, 1, 1), true);
+}
+
+// Settled and expanding/shrinking live lens; every case has a fresh current texture/version.
+foreach (double dpi in new[] {1.0,1.5,2.0})
+foreach (int width in new[] {240,420,300})
+{
+    int w=(int)(width*dpi), h=(int)(140*dpi); double r=35*dpi;
+    await Check($"water-settled-resize dpi={dpi} width={width}",w,h,r,dpi,FillLive(w,h,r,1),null,0,0,1,1,LiquidOpticsFrame.Identity,true);
+    await Check($"water-moving-scale dpi={dpi} width={width}",w,h,r,dpi,FillLive(w,h,r,1),null,2,-3,1.08,0.96,lagOptics,true);
 }
 
 Console.WriteLine($"WARP {cases} cases passed; worst-channel-error={worst}; software D3D11, no hardware FPS, no WPF-present measurement.");

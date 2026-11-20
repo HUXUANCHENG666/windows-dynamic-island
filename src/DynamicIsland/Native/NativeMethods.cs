@@ -317,6 +317,9 @@ static class NativeMethods
     public const int BI_RGB = 0;
     public const uint DIB_RGB_COLORS = 0;
 
+    [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
+    public static extern IntPtr CreateDC(string driver, string? device, string? output, IntPtr initData);
+
     [DllImport("user32.dll")]
     public static extern IntPtr GetDC(IntPtr hwnd);
 

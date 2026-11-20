@@ -34,6 +34,7 @@ sealed class GlassGpuRenderer : IDisposable
         public bool Pending;
         public int Width, Height;
         public long Sequence, Started;
+        public GlassFrameGeometry Geometry;
     }
     readonly Readback[] _readbacks = { new(), new(), new() };
     long _sequence;
@@ -201,7 +202,7 @@ sealed class GlassGpuRenderer : IDisposable
         int sourceIslandH,
         double radius,
         LiquidSurface? surface,
-        bool moving, double dpi = 1, double sourceRadius = 0, double shiftX = 0, double shiftY = 0, long started = 0, long captureVersion = 0, double scaleX = 1, double scaleY = 1, LiquidOpticsFrame optics = default, bool liveInterior = false)
+        bool moving, double dpi = 1, double sourceRadius = 0, double shiftX = 0, double shiftY = 0, long started = 0, long captureVersion = 0, double scaleX = 1, double scaleY = 1, LiquidOpticsFrame optics = default, bool liveInterior = false, GlassFrameGeometry geometry = default)
     {
         if (!IsAvailable || islandW < 8 || islandH < 8)
             return false;
@@ -248,7 +249,7 @@ sealed class GlassGpuRenderer : IDisposable
                 LagScaleY = optics.IsActive ? (float)optics.LagScaleY : 1,
                 InteriorGain = optics.IsActive ? (float)optics.Strength : 0,
                 InteriorWarp = (float)LiquidOptics.InteriorSlopeWarp,
-                InteriorLive = liveInterior && optics.IsActive ? 1 : 0
+                InteriorLive = liveInterior ? 1 : 0
             };
             WriteConstants(data);
 
@@ -273,7 +274,7 @@ sealed class GlassGpuRenderer : IDisposable
             _context.OMSetRenderTargets(Array.Empty<ID3D11RenderTargetView>(), null);
             _context.CopySubresourceRegion(slot.Texture!, 0, 0, 0, 0, _target, 0, new Box(0, 0, 0, outW, outH, 1));
             slot.Pending = true; slot.Width = outW; slot.Height = outH;
-            slot.Sequence = ++_sequence; slot.Started = started;
+            slot.Sequence = ++_sequence; slot.Started = started; slot.Geometry = geometry;
             _context.Flush(); // 提交命令，不等待 GPU；让后续非阻塞 Map 有进展。
             return true;
         }
@@ -400,6 +401,8 @@ sealed class GlassGpuRenderer : IDisposable
         }
     }
 
+    public GlassPixels? PollFrame() { TryReadback(); return TakeFrame(); }
+
     void TryReadback()
     {
         Readback? oldest = null;
@@ -420,7 +423,7 @@ sealed class GlassGpuRenderer : IDisposable
         if (oldest?.Texture == null) return;
         foreach (var slot in _readbacks)
             if (slot.Pending && slot.Sequence < oldest.Sequence) { slot.Pending = false; Dropped++; }
-        var frame = new GlassPixels(oldest.Width, oldest.Height, true, oldest.Started);
+        var frame = new GlassPixels(oldest.Width, oldest.Height, true, oldest.Started) { Geometry = oldest.Geometry };
         try
         {
             unsafe
@@ -708,6 +711,27 @@ bool TryMapInterior(float2 p, float2 slope, float surface, out float2 u, out flo
     return alpha > 0.01;
 }
 
+float4 WaterColor(float2 p, float distance, float2 slope, float surface)
+{
+    float2 center=float2(IslandW,IslandH)*0.5;
+    float2 n=(p-center)/center;
+    float dome=max(0,(1-n.x*n.x)*(1-n.y*n.y));
+    float contraction=(1-1/1.08)*dome*dome;
+    float2 lagScale=clamp(float2(LagScaleX,LagScaleY),0.25,4);
+    float2 strain=clamp((p-center)*(1/lagScale-1),-56*Dpi,56*Dpi);
+    float2 displacement=-float2(LagX,LagY)+strain+slope/(1+abs(slope))*InteriorWarp*Dpi;
+    float band=RimBand(IslandW,IslandH);
+    float blend=Smootherstep(-3*band,-0.25*band,distance);
+    float2 b=p-(p-center)*contraction+displacement*0.18*(1-blend);
+    float along=Smootherstep(0,1,1+distance/band);
+    float depth=(4+3.5*along+clamp(surface,-1,1)*HeightWarp)*Dpi;
+    float2 edge=p+NormalOf(p,IslandW,IslandH,Radius)*(depth-distance)+slope/(1+abs(slope))*SlopeWarp*Dpi;
+    float4 c=SamplePad(Pad+lerp(b,edge,blend));
+    float a=(0.96-0.16*blend)*saturate(0.5-distance)*c.a;
+    float4 shade=ShadeColor(p,surface);
+    return float4(c.rgb,1)*a+shade*(1-a);
+}
+
 float4 PSMain(VSOut i) : SV_Target
 {
     // Quantize to the same integer-pixel centers the CPU renderer uses, avoiding
@@ -718,6 +742,7 @@ float4 PSMain(VSOut i) : SV_Target
     if (distance >= 0.5) return 0;
     float slopeX, slopeY;
     float surface = SampleField(uv, slopeX, slopeY);
+    if (HasPad > 0.5 && InteriorLive > 0.5) return WaterColor(p,distance,float2(slopeX,slopeY),surface);
     if (distance <= -RimBand(IslandW, IslandH))
     {
         if (HasPad < 0.5 || InteriorGain < 0.01) return 0;

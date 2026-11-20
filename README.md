@@ -243,3 +243,5 @@ GitHub Actions（`.github/workflows/windows.yml`）会在 `windows-latest` 上�
 翻译设置新增 **LibreTranslate自建、Azure Translator F0、DeepL额度**，保留MyMemory与OpenAI兼容。提供商单独保留字段/密钥草稿并明确保存；不擅自切源、不广播到多个源，切源不清历史。Azure F0每月200万字符、需自己的免费层密钥（账号通常绑卡验证）；DeepL新Developer是**共100万字符一次性额度，不是每月免费**，旧Free才是50万/月；Libre软件开源免费，需自己部署或可信实例，官方托管不能无Key免费调用。额度/地区/账户资格以官网为准，程序不开户、不升级，不保证付费账户的调用免费。MyMemory匿名仅5000字符/日，不适合长时间连续翻译。密钥沿用本机现有设置存储，不写日志，不新增加密承诺。
 
 官方链接、免费与试用区别、实测边界和退出/长会话验证见 [连续字幕修复](docs/live-translation-reliability.md) 与 [免费源调研](docs/translation-providers.md)。
+
+清水透镜：正下方实况捕获可用时，静止也有适度水滴放大，并连续接到 9 DIP 边缘；捕获完成直接进入同帧几何，过旧/不匹配结果退透明而非拉伸截图。CPU 回退降分辨率以控制耗时；目标 60fps 预算，不代表已在你的硬件实测达到。系统/驱动不支持实况内景时仍退透明。

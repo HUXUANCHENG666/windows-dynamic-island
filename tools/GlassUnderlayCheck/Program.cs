@@ -153,8 +153,8 @@ static void Report(string label, int[] pixels, int overlay, int under)
 
 static int[] Capture(int x, int y, int w, int h, uint rop)
 {
-    IntPtr screen = GetDC(IntPtr.Zero);
-    if (screen == IntPtr.Zero) throw new InvalidOperationException("GetDC failed");
+    IntPtr screen = CreateDC("DISPLAY", null, null, IntPtr.Zero);
+    if (screen == IntPtr.Zero) throw new InvalidOperationException("CreateDC(DISPLAY) failed");
     IntPtr dc = CreateCompatibleDC(screen);
     var info = new BITMAPINFO { Header = new BITMAPINFOHEADER
     {
@@ -175,7 +175,7 @@ static int[] Capture(int x, int y, int w, int h, uint rop)
         SelectObject(dc, old);
         if (dib != IntPtr.Zero) DeleteObject(dib);
         DeleteDC(dc);
-        ReleaseDC(IntPtr.Zero, screen);
+        DeleteDC(screen);
     }
 }
 
@@ -218,6 +218,7 @@ static extern IntPtr CreateWindowEx(int ex, string cls, string title, int style,
 [DllImport("user32.dll", SetLastError = true)] static extern bool SetWindowDisplayAffinity(IntPtr h, uint a);
 [DllImport("user32.dll", SetLastError = true)] static extern bool GetWindowDisplayAffinity(IntPtr h, out uint a);
 [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hwnd, IntPtr insert, int x, int y, int w, int ht, uint flags);
+[DllImport("gdi32.dll", CharSet=CharSet.Unicode)] static extern IntPtr CreateDC(string driver,string? device,string? output,IntPtr init);
 [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr h);
 [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr h, IntPtr dc);
 [DllImport("user32.dll")] static extern int GetSystemMetrics(int i);

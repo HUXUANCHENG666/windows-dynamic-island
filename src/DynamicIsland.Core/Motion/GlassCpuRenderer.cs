@@ -14,7 +14,7 @@ public static class GlassCpuRenderer
         if (!optics.IsActive) optics = LiquidOpticsFrame.Identity;
         Array.Clear(pixels, 0, ow * oh);
         double band = IslandOutline.RimBand(w, h, dpi);
-        bool fillInterior = optics.IsActive && padPixels != null;
+        bool fillInterior = (liveInterior || optics.IsActive) && padPixels != null;
         for (int y = 0; y < oh; y++)
         for (int x = 0; x < ow; x++)
         {
@@ -28,7 +28,13 @@ public static class GlassCpuRenderer
             field?.SampleSlope(px / w, py / h, out height, out sx, out sy);
             int shade = distance <= -band ? 0 : IslandOutline.ShadeArgb(px, py, w, h, radius, height, dpi);
             int c = 0; double u = 0, v = 0, alpha = 0;
-            if (padPixels != null && distance > -band && LiquidRefraction.TryMap(px, py, w, h, Pad, radius, sx, sy, height,
+            if (liveInterior && padPixels != null)
+            {
+                WaterLens.Map(px, py, w, h, radius, dpi, distance, optics, sx, sy, height, out u, out v, out alpha);
+                c = GlassSample.Footprint(padPixels, sourceW + 2 * Pad, sourceH + 2 * Pad, u, v,
+                    sourceW, sourceH, w, h, Pad, sourceRadius, dpi, shiftX, shiftY, true, scaleX, scaleY);
+            }
+            else if (padPixels != null && distance > -band && LiquidRefraction.TryMap(px, py, w, h, Pad, radius, sx, sy, height,
                 out u, out v, out alpha, out _, out _, out _, out _, dpi))
                 c = GlassSample.Footprint(padPixels, sourceW + 2 * Pad, sourceH + 2 * Pad, u, v,
                     sourceW, sourceH, w, h, Pad, sourceRadius, dpi, shiftX, shiftY, true, scaleX, scaleY);
