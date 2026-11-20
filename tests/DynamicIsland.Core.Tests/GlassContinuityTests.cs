@@ -26,8 +26,8 @@ public class GlassContinuityTests
         for (int frame = 0; frame <= 120; frame++)
         {
             double t = frame / 120.0, w = (180 + 354 * t) * dpi, h = (40 + 190 * t) * dpi;
-            Assert.Equal(6 * dpi, IslandOutline.RimBand(w, h, dpi), 9);
-            Assert.Equal(0, IslandOutline.Along(w / 2, 6.01 * dpi, w, h, 35 * dpi, dpi));
+            Assert.Equal(Math.Min(9 * dpi, h * 0.20), IslandOutline.RimBand(w, h, dpi), 9);
+            Assert.Equal(0, IslandOutline.Along(w / 2, 9.01 * dpi, w, h, 35 * dpi, dpi));
             Assert.True(IslandOutline.Along(w / 2, 2 * dpi, w, h, 35 * dpi, dpi) > 0.5);
         }
     }
@@ -162,7 +162,7 @@ public class GlassContinuityTests
             Assert.Equal(c & 255, (c >> 16) & 255);
             Assert.InRange(c & 255, 0, a);
         }
-        Assert.Equal(0, pixels[(int)(7 * dpi) * w + w / 2]);
+        Assert.Equal(0, pixels[(int)(10 * dpi) * w + w / 2]);
         Assert.NotEqual(0, pixels[(int)(2 * dpi) * w + w / 2]);
     }
 

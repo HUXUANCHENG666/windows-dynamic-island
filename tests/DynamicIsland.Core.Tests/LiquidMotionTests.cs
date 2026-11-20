@@ -320,7 +320,7 @@ public class LiquidMotionTests
         const double h = 292;
         const double radius = 40;
         double inset = IslandOutline.RimBand(w, h);
-        Assert.Equal(6, inset);
+        Assert.Equal(9, inset);
         Assert.Equal(radius - inset, IslandOutline.InnerCornerRadius(w, h, radius));
         // 直角内缩的左上角点落在圆角扇形外，应在边缘带里；中点内沿仍贴边。
         Assert.True(IslandOutline.Along(inset, inset, w, h, radius) > 0);

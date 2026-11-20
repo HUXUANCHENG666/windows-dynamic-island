@@ -7,7 +7,7 @@ namespace DynamicIsland.Core.Geometry;
 /// </summary>
 public static class IslandOutline
 {
-    public const double RimWidthDip = 6;
+    public const double RimWidthDip = 9;
     public static double RimBand(double width, double height, double dpi = 1) =>
         Math.Min(RimWidthDip * dpi, Math.Min(width, height) * 0.20);
 

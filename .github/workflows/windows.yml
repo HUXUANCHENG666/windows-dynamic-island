@@ -13,6 +13,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
+      - name: Check settings XAML contracts
+        run: python3 build/check-settings-xaml.py
       - name: Test motion, shape, and state logic
         run: dotnet test tests/DynamicIsland.Core.Tests/DynamicIsland.Core.Tests.csproj -c Release
 
@@ -28,6 +30,8 @@ jobs:
         run: ./build/check-glass-shader.ps1
       - name: Validate D3D11 shader pixels with headless WARP (not hardware FPS)
         run: dotnet run --project tools/GlassGpuCheck/GlassGpuCheck.csproj -c Release --property:WarningLevel=9999 --property:TreatWarningsAsErrors=true
+      - name: Load actual WPF settings resources, layout and behavior (headless)
+        run: dotnet run --project tools/SettingsUiCheck/SettingsUiCheck.csproj -c Release --property:TreatWarningsAsErrors=true
       - name: Publish self-contained exe
         shell: bash
         run: ./build/publish.sh "${{ runner.temp }}/publish"

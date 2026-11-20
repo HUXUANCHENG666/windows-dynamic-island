@@ -353,6 +353,20 @@ public partial class IslandWindow : Window
         PinTimer(expand: true);
     }
 
+    internal DockAnchor CurrentAnchor => _anchor;
+    internal void SetDockAnchor(DockAnchor anchor)
+    {
+        var monitor = ResolveMonitor(MonitorEnumerator.Enumerate());
+        if (monitor == null) return;
+        Settings.Docks ??= new();
+        DockStore.Remember(Settings.Docks, monitor.DeviceName, anchor);
+        SettingsStore.Save(Settings);
+        _placed = default;
+        Position();
+        _animator.SetTarget(_director.Mode, _director.Expanded, _director.ShowAsDot, _orientation);
+        Nudge();
+    }
+
     public void SelectMonitor(string? deviceName)
     {
         Settings.MonitorDeviceName = deviceName;
