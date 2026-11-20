@@ -18,7 +18,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
     readonly GlassDiagnostics _stats = new();
     readonly LiquidSurface _field = new();
     GlassGpuRenderer? _gpu;
-    CapturedPad? _pad, _pending;
+    CapturedPad? _pad, _pending, _atlas;
     GlassPixels? _ready;
     WriteableBitmap? _bitmap;
     bool _renderBusy, _captureBusy, _disposed;
@@ -32,12 +32,13 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
     public bool CaptureInFlight { get { lock (_gate) return _captureBusy; } }
     public void Clear()
     {
-        lock (_gate) { _epoch++; _ready?.Dispose(); _ready = null; }
+        lock (_gate) { _epoch++; _ready?.Dispose(); _ready = null; _atlas?.Dispose(); _atlas = null; }
         _bitmap = null;
     }
 
     public bool TryPresent(int w, int h, double radius, LiquidSurface? surface, bool moving,
-        double dpi = 1, int left = 0, int top = 0, double scaleX = 1, double scaleY = 1)
+        double dpi = 1, int left = 0, int top = 0, double scaleX = 1, double scaleY = 1,
+        LiquidOpticsFrame optics = default)
     {
         GlassPixels? ready;
         lock (_gate) { ready = _ready; _ready = null; }
@@ -69,7 +70,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
                 {
                     long start = Stopwatch.GetTimestamp();
                     GlassPixels? frame = null;
-                    try { frame = Render(pad, w, h, radius, surface == null ? null : _field, moving, dpi, left, top, start, scaleX, scaleY); }
+                    try { frame = Render(pad, w, h, radius, surface == null ? null : _field, moving, dpi, left, top, start, scaleX, scaleY, optics); }
                     catch (Exception ex)
                     {
                         Debug.WriteLine($"Glass skipped: {ex.GetType().Name}");
@@ -98,7 +99,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
     }
 
     GlassPixels? Render(CapturedPad? pad, int w, int h, double radius, LiquidSurface? field, bool moving,
-        double dpi, int left, int top, long start, double scaleX, double scaleY)
+        double dpi, int left, int top, long start, double scaleX, double scaleY, LiquidOpticsFrame optics)
     {
         if (GlassWork.PreferGpu && _gpu == null && DateTime.UtcNow >= _retry)
         {
@@ -110,7 +111,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
             long submit = Stopwatch.GetTimestamp();
             bool healthy = _gpu.TryPresent(pad?.Pixels, pad == null ? 0 : pad.Width + 2 * Pad,
                 pad == null ? 0 : pad.Height + 2 * Pad, w, h, pad?.Width ?? w, pad?.Height ?? h,
-                radius, field, moving, dpi, pad?.Radius ?? radius, left - (pad?.Left ?? left), top - (pad?.Top ?? top), start, pad?.Id ?? 0, scaleX, scaleY);
+                radius, field, moving, dpi, pad?.Radius ?? radius, left - (pad?.Left ?? left), top - (pad?.Top ?? top), start, pad?.Id ?? 0, scaleX, scaleY, optics);
             _stats.Time(3, submit);
             if (healthy)
             {
@@ -125,7 +126,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
         var result = new GlassPixels(ow, oh, false, start);
         GlassCpuRenderer.Render(result.Pixels, ow, oh, w, h, radius, dpi, field,
             pad?.Pixels, pad?.Width ?? w, pad?.Height ?? h, pad?.Radius ?? radius,
-            left - (pad?.Left ?? left), top - (pad?.Top ?? top), scaleX, scaleY);
+            left - (pad?.Left ?? left), top - (pad?.Top ?? top), scaleX, scaleY, optics);
         return result;
     }
 
@@ -157,12 +158,40 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
     }
     public void CompleteCapture()
     {
-        lock (_gate) { _pad?.Dispose(); _pad = _pending; _pending = null; _captureBusy = false; }
+        lock (_gate)
+        {
+            if (_pending != null)
+            {
+                var merged = MergeBackdrop(_pending, _atlas);
+                _atlas?.Dispose(); _pad?.Dispose(); _pending.Dispose();
+                _atlas = merged; _pad = merged?.Retain(); _pending = null;
+            }
+            _captureBusy = false;
+        }
     }
     public void AbandonCapture()
     {
         lock (_gate) { _pending?.Dispose(); _pending = null; _captureBusy = false; }
     }
+    static CapturedPad? MergeBackdrop(CapturedPad capture, CapturedPad? previous)
+    {
+        const int pad = Pad;
+        int count = (capture.Width + 2 * pad) * (capture.Height + 2 * pad);
+        int[] dest = System.Buffers.ArrayPool<int>.Shared.Rent(count);
+        try
+        {
+            LiquidBackdrop.Composite(dest, capture.Left, capture.Top, capture.Width, capture.Height,
+                previous?.Pixels, previous?.Left ?? 0, previous?.Top ?? 0, previous?.Width ?? 0, previous?.Height ?? 0,
+                capture.Pixels, capture.Left, capture.Top, capture.Width, capture.Height, pad);
+            return new CapturedPad(dest, capture.Width, capture.Height, capture.Left, capture.Top, capture.Radius, capture.Dpi);
+        }
+        catch
+        {
+            System.Buffers.ArrayPool<int>.Shared.Return(dest);
+            throw;
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         Task draining;
@@ -182,7 +211,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
         lock (_gate)
         {
             _disposed = true; _ready?.Dispose(); _ready = null;
-            _pad?.Dispose(); _pad = null; _pending?.Dispose(); _pending = null;
+            _pad?.Dispose(); _pad = null; _pending?.Dispose(); _pending = null; _atlas?.Dispose(); _atlas = null;
             if (!_captureBusy) _capture.Dispose();
             if (!_renderBusy) { _gpu?.Dispose(); _gpu = null; }
         }

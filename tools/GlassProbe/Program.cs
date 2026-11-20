@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using DynamicIsland.Core.Geometry;
 using DynamicIsland.Core.Motion;
 
@@ -27,21 +28,20 @@ for (int kind = 0; kind < 4; kind++)
         source[y * (w + 2 * pad) + x] = IslandOutline.SignedDistance(px + .5, py + .5, w, h, r) <= 1 ? 0 : c;
     }
     GlassCpuRenderer.Render(pixels, w, h, w, h, r, 1, field, source, w, h, r);
-    using (var file = File.Create(Path.Combine(directory, $"pattern-{kind}.ppm")))
-    {
-        file.Write(System.Text.Encoding.ASCII.GetBytes($"P6\n{w} {h}\n255\n"));
-        for (int y = 0; y < h; y++)
-        for (int x = 0; x < w; x++)
-        {
-            int c = pixels[y * w + x], a = (int)((uint)c >> 24);
-            // Synthetic underneath, not a desktop screenshot. Include outline only as a guide.
-            int bg = background[(y + pad) * (w + 2 * pad) + x + pad];
-            if (IslandOutline.SignedDistance(x + .5, y + .5, w, h, r) >= 0) { c = 0; a = 0; }
-            for (int shift = 16; shift >= 0; shift -= 8)
-                file.WriteByte((byte)Math.Clamp(((c >> shift) & 255) + ((bg >> shift) & 255) * (255 - a) / 255, 0, 255));
-        }
-    }
+    WritePpm(Path.Combine(directory, $"pattern-{kind}.ppm"), pixels, background);
 }
+
+// 合成对比：同一网格背景，静止直透 vs 28px 世界坐标滞后（内部使用完整历史像素，不是冻结整张岛截图）。
+{
+    var before = new int[w * h];
+    var after = new int[w * h];
+    int[] history = (int[])background.Clone();
+    GlassCpuRenderer.Render(before, w, h, w, h, r, 1, field, source, w, h, r);
+    GlassCpuRenderer.Render(after, w, h, w, h, r, 1, field, history, w, h, r, 0, 0, 1, 1, new LiquidOpticsFrame(28, 0, 1, 1, 1));
+    WritePpm(Path.Combine(directory, "lag-before.ppm"), before, background);
+    WritePpm(Path.Combine(directory, "lag-after.ppm"), after, background);
+}
+
 for (int i = 0; i < 20; i++) GlassCpuRenderer.Render(pixels, w, h, w, h, r, 1, field, source, w, h, r);
 var samples = new double[180];
 long allocation = GC.GetAllocatedBytesForCurrentThread();
@@ -55,4 +55,34 @@ long bytes = GC.GetAllocatedBytesForCurrentThread() - allocation;
 Array.Sort(samples);
 Console.WriteLine($"SYNTHETIC actual Core CPU fallback only {w}x{h}, {samples.Length} runs: mean={samples.Average():F3}ms p95={samples[(int)(samples.Length * .95)]:F3}ms; measured-loop allocated={bytes} bytes.");
 Console.WriteLine("Excludes capture, worker scheduling, snapshots, pooling, UI WritePixels, GPU and actual presentation. NOT Windows/GPU FPS.");
-Console.WriteLine($"Synthetic algorithm PPM images: {directory} (NOT Windows screenshots)");
+var lagSamples = new double[60];
+var lagOptics = new LiquidOpticsFrame(28, 0, 1, 1, 1);
+int[] historyPixels = (int[])background.Clone();
+for (int i = 0; i < 8; i++) GlassCpuRenderer.Render(pixels, w, h, w, h, r, 1, field, historyPixels, w, h, r, 0, 0, 1, 1, lagOptics);
+allocation = GC.GetAllocatedBytesForCurrentThread();
+for (int i = 0; i < lagSamples.Length; i++)
+{
+    long start = Stopwatch.GetTimestamp();
+    GlassCpuRenderer.Render(pixels, w, h, w, h, r, 1, field, historyPixels, w, h, r, 0, 0, 1, 1, lagOptics);
+    lagSamples[i] = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+}
+long lagBytes = GC.GetAllocatedBytesForCurrentThread() - allocation;
+Array.Sort(lagSamples);
+Console.WriteLine($"SYNTHETIC interior-lag CPU fallback {w}x{h}, {lagSamples.Length} runs: mean={lagSamples.Average():F3}ms p95={lagSamples[(int)(lagSamples.Length * .95)]:F3}ms; measured-loop allocated={lagBytes} bytes. Still not Windows/GPU FPS.");
+Console.WriteLine($"Synthetic algorithm PPM images: {directory} (合成算法验证，非实际Windows截图)");
+
+static void WritePpm(string path, int[] pixels, int[] background)
+{
+    const int w = 534, h = 230, r = 35, pad = 72;
+    using var file = File.Create(path);
+    file.Write(Encoding.ASCII.GetBytes($"P6\n# 合成算法验证，非实际Windows截图\n{w} {h}\n255\n"));
+    for (int y = 0; y < h; y++)
+    for (int x = 0; x < w; x++)
+    {
+        int c = pixels[y * w + x], a = (int)((uint)c >> 24);
+        int bg = background[(y + pad) * (w + 2 * pad) + x + pad];
+        if (IslandOutline.SignedDistance(x + .5, y + .5, w, h, r) >= 0) { c = 0; a = 0; }
+        for (int shift = 16; shift >= 0; shift -= 8)
+            file.WriteByte((byte)Math.Clamp(((c >> shift) & 255) + ((bg >> shift) & 255) * (255 - a) / 255, 0, 255));
+    }
+}

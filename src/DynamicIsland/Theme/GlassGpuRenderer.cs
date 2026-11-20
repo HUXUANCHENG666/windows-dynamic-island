@@ -200,7 +200,7 @@ sealed class GlassGpuRenderer : IDisposable
         int sourceIslandH,
         double radius,
         LiquidSurface? surface,
-        bool moving, double dpi = 1, double sourceRadius = 0, double shiftX = 0, double shiftY = 0, long started = 0, long captureVersion = 0, double scaleX = 1, double scaleY = 1)
+        bool moving, double dpi = 1, double sourceRadius = 0, double shiftX = 0, double shiftY = 0, long started = 0, long captureVersion = 0, double scaleX = 1, double scaleY = 1, LiquidOpticsFrame optics = default)
     {
         if (!IsAvailable || islandW < 8 || islandH < 8)
             return false;
@@ -241,7 +241,12 @@ sealed class GlassGpuRenderer : IDisposable
                 HeightWarp = (float)LiquidRefraction.HeightWarp,
                 SlopeWarp = (float)LiquidRefraction.SlopeWarp,
                 Dpi = (float)dpi, SrcRadius = (float)sourceRadius, ShiftX = (float)shiftX, ShiftY = (float)shiftY,
-                ScaleX = (float)scaleX, ScaleY = (float)scaleY
+                ScaleX = (float)scaleX, ScaleY = (float)scaleY,
+                LagX = (float)optics.LagX, LagY = (float)optics.LagY,
+                LagScaleX = optics.IsActive ? (float)optics.LagScaleX : 1,
+                LagScaleY = optics.IsActive ? (float)optics.LagScaleY : 1,
+                InteriorGain = optics.IsActive ? (float)optics.Strength : 0,
+                InteriorWarp = (float)LiquidOptics.InteriorSlopeWarp
             };
             WriteConstants(data);
 
@@ -477,7 +482,8 @@ sealed class GlassGpuRenderer : IDisposable
         public float FieldCols, FieldRows, HasPad, HasField;
         public float RimWidth, Chromatic, HeightWarp, SlopeWarp;
         public float Dpi, SrcRadius, ShiftX, ShiftY;
-        public float ScaleX, ScaleY, Unused1, Unused2;
+        public float ScaleX, ScaleY, LagX, LagY;
+        public float LagScaleX, LagScaleY, InteriorGain, InteriorWarp;
     }
 
     const string ShaderSource = """
@@ -505,8 +511,12 @@ cbuffer Params : register(b0)
     float ShiftY;
     float ScaleX;
     float ScaleY;
-    float Unused1;
-    float Unused2;
+    float LagX;
+    float LagY;
+    float LagScaleX;
+    float LagScaleY;
+    float InteriorGain;
+    float InteriorWarp;
 };
 
 Texture2D PadTex : register(t0);
@@ -655,14 +665,44 @@ bool TryMap(float2 p, float2 slope, float surface, out float2 u, out float2 ru, 
     return alpha > 0.01;
 }
 
+bool TryMapInterior(float2 p, float2 slope, float surface, out float2 u, out float alpha)
+{
+    u = 0;
+    alpha = 0;
+    if (InteriorGain < 0.01 || IslandW < 2 || IslandH < 2 || Pad < 4)
+        return false;
+    float r = SafeRadius(IslandW, IslandH, Radius);
+    float d = SignedDistance(p, IslandW, IslandH, r);
+    float band = RimBand(IslandW, IslandH);
+    if (d >= -band)
+        return false;
+    float2 sample = float2(p.x * LagScaleX, p.y * LagScaleY) - float2(LagX, LagY)
+        + slope / (1 + abs(slope)) * InteriorWarp * Dpi;
+    u = Pad + sample;
+    float near = Smootherstep(-band - 4 * Dpi, -band + 2 * Dpi, d);
+    alpha = saturate(InteriorGain * (0.42 + 0.28 * saturate(abs(surface))) * (1 - 0.35 * near));
+    alpha = min(alpha, 0.50);
+    return alpha > 0.01;
+}
+
 float4 PSMain(VSOut i) : SV_Target
 {
     float2 p = i.uv * float2(IslandW, IslandH);
     float2 uv = i.uv;
     float distance = SignedDistance(p, IslandW, IslandH, Radius);
-    if (distance >= 0.5 || distance <= -RimBand(IslandW, IslandH)) return 0;
+    if (distance >= 0.5) return 0;
     float slopeX, slopeY;
     float surface = SampleField(uv, slopeX, slopeY);
+    if (distance <= -RimBand(IslandW, IslandH))
+    {
+        if (HasPad < 0.5 || InteriorGain < 0.01) return 0;
+        float2 iu; float ialpha;
+        if (!TryMapInterior(p, float2(slopeX, slopeY), surface, iu, ialpha)) return 0;
+        float4 inside = SamplePad(iu);
+        if (dot(inside, 1) <= 0 || inside.a <= 0) return 0;
+        float ia = saturate(ialpha * inside.a);
+        return float4(inside.rgb, 1) * ia;
+    }
     float4 shade = ShadeColor(p, surface);
     float4 color = shade;
     if (HasPad > 0.5)
