@@ -19,7 +19,7 @@
 - GPU 仍为硬件优先、3 staging 槽、DO_NOT_WAIT；提交后工作任务最多 3 次异步 1ms 延迟再非阻塞检查，没有 UI 等待/自旋，完成即发一个 Render 优先级 UI 提交通知，不强制等下个动画 tick。计时器可能被 OS 延迟，1ms 不是硬实时保证。只有一项渲染、一项捕获、一个完成槽；慢机器丢旧帧，不排队。
 - 从采集起的时间戳、原尺寸/位置/缩放跟随各 staging 槽；UI 拒绝与当前几何误差超过 3 物理像素×DPI 或底图龄超过 100ms 的结果，过期已显示图也清掉；缺失区域是真透明，绝不把旧截图放大填上。Clear 使采集 epoch 失效。
 - GDI 用延迟启动的专用线程（有界单槽 mailbox；按 [CreateDC 官方生命周期](https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-createdcw) 保持创建线程活着）复用 `CreateDC("DISPLAY")` 的显示 DC 与桶 DIB（失败重建、退出释放），不再每帧 GetDC/ReleaseDC；仅清请求矩形，防屏外裁剪残留旧像素。
-- CPU 全内景 5-tap 比薄边贵，回退输出长边有界到 480；GPU 长边仍 1024。UV 与透镜公式一致，CPU 降分辨率是明确取舍，不影响真实窗口 1:1 跟手、Q 弹或展开弹簧。
+- CPU 全内景 5-tap 比薄边贵，最终回退输出长边有界到 384；GPU 长边仍 1024。UV 与透镜公式一致，CPU 降分辨率是明确取舍，不影响真实窗口 1:1 跟手、Q 弹或展开弹簧。
 
 ## 诊断与证据范围
 
@@ -44,3 +44,14 @@ CI 首轮扩展 WARP 覆盖发现 200% DPI、宽 420 DIP、缩放 1.08 时的真
 188ffd7 在另一 CI runner 观察：DDA capture p95=1.04ms（386 次 DDA、1 次 GDI），但 worker p95=15.87ms、采集到 UI=16.27ms，UI submit=37.3/s。瓶颈已转到 Task.Delay(1) 的粗粒度唤醒/runner 的 DispatcherTimer 节拍，不能据此声称 60fps。最终用公开 [CreateWaitableTimerExW HIGH_RESOLUTION](https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-createwaitabletimerexw) 的私有单次 1ms 等待代替 Task.Delay；只在后台最多等待两次，不自旋、不改变全系统 timer resolution；不支持时跳过等待、下一 tick 再取，句柄随 GPU 退出释放。UI 始终不等待。
 
 同轮 Windows CPU 合成 480×210 p95=21.932ms，仍超预算，因此最终 CPU Live 长边进一步有界到 **384**（算法和 UV 不变，精细文字在 CPU 回退下可能比 GPU 软）；上文 480 的数字为调优过程，不是最终上限。最终 run 日志是交付指标。所有窗口/动画、翻译、设置和正式版号不变。
+
+最终审查保留 WriteableBitmap 的可复用存储：拖动/过龄时只撤下旧图，不销毁位图；同尺寸新图仍 WritePixels 原对象。展开导致实际输出尺寸变化才重建，避免“拒绝旧几何”反而令普通拖动每帧创建 WPF 位图。
+
+### 可复查的 CI 实测（同一测试方法，不是同一物理机器）
+
+- BitBlt 优先 / run 44763793582：p95 capture 30.99ms，worker 33.43ms，capture-to-UI 35.54ms，UI submit 25.6/s。
+- DDA + 粗 Task.Delay / run 44764756236：1.04 / 15.87 / 16.27ms，UI submit 37.3/s；386 次 DDA、1 次 GDI。
+- DDA + 私有高精度等待 / run 44765563897：0.99 / 4.04 / 4.31ms，UI write 0.36ms，GPU submit/poll 0.22ms，readback probe/copy 0.02ms，ready-to-UI 0.42ms；UI submit 36.3/s，374 次 DDA、1 次 GDI。三个 capture-fail 是测试 Clear 使采集 epoch 作废的计数。39 个 WARP 对照最大通道差 3/255；无变化复用和底层变色更新均通过。
+- 最后一项同 run Windows CPU：320×140 Live p50/p95 9.234/14.892ms；640×280 几何、384×168 输出 12.886/13.370ms，预分配调用 0 bytes/frame。
+
+这些是共享 CI runner 的观测，不能严格归因百分比加速，也不能把 DispatcherTimer 驱动的 36.3 次 UI 提交说成真实显示 60fps。证据说明主要等待已被去掉、单帧链路 p95 进入 16.67ms 目标预算；真实 app 用 CompositionTarget.Rendering，用户硬件/显示器仍未测。Linux 仅合成算法图可检查空间连续，不是 Windows 录屏。

@@ -17,6 +17,6 @@ foreach (var (w,h) in new[] { (320,140), (640,280) })
         for(int i=0;i<times.Length;i++) {long start=Stopwatch.GetTimestamp(); Render(); times[i]=Stopwatch.GetElapsedTime(start).TotalMilliseconds;}
         alloc=GC.GetAllocatedBytesForCurrentThread()-alloc;
         Array.Sort(times);
-        Console.WriteLine($"CPU synthetic {w}x{h} output={ow}x{oh} live={live} n={times.Length} p50-ms={times[40]:F3} p95-ms={times[75]:F3} alloc/frame={alloc/times.Length} checksum={dst[w*h/2]:X8} (compute only; not desktop fps)");
+        Console.WriteLine($"CPU synthetic {w}x{h} output={ow}x{oh} live={live} n={times.Length} p50-ms={times[40]:F3} p95-ms={times[75]:F3} alloc/frame={alloc/times.Length} checksum={dst[ow*oh/2]:X8} (compute only; not desktop fps)");
     }
 }

@@ -24,7 +24,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
     GlassPixels? _ready;
     WriteableBitmap? _bitmap;
     bool _renderBusy, _captureBusy, _disposed;
-    bool _gpuImage;
+    bool _gpuImage, _visible;
     GlassFrameGeometry _view;
     double _viewDpi = 1;
     GlassFrameGeometry _shown;
@@ -34,15 +34,15 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
     Task _renderTask = Task.CompletedTask, _captureTask = Task.CompletedTask;
     int _epoch;
     DateTime _retry;
-    public ImageSource? Image => _gpuImage ? null : _bitmap;
+    public ImageSource? Image => _visible && !_gpuImage ? _bitmap : null;
     public ImageSource? Shade => null;
-    public ImageSource? GpuImage => _gpuImage ? _bitmap : null;
+    public ImageSource? GpuImage => _visible && _gpuImage ? _bitmap : null;
     public bool AllowLiveInterior;
     public bool CaptureInFlight { get { lock (_gate) return _captureBusy; } }
     public void Clear()
     {
         lock (_gate) { _epoch++; _minCapture = Stopwatch.GetTimestamp(); _ready?.Dispose(); _ready = null; _pad?.Dispose(); _pad = null; }
-        _bitmap = null;
+        _bitmap = null; _visible = false;
     }
 
     public bool TryPresent(int w, int h, double radius, LiquidSurface? surface, bool moving,
@@ -51,8 +51,8 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
     {
         _view = new(w, h, left, top, scaleX, scaleY); _viewDpi = dpi;
         bool updated = false;
-        if (_bitmap != null && (!_shown.Matches(_view, 3 * dpi) || !GlassFrameGeometry.IsFresh(Stopwatch.GetElapsedTime(_shownCapture).TotalMilliseconds)))
-        { _bitmap = null; updated = true; }
+        if (_visible && _bitmap != null && (!_shown.Matches(_view, 3 * dpi) || !GlassFrameGeometry.IsFresh(Stopwatch.GetElapsedTime(_shownCapture).TotalMilliseconds)))
+        { _visible = false; updated = true; }
         updated |= PresentReady();
         lock (_gate)
         {
@@ -130,7 +130,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
                     _bitmap = new WriteableBitmap(ready.Width, ready.Height, 96, 96, PixelFormats.Pbgra32, null);
                 _bitmap.WritePixels(new Int32Rect(0, 0, ready.Width, ready.Height), ready.Pixels, ready.Width * 4, 0);
                 _shown = ready.Geometry; _shownCapture = ready.Started;
-                _gpuImage = ready.Gpu; updated = true; _stats.Ui();
+                _gpuImage = ready.Gpu; _visible = true; updated = true; _stats.Ui();
                 _stats.Time(4, ready.Started);
                 _stats.Time(6, ready.ReadyAt);
             }
