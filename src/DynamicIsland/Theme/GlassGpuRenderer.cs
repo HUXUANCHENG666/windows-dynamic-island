@@ -645,7 +645,8 @@ float2 SafeRoundedPoint(float2 p, float2 size, float radius)
 float4 PadTap(float2 p)
 {
     float2 size = float2(SrcPadW, SrcPadH);
-    p = clamp(p, 0, size - 1);
+    // Clamp each tap to actual captured content, not the larger reusable texture bucket.
+    p = clamp(p, 0, float2(SrcW, SrcH) + 2 * Pad - 1);
     return PadTex.SampleLevel(LinearClamp, (p + 0.5) / size, 0);
 }
 
