@@ -108,6 +108,10 @@ static class GlassSkin
         window.GlassBlobBLag.Y = lagY * 0.8;
         window.GlassStreakLag.X = lagX * 1.15;
         window.GlassStreakLag.Y = lagY * 1.15;
+        window.GlassShadeLag.X = lagX * 0.7;
+        window.GlassShadeLag.Y = lagY * 0.7;
+        window.GlassRefractionLag.X = lagX * 0.5;
+        window.GlassRefractionLag.Y = lagY * 0.5;
     }
 
     static DropShadowEffect MakeShadow()

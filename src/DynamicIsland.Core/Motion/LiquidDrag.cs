@@ -19,7 +19,7 @@ public static class LiquidDrag
     /// 比岛本体更有弹性：ζ ≈ 0.50，过冲大约 16%。
     /// 再配合 <see cref="ReleaseKick"/>，松手后会明显地弹一下再落定。
     /// </summary>
-    public static SpringConfig Bounce { get; } = new(190, 13.8);
+    public static SpringConfig Bounce { get; } = new(230, 15.2);
 
     public static double Speed(double vx, double vy) => Math.Sqrt(vx * vx + vy * vy);
 

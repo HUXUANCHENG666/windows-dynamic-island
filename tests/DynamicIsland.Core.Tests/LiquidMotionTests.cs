@@ -266,9 +266,53 @@ public class LiquidMotionTests
     }
 
     [Fact]
-    public void GlassWork_DoesNotCaptureWhileMoving()
+    public void GlassWork_SchedulesVisualsWhileMoving_WithoutBlockingPosition()
     {
-        Assert.True(GlassWork.ShouldCapture(moving: false));
-        Assert.False(GlassWork.ShouldCapture(moving: true));
+        Assert.False(GlassWork.PositionDependsOnCapture);
+        Assert.True(GlassWork.ShouldRefreshVisuals(moving: true));
+        Assert.True(GlassWork.ShouldRefreshVisuals(moving: false));
+        Assert.True(GlassWork.ShouldReuseCapture(true));
+        Assert.False(GlassWork.ShouldReuseCapture(false));
+        Assert.False(GlassWork.ShouldCapture(moving: true, secondsSinceCapture: 1, captureInFlight: true));
+        Assert.False(GlassWork.ShouldCapture(moving: true, secondsSinceCapture: 0.01, captureInFlight: false));
+        Assert.True(GlassWork.ShouldCapture(moving: true, secondsSinceCapture: 0.05, captureInFlight: false));
+        Assert.True(GlassWork.ShouldCapture(moving: false, secondsSinceCapture: 0.02, captureInFlight: false));
+        Assert.True(GlassWork.OutputLongSide(moving: true) < GlassWork.OutputLongSide(moving: false));
+    }
+
+    [Fact]
+    public void Outline_InnerEdgeStaysRounded()
+    {
+        // 竖向菜单：带宽大于外圆角时，旧的等距内缩会把内沿切成直角矩形。
+        const double w = 210;
+        const double h = 292;
+        const double radius = 40;
+        double inset = IslandOutline.RimBand(w, h);
+        Assert.True(inset > radius);
+        Assert.True(IslandOutline.InnerCornerRadius(w, h, radius) >= IslandOutline.MinInnerCorner);
+        // 直角内缩的左上角点落在圆角扇形外，应在边缘带里；中点内沿仍贴边。
+        Assert.True(IslandOutline.Along(inset, inset, w, h, radius) > 0);
+        Assert.True(IslandOutline.Along(w / 2, inset, w, h, radius) < 0.08);
+        Assert.True(IslandOutline.InnerSignedDistance(inset, inset, w, h, radius) > 8);
+        Assert.InRange(IslandOutline.InnerSignedDistance(w / 2, inset, w, h, radius), -0.6, 0.6);
+        Assert.True(IslandOutline.InnerSignedDistance(inset + 4, inset + 4, w, h, radius) > 0);
+    }
+
+    [Fact]
+    public void Refraction_WarpAndChromaFadeTowardTheInnerEdge()
+    {
+        const double w = 200;
+        const double h = 100;
+        const int pad = 72;
+        Assert.True(LiquidRefraction.TryMap(196, 50, w, h, pad,
+            out var u0, out var v0, out var outer, out var ru0, out var rv0, out _, out _));
+        Assert.True(LiquidRefraction.TryMap(186, 50, w, h, pad,
+            out var u1, out var v1, out var inner, out var ru1, out var rv1, out _, out _));
+        double chromaOuter = Math.Sqrt((ru0 - u0) * (ru0 - u0) + (rv0 - v0) * (rv0 - v0));
+        double chromaInner = Math.Sqrt((ru1 - u1) * (ru1 - u1) + (rv1 - v1) * (rv1 - v1));
+        Assert.True(outer > inner);
+        Assert.True(chromaInner < chromaOuter * 0.75);
+        Assert.True(chromaOuter < 2.5);
+        Assert.True(inner > 0.01);
     }
 }

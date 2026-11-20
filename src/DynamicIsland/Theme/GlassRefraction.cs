@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using DynamicIsland.Core.Geometry;
+using DynamicIsland.Core.Island;
 using DynamicIsland.Core.Motion;
 using DynamicIsland.Native;
 
@@ -10,6 +11,7 @@ namespace DynamicIsland.Visuals;
 
 /// <summary>
 /// 只采集岛外一圈桌面，再弯到玻璃边缘上。中心保持透明，桌面仍从分层窗口透出来。
+/// 完整捕获放到后台线程；界面线程只用上一帧周围图按当前形状再扭曲。
 /// </summary>
 sealed class GlassRefractionBuffer : IDisposable
 {
@@ -18,13 +20,20 @@ sealed class GlassRefractionBuffer : IDisposable
     WriteableBitmap? _bitmap;
     WriteableBitmap? _shade;
     int[] _pad = Array.Empty<int>();
+    int[] _backPad = Array.Empty<int>();
     int[] _output = Array.Empty<int>();
     int[] _shadePixels = Array.Empty<int>();
     int _padW;
     int _padH;
+    int _backW;
+    int _backH;
+    volatile bool _captureBusy;
+    volatile bool _disposed;
 
     public ImageSource? Image => _bitmap;
     public ImageSource? Shade => _shade;
+    public bool CaptureInFlight => _captureBusy;
+    public bool HasCachedPad => _padW >= 2 && _pad.Length == _padW * _padH;
 
     public void Clear()
     {
@@ -32,16 +41,33 @@ sealed class GlassRefractionBuffer : IDisposable
         _shade = null;
     }
 
+    public bool CanReusePad(int width, int height) =>
+        GlassWork.ShouldReuseCapture(HasCachedPad) && _padW == width + Pad * 2 && _padH == height + Pad * 2;
+
     public bool TryUpdate(int pillLeft, int pillTop, int pillW, int pillH, int visualLeft, int visualTop, int visualW, int visualH, double radius, LiquidSurface? surface = null)
     {
-        if (pillW < 8 || pillH < 8 || !Capture(pillLeft, pillTop, pillW, pillH, visualLeft, visualTop, visualW, visualH))
+        if (pillW < 8 || pillH < 8 || !CaptureInto(ref _pad, out _padW, out _padH, pillLeft, pillTop, pillW, pillH, visualLeft, visualTop, visualW, visualH))
         {
             _bitmap = null;
             return false;
         }
 
-        WriteShade(pillW, pillH, radius, surface);
-        return Warp(pillW, pillH, radius, surface);
+        WriteShade(pillW, pillH, radius, surface, moving: false);
+        return Warp(pillW, pillH, radius, surface, moving: false);
+    }
+
+    public bool TryPresent(int pillW, int pillH, double radius, LiquidSurface? surface, bool moving)
+    {
+        if (pillW < 8 || pillH < 8)
+            return false;
+
+        bool shade = WriteShade(pillW, pillH, radius, surface, moving);
+        if (CanReusePad(pillW, pillH))
+            return Warp(pillW, pillH, radius, surface, moving) || shade;
+
+        // 尺寸对不上时不要把上一帧错误拉伸上去，高光仍可跟着当前形状走。
+        _bitmap = null;
+        return shade;
     }
 
     public bool TryUpdateShade(int pillW, int pillH, double radius, LiquidSurface? surface)
@@ -52,20 +78,81 @@ sealed class GlassRefractionBuffer : IDisposable
             return false;
         }
 
-        return WriteShade(pillW, pillH, radius, surface);
+        return WriteShade(pillW, pillH, radius, surface, moving: false);
     }
 
-    bool Capture(int left, int top, int width, int height, int visualLeft, int visualTop, int visualW, int visualH)
+    public bool TryBeginCapture(
+        int pillLeft,
+        int pillTop,
+        int pillW,
+        int pillH,
+        int visualLeft,
+        int visualTop,
+        int visualW,
+        int visualH,
+        Action<bool> completed)
+    {
+        if (_disposed || _captureBusy || pillW < 8 || pillH < 8)
+            return false;
+
+        _captureBusy = true;
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            bool ok = false;
+            try
+            {
+                ok = !_disposed && CaptureInto(ref _backPad, out _backW, out _backH,
+                    pillLeft, pillTop, pillW, pillH, visualLeft, visualTop, visualW, visualH);
+            }
+            catch
+            {
+                ok = false;
+            }
+
+            try
+            {
+                completed(ok && !_disposed);
+            }
+            catch
+            {
+                // 回调里的调度失败不能把捕获锁卡住。
+            }
+        });
+        return true;
+    }
+
+    public void CompleteCapture()
+    {
+        var swap = _pad;
+        _pad = _backPad;
+        _backPad = swap;
+        _padW = _backW;
+        _padH = _backH;
+        _captureBusy = false;
+    }
+
+    public void AbandonCapture() => _captureBusy = false;
+
+    bool CaptureInto(
+        ref int[] dest,
+        out int padW,
+        out int padH,
+        int left,
+        int top,
+        int width,
+        int height,
+        int visualLeft,
+        int visualTop,
+        int visualW,
+        int visualH)
     {
         int pad = Pad;
-        int padW = width + pad * 2;
-        int padH = height + pad * 2;
-        if (_pad.Length != padW * padH)
-            _pad = new int[padW * padH];
+        padW = width + pad * 2;
+        padH = height + pad * 2;
+        if (dest.Length != padW * padH)
+            dest = new int[padW * padH];
         else
-            Array.Clear(_pad);
-        _padW = padW;
-        _padH = padH;
+            Array.Clear(dest);
 
         IntPtr screen = NativeMethods.GetDC(IntPtr.Zero);
         if (screen == IntPtr.Zero)
@@ -102,8 +189,8 @@ sealed class GlassRefractionBuffer : IDisposable
             BitBltStrip(dc, screen, 0, pad, pad, height, left - pad, top);
             BitBltStrip(dc, screen, pad + width, pad, pad, height, left + width, top);
 
-            Marshal.Copy(bits, _pad, 0, _pad.Length);
-            EraseVisual(left - pad, top - pad, visualLeft, visualTop, visualW, visualH);
+            Marshal.Copy(bits, dest, 0, dest.Length);
+            EraseVisual(dest, padW, padH, left - pad, top - pad, visualLeft, visualTop, visualW, visualH);
             return true;
         }
         finally
@@ -125,23 +212,23 @@ sealed class GlassRefractionBuffer : IDisposable
         NativeMethods.BitBlt(dest, dx, dy, width, height, screen, sx, sy, NativeMethods.SRCCOPY);
     }
 
-    void EraseVisual(int originX, int originY, int visualLeft, int visualTop, int visualW, int visualH)
+    static void EraseVisual(int[] dest, int padW, int padH, int originX, int originY, int visualLeft, int visualTop, int visualW, int visualH)
     {
-        int x0 = Math.Clamp(visualLeft - originX, 0, _padW);
-        int y0 = Math.Clamp(visualTop - originY, 0, _padH);
-        int x1 = Math.Clamp(visualLeft - originX + Math.Max(0, visualW), 0, _padW);
-        int y1 = Math.Clamp(visualTop - originY + Math.Max(0, visualH), 0, _padH);
+        int x0 = Math.Clamp(visualLeft - originX, 0, padW);
+        int y0 = Math.Clamp(visualTop - originY, 0, padH);
+        int x1 = Math.Clamp(visualLeft - originX + Math.Max(0, visualW), 0, padW);
+        int y1 = Math.Clamp(visualTop - originY + Math.Max(0, visualH), 0, padH);
         for (int y = y0; y < y1; y++)
         {
-            int row = y * _padW;
+            int row = y * padW;
             for (int x = x0; x < x1; x++)
-                _pad[row + x] = 0;
+                dest[row + x] = 0;
         }
     }
 
-    bool WriteShade(int width, int height, double radius, LiquidSurface? surface)
+    bool WriteShade(int width, int height, double radius, LiquidSurface? surface, bool moving)
     {
-        var (outW, outH) = OutputSize(width, height);
+        var (outW, outH) = OutputSize(width, height, moving);
         if (_shadePixels.Length != outW * outH)
             _shadePixels = new int[outW * outH];
         else
@@ -179,15 +266,15 @@ sealed class GlassRefractionBuffer : IDisposable
         return true;
     }
 
-    static (int Width, int Height) OutputSize(int width, int height)
+    static (int Width, int Height) OutputSize(int width, int height, bool moving)
     {
-        double scale = Math.Min(1, 280.0 / Math.Max(width, height));
+        double scale = Math.Min(1, GlassWork.OutputLongSide(moving) / (double)Math.Max(width, height));
         return (Math.Max(8, (int)Math.Round(width * scale)), Math.Max(8, (int)Math.Round(height * scale)));
     }
 
-    bool Warp(int width, int height, double radius, LiquidSurface? surface)
+    bool Warp(int width, int height, double radius, LiquidSurface? surface, bool moving)
     {
-        var (outW, outH) = OutputSize(width, height);
+        var (outW, outH) = OutputSize(width, height, moving);
         if (_output.Length != outW * outH)
             _output = new int[outW * outH];
         else
@@ -278,10 +365,14 @@ sealed class GlassRefractionBuffer : IDisposable
 
     public void Dispose()
     {
+        _disposed = true;
+        _captureBusy = false;
         _bitmap = null;
         _shade = null;
         _pad = Array.Empty<int>();
+        _backPad = Array.Empty<int>();
         _output = Array.Empty<int>();
         _shadePixels = Array.Empty<int>();
+        _padW = _padH = _backW = _backH = 0;
     }
 }

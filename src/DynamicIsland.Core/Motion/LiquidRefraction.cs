@@ -11,7 +11,7 @@ public static class LiquidRefraction
     public const int DefaultPad = 72;
     public const double InnerRadius = 0.78;
     public const double SampleGain = 0.88;
-    public const double Chromatic = 0.045;
+    public const double Chromatic = 0.022;
     public const double HeightWarp = 0.20;
     public const double SlopeWarp = 0.55;
 
@@ -85,10 +85,10 @@ public static class LiquidRefraction
         radius = Squircle.SafeRadius(width, height, radius);
 
         double d = IslandOutline.SignedDistance(x, y, width, height, radius);
-        if (d >= 0.35)
+        if (d >= 0.5)
             return false;
         double along = IslandOutline.Along(x, y, width, height, radius);
-        if (along < 0.02)
+        if (along <= 0)
             return false;
 
         var (ux, uy) = IslandOutline.Normal(x, y, width, height, radius);
@@ -111,14 +111,17 @@ public static class LiquidRefraction
         sx = Math.Clamp(sx, 0, paddedW - 1);
         sy = Math.Clamp(sy, 0, paddedH - 1);
 
-        double chroma = Chromatic * pad * along;
+        // 色差按距离平方衰减，靠近外沿再淡一点，避免一道硬的 RGB 描边。
+        double chroma = Chromatic * pad * along * along
+            * (1 - 0.55 * IslandOutline.Smootherstep(0.72, 1, along));
         u = sx;
         v = sy;
         redU = Math.Clamp(sx + ux * chroma, 0, paddedW - 1);
         redV = Math.Clamp(sy + uy * chroma, 0, paddedH - 1);
         blueU = Math.Clamp(sx - ux * chroma, 0, paddedW - 1);
         blueV = Math.Clamp(sy - uy * chroma, 0, paddedH - 1);
-        alpha = along * (1 - 0.12 * IslandOutline.Smoothstep(0.2, 0.85, along));
+        alpha = IslandOutline.Smootherstep(0, 0.88, along)
+            * (1 - 0.20 * IslandOutline.Smootherstep(0.84, 1, along));
         return alpha > 0.01;
     }
 
