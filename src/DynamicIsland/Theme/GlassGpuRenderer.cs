@@ -694,8 +694,10 @@ bool TryMapInterior(float2 p, float2 slope, float surface, out float2 u, out flo
 
 float4 PSMain(VSOut i) : SV_Target
 {
-    float2 p = i.uv * float2(IslandW, IslandH);
-    float2 uv = i.uv;
+    // Quantize to the same integer-pixel centers the CPU renderer uses, avoiding
+    // float UV/SDF ties on the 0.5 silhouette (e.g. 150% DPI, r=52.5).
+    float2 p = floor(i.uv * float2(IslandW, IslandH)) + 0.5;
+    float2 uv = p / float2(IslandW, IslandH);
     float distance = SignedDistance(p, IslandW, IslandH, Radius);
     if (distance >= 0.5) return 0;
     float slopeX, slopeY;
