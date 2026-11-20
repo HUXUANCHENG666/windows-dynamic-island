@@ -26,6 +26,22 @@ public class ThrowTests
     }
 
     [Fact]
+    public void Velocity_IgnoresATrailingStallAfterAFlick()
+    {
+        var samples = new[]
+        {
+            Sample(0, 0, 0),
+            Sample(80, 20, 0.04),
+            Sample(160, 40, 0.08),
+            Sample(160, 40, 0.20)
+        };
+        var (vx, vy) = ThrowMath.Velocity(samples);
+        Assert.True(ThrowMath.ShouldLaunch(vx, vy));
+        Assert.InRange(vx, 1500, 2500);
+        Assert.InRange(vy, 300, 800);
+    }
+
+    [Fact]
     public void Velocity_IsZeroWhenThePointerStopped()
     {
         var samples = new[] { Sample(500, 500, 0), Sample(500, 500, 0.1) };

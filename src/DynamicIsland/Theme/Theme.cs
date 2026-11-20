@@ -25,6 +25,10 @@ static class Theme
     public static SolidColorBrush Danger { get; } = Solid(Palette.Danger);
     public static SolidColorBrush Live { get; } = Solid(Palette.Live);
     public static SolidColorBrush Ink { get; } = Solid(Palette.Ink);
+    public static SolidColorBrush GlassKey { get; } = Solid(new Rgba(244, 251, 255, 42));
+    public static SolidColorBrush GlassKeyHover { get; } = Solid(new Rgba(244, 251, 255, 78));
+    public static SolidColorBrush GlassKeyPress { get; } = Solid(new Rgba(244, 251, 255, 104));
+    public static SolidColorBrush GlassKeyStroke { get; } = Solid(new Rgba(244, 251, 255, 130));
     public static LinearGradientBrush IslandFill { get; } = MakeFill();
 
     public static SolidColorBrush Solid(Rgba color)

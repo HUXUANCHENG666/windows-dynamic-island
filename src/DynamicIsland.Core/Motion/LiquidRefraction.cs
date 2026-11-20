@@ -1,8 +1,10 @@
+using DynamicIsland.Core.Geometry;
+
 namespace DynamicIsland.Core.Motion;
 
 /// <summary>
 /// 水滴边缘的折射采样：只从岛外一圈周围取色，再弯到 Rim 里。
-/// 中心保持透明，这样仍能直接透过窗口看到后面的桌面。
+/// 边缘带按圆角矩形 / 跑道形的距离场来算，中心保持透明。
 /// </summary>
 public static class LiquidRefraction
 {
@@ -13,17 +15,13 @@ public static class LiquidRefraction
     public const double HeightWarp = 0.20;
     public const double SlopeWarp = 0.55;
 
-    public static double Smoothstep(double edge0, double edge1, double x)
-    {
-        if (edge1 <= edge0)
-            return x >= edge1 ? 1 : 0;
-        double t = Math.Clamp((x - edge0) / (edge1 - edge0), 0, 1);
-        return t * t * (3 - 2 * t);
-    }
+    public static double Smoothstep(double edge0, double edge1, double x) =>
+        IslandOutline.Smoothstep(edge0, edge1, x);
 
     /// <summary>
     /// 岛内像素 (x,y) 若落在边缘带，给出它在「外扩 pad 后的周围图」里的采样点。
     /// 周围图的坐标系：岛本体占 [pad, pad+w) × [pad, pad+h)。
+    /// 未给半径时按胶囊（半径 = 短边的一半）处理。
     /// </summary>
     public static bool TryMap(
         double x,
@@ -38,10 +36,9 @@ public static class LiquidRefraction
         out double redV,
         out double blueU,
         out double blueV) =>
-        TryMap(x, y, width, height, pad, 0, 0, 0,
+        TryMap(x, y, width, height, pad, -1, 0, 0, 0,
             out u, out v, out alpha, out redU, out redV, out blueU, out blueV);
 
-    /// <param name="slopeX">高度场在岛内归一化坐标下的横向斜率，用来把周围多折一点。</param>
     public static bool TryMap(
         double x,
         double y,
@@ -57,37 +54,54 @@ public static class LiquidRefraction
         out double redU,
         out double redV,
         out double blueU,
+        out double blueV) =>
+        TryMap(x, y, width, height, pad, -1, slopeX, slopeY, surface,
+            out u, out v, out alpha, out redU, out redV, out blueU, out blueV);
+
+    public static bool TryMap(
+        double x,
+        double y,
+        double width,
+        double height,
+        int pad,
+        double radius,
+        double slopeX,
+        double slopeY,
+        double surface,
+        out double u,
+        out double v,
+        out double alpha,
+        out double redU,
+        out double redV,
+        out double blueU,
         out double blueV)
     {
         u = v = alpha = redU = redV = blueU = blueV = 0;
         if (width < 2 || height < 2 || pad < 4)
             return false;
 
+        if (radius < 0)
+            radius = Math.Min(width, height) * 0.5;
+        radius = Squircle.SafeRadius(width, height, radius);
+
+        double d = IslandOutline.SignedDistance(x, y, width, height, radius);
+        if (d >= 0.35)
+            return false;
+        double along = IslandOutline.Along(x, y, width, height, radius);
+        if (along < 0.02)
+            return false;
+
+        var (ux, uy) = IslandOutline.Normal(x, y, width, height, radius);
         double cx = width * 0.5;
         double cy = height * 0.5;
         double halfW = width * 0.5;
         double halfH = height * 0.5;
-        double nx = (x - cx) / halfW;
-        double ny = (y - cy) / halfH;
-        double r = Math.Sqrt(nx * nx + ny * ny);
-        if (r < InnerRadius || r < 1e-6)
-            return false;
-
-        double dx = x - cx;
-        double dy = y - cy;
-        double len = Math.Sqrt(dx * dx + dy * dy);
-        if (len < 1e-6)
-            return false;
-        double ux = dx / len;
-        double uy = dy / len;
-
         double tx = Math.Abs(ux) < 1e-8 ? double.PositiveInfinity : halfW / Math.Abs(ux);
         double ty = Math.Abs(uy) < 1e-8 ? double.PositiveInfinity : halfH / Math.Abs(uy);
         double tRect = Math.Min(tx, ty);
         if (double.IsInfinity(tRect) || tRect <= 0)
             return false;
 
-        double along = Smoothstep(InnerRadius, 1, r);
         double offset = 0.6 + along * Math.Max(4, (pad - 1) * SampleGain)
             + surface * pad * HeightWarp;
         double sx = cx + pad + ux * (tRect + offset) + slopeX * pad * SlopeWarp;
@@ -104,7 +118,7 @@ public static class LiquidRefraction
         redV = Math.Clamp(sy + uy * chroma, 0, paddedH - 1);
         blueU = Math.Clamp(sx - ux * chroma, 0, paddedW - 1);
         blueV = Math.Clamp(sy - uy * chroma, 0, paddedH - 1);
-        alpha = along * (1 - 0.12 * Smoothstep(0.97, 1.04, r));
+        alpha = along * (1 - 0.12 * IslandOutline.Smoothstep(0.2, 0.85, along));
         return alpha > 0.01;
     }
 

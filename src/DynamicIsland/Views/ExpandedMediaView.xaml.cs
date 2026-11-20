@@ -22,6 +22,10 @@ public partial class ExpandedMediaView : UserControl
     ImageSource? _art;
     ImageSource? _painted;
     double _slot = MediaArtLayout.HorizontalSize;
+    readonly HoverFill _previousLook = new();
+    readonly HoverFill _playLook = new();
+    readonly HoverFill _nextLook = new();
+    IslandSkin _skin = IslandSkin.Default;
 
     public ExpandedMediaView()
     {
@@ -44,10 +48,10 @@ public partial class ExpandedMediaView : UserControl
         NextIcon.Data = Geometry.Parse(Glyphs.Next);
         PreviousIcon.Fill = Theme.Title;
         NextIcon.Fill = Theme.Title;
-        PlayIcon.Fill = Theme.Ink;
-        Play.Background = Theme.Title;
-        Ui.Hover(Previous, Brushes.Transparent, Theme.Hover);
-        Ui.Hover(Next, Brushes.Transparent, Theme.Hover);
+        Ui.Hover(Previous, _previousLook);
+        Ui.Hover(Play, _playLook);
+        Ui.Hover(Next, _nextLook);
+        ApplySkin(IslandSkin.Default);
         Previous.MouseLeftButtonUp += (_, e) => Raise(PreviousClicked, e);
         Next.MouseLeftButtonUp += (_, e) => Raise(NextClicked, e);
         Play.MouseLeftButtonUp += (_, e) => Raise(PlayPauseClicked, e);
@@ -59,11 +63,7 @@ public partial class ExpandedMediaView : UserControl
         NextSessionIcon.Stroke = Theme.Title;
         SessionCountText.FontFamily = ui;
         SessionCountText.Foreground = Theme.Title;
-        var veil = new SolidColorBrush(Color.FromArgb(150, 0, 0, 0));
-        veil.Freeze();
-        PrevSession.Background = veil;
-        NextSession.Background = veil;
-        SessionBadge.Background = veil;
+        // 会话切换键的底色随皮肤走，在 ApplySkin 里设置。
         PrevSession.Cursor = Cursors.Hand;
         NextSession.Cursor = Cursors.Hand;
         PrevSession.Focusable = false;
@@ -145,6 +145,63 @@ public partial class ExpandedMediaView : UserControl
     {
         border.Opacity = enabled ? 1 : 0.32;
         border.IsHitTestVisible = enabled;
+    }
+
+    public void ApplySkin(IslandSkin skin)
+    {
+        _skin = skin;
+        bool glass = skin == IslandSkin.Glass;
+        StyleKey(Previous, _previousLook, glass, primary: false);
+        StyleKey(Play, _playLook, glass, primary: true);
+        StyleKey(Next, _nextLook, glass, primary: false);
+        PlayIcon.Fill = glass ? Theme.Title : Theme.Ink;
+        var veil = glass ? Theme.GlassKey : FrozenVeil();
+        PrevSession.Background = veil;
+        NextSession.Background = veil;
+        SessionBadge.Background = veil;
+        PrevSession.BorderBrush = glass ? Theme.GlassKeyStroke : Brushes.Transparent;
+        NextSession.BorderBrush = glass ? Theme.GlassKeyStroke : Brushes.Transparent;
+        SessionBadge.BorderBrush = glass ? Theme.GlassKeyStroke : Brushes.Transparent;
+        PrevSession.BorderThickness = glass ? new Thickness(1) : new Thickness(0);
+        NextSession.BorderThickness = glass ? new Thickness(1) : new Thickness(0);
+        SessionBadge.BorderThickness = glass ? new Thickness(1) : new Thickness(0);
+    }
+
+    static void StyleKey(Border border, HoverFill fill, bool glass, bool primary)
+    {
+        if (glass)
+        {
+            fill.Normal = Theme.GlassKey;
+            fill.Hover = Theme.GlassKeyHover;
+            fill.Pressed = Theme.GlassKeyPress;
+            border.BorderBrush = Theme.GlassKeyStroke;
+            border.BorderThickness = new Thickness(1);
+        }
+        else if (primary)
+        {
+            fill.Normal = Theme.Title;
+            fill.Hover = Theme.Title;
+            fill.Pressed = Theme.ChipHover;
+            border.BorderBrush = Brushes.Transparent;
+            border.BorderThickness = new Thickness(0);
+        }
+        else
+        {
+            fill.Normal = Brushes.Transparent;
+            fill.Hover = Theme.Hover;
+            fill.Pressed = Theme.Chip;
+            border.BorderBrush = Brushes.Transparent;
+            border.BorderThickness = new Thickness(0);
+        }
+
+        Ui.Paint(border, fill);
+    }
+
+    static Brush FrozenVeil()
+    {
+        var veil = new SolidColorBrush(Color.FromArgb(150, 0, 0, 0));
+        veil.Freeze();
+        return veil;
     }
 
     public void SetVertical(bool vertical)

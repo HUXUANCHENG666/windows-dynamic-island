@@ -60,7 +60,7 @@
                                 <TextBlock x:Name="SkinGlassText" Text="液态玻璃" FontSize="13"/>
                             </Border>
                         </StackPanel>
-                        <TextBlock x:Name="SkinDetail" Text="中间几乎透明，能看清后面的桌面。边缘是一层会计算的薄流体：拖动会搅动水面，折射和高光跟着表面走，松手有 Q 弹。白字靠淡光晕保持清晰。" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap" LineHeight="18"/>
+                        <TextBlock x:Name="SkinDetail" Text="中间几乎透明，能看清后面的桌面。边缘月牙和高光贴合岛的跑道形轮廓，不会在中间单独画出一块椭圆。播放键等控制键也是通透玻璃。拖动会搅动水面，松手有 Q 弹。白字靠淡光晕保持清晰。" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap" LineHeight="18"/>
                     </StackPanel>
                 </Border>
 

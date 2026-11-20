@@ -107,7 +107,7 @@ sealed class IslandAnimator
         window.PillStroke.Data = geometry;
         window.PillStroke.Clip = geometry;
         window.ContentHost.Clip = geometry;
-        window.DecorateGlass(geometry, snapW, snapH);
+        window.DecorateGlass(geometry, snapW, snapH, safeRadius);
         window.HitGeometry = geometry;
 
         double slop = IslandMetrics.HitSlop;

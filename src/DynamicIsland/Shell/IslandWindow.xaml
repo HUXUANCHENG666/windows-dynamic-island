@@ -22,6 +22,7 @@
             <Path x:Name="Pill"/>
             <Grid x:Name="GlassHost" IsHitTestVisible="False" Visibility="Collapsed" ClipToBounds="True">
                 <Path x:Name="GlassScrim"/>
+                <Image x:Name="GlassShade" Stretch="Fill" IsHitTestVisible="False" SnapsToDevicePixels="True"/>
                 <Image x:Name="GlassRefraction" Stretch="Fill" IsHitTestVisible="False" SnapsToDevicePixels="True"/>
                 <Path x:Name="GlassThickness"/>
                 <Path x:Name="GlassSpecular"/>

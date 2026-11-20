@@ -43,14 +43,28 @@ public static class ThrowMath
         if (samples.Count < 2)
             return (0, 0);
 
-        var last = samples[^1];
-        int first = samples.Count - 1;
+        int lastIndex = samples.Count - 1;
+        // 松手前若指针已经停住，或 UI 卡了一拍才记上最后一个同位置样本，这段滞留不能把甩势抹掉。
+        while (lastIndex >= 2)
+        {
+            var prev = samples[lastIndex - 1];
+            var tail = samples[lastIndex];
+            double linger = tail.Seconds - prev.Seconds;
+            double dist = Speed(tail.X - prev.X, tail.Y - prev.Y);
+            if (linger >= 0.04 && dist / Math.Max(linger, 1e-6) < LaunchSpeed * 0.35)
+                lastIndex--;
+            else
+                break;
+        }
+
+        var last = samples[lastIndex];
+        int first = lastIndex;
         while (first > 0 && last.Seconds - samples[first - 1].Seconds <= SampleWindow)
             first--;
 
         double vx = 0;
         double vy = 0;
-        if (first < samples.Count - 1)
+        if (first < lastIndex)
         {
             var start = samples[first];
             double dt = last.Seconds - start.Seconds;

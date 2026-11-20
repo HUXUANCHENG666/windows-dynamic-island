@@ -1,8 +1,6 @@
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
-using System.Windows.Shapes;
 using DynamicIsland.Core.Island;
 using DynamicIsland.Core.Motion;
 using DynamicIsland.Shell;
@@ -11,7 +9,7 @@ namespace DynamicIsland.Visuals;
 
 /// <summary>
 /// 液态玻璃只画在岛的超椭圆上。中间几乎透明，桌面从岛身透出来；
-/// 边缘是一层按高度场计算的薄流体，高光和焦散跟着表面走。
+/// 边缘月牙、高光和折射都按跑道形 / 圆角矩形的距离场来算，不再在中间单独画一块椭圆反光。
 /// 不改窗口整体透明度，也不铺近黑遮罩。白字靠淡光晕保持可读。
 /// </summary>
 static class GlassSkin
@@ -19,15 +17,7 @@ static class GlassSkin
     static readonly DropShadowEffect Shadow = MakeShadow();
     static readonly DropShadowEffect TextHalo = MakeTextHalo();
     static readonly Brush Body = MakeBody();
-    static readonly Brush Scrim = MakeScrim();
-    static readonly Brush Thickness = MakeThickness();
-    static readonly Brush Specular = MakeSpecular();
-    static readonly Brush Lip = MakeLip();
-    static readonly Brush Bead = MakeBead();
     static readonly Brush Rim = MakeRim();
-    static readonly Brush BlobCool = MakeBlob(0x24, 0xD4, 0xF2, 0xFF);
-    static readonly Brush BlobCooler = MakeBlob(0x1A, 0xB0, 0xE0, 0xF6);
-    static readonly Brush Streak = MakeStreak();
 
     public static void Apply(IslandWindow window, IslandSkin skin)
     {
@@ -38,21 +28,19 @@ static class GlassSkin
             window.PillStroke.Stroke = Rim;
             window.PillStroke.StrokeThickness = 1.5;
             window.GlassHost.Visibility = Visibility.Visible;
-            window.GlassScrim.Fill = Scrim;
-            window.GlassThickness.Fill = Thickness;
-            window.GlassSpecular.Fill = Specular;
-            window.GlassLip.Fill = Lip;
-            window.GlassBead.Fill = Bead;
-            window.GlassBlobA.Fill = BlobCool;
-            window.GlassBlobB.Fill = BlobCooler;
-            window.GlassStreak.Fill = Streak;
+            window.GlassScrim.Fill = Brushes.Transparent;
+            window.GlassThickness.Fill = Brushes.Transparent;
+            window.GlassSpecular.Fill = Brushes.Transparent;
+            window.GlassLip.Fill = Brushes.Transparent;
+            HideBlobs(window);
             window.ContentHost.Effect = TextHalo;
         }
         else
         {
             ResetShifts(window);
             window.GlassHost.Visibility = Visibility.Collapsed;
-            UpdateRefraction(window, null);
+            HideBlobs(window);
+            UpdateRefraction(window, null, null);
             SetFlow(window, 0, 0, false);
             window.Pill.Fill = Theme.IslandFill;
             window.PillStroke.Stroke = Theme.Hairline;
@@ -68,47 +56,23 @@ static class GlassSkin
         window.GlassThickness.Data = geometry;
         window.GlassSpecular.Data = geometry;
         window.GlassLip.Data = geometry;
-        LayoutBlobs(window, width, height, null);
+        HideBlobs(window);
         if (window.GlassHost.Visibility != Visibility.Visible || !animate)
             ResetShifts(window);
     }
 
     public static void ApplySurface(IslandWindow window, LiquidSurface surface, double width, double height, double vx, double vy, bool moving)
     {
-        LayoutBlobs(window, width, height, surface);
+        HideBlobs(window);
         SetFlow(window, vx, vy, moving);
     }
 
-    static void LayoutBlobs(IslandWindow window, double width, double height, LiquidSurface? surface)
+    static void HideBlobs(IslandWindow window)
     {
-        width = Math.Max(12, width);
-        height = Math.Max(12, height);
-        bool compact = height < 64;
-        double pack = compact ? 0.55 : 1;
-        var crest = surface?.PrimaryCrest() ?? (0.38, 0.36, 0);
-        var second = surface?.SecondaryCrest(crest) ?? (0.68, 0.62, 0);
-        var spec = surface?.SpecularPoint() ?? (0.28, 0.22, 0);
-        float energy = surface == null ? 0.35f : Math.Clamp(surface.PeakAbsHeight / 0.45f, 0, 1);
-
-        Place(window.GlassBead, width * 0.20 * pack, height * 0.18 * pack,
-            (spec.U - 0.5) * width, (spec.V - 0.5) * height, (compact ? 0.42 : 0.72) + 0.22 * energy);
-        Place(window.GlassBlobA, width * 0.34 * pack, height * 0.36 * pack,
-            (crest.U - 0.5) * width, (crest.V - 0.5) * height, (compact ? 0.16 : 0.28) + 0.22 * energy);
-        Place(window.GlassBlobB, width * 0.26 * pack, height * 0.30 * pack,
-            (second.U - 0.5) * width, (second.V - 0.5) * height, (compact ? 0.10 : 0.20) + 0.16 * energy);
-        Place(window.GlassStreak, width * 0.50 * pack, Math.Max(6, height * 0.07),
-            ((crest.U + second.U) * 0.5 - 0.5) * width, ((crest.V + second.V) * 0.5 - 0.5) * height,
-            (compact ? 0.12 : 0.26) + 0.18 * energy);
-    }
-
-    static void Place(Ellipse blob, double w, double h, double x, double y, double opacity)
-    {
-        blob.Width = Math.Max(8, w);
-        blob.Height = Math.Max(6, h);
-        blob.HorizontalAlignment = HorizontalAlignment.Center;
-        blob.VerticalAlignment = VerticalAlignment.Center;
-        blob.Margin = new Thickness(x, y, -x, -y);
-        blob.Opacity = Math.Clamp(opacity, 0.06, 1);
+        window.GlassBead.Visibility = Visibility.Collapsed;
+        window.GlassBlobA.Visibility = Visibility.Collapsed;
+        window.GlassBlobB.Visibility = Visibility.Collapsed;
+        window.GlassStreak.Visibility = Visibility.Collapsed;
     }
 
     static void ResetShifts(IslandWindow window)
@@ -124,10 +88,12 @@ static class GlassSkin
         SetFlow(window, 0, 0, false);
     }
 
-    public static void UpdateRefraction(IslandWindow window, ImageSource? image)
+    public static void UpdateRefraction(IslandWindow window, ImageSource? image, ImageSource? shade)
     {
         window.GlassRefraction.Source = image;
         window.GlassRefraction.Visibility = image == null ? Visibility.Collapsed : Visibility.Visible;
+        window.GlassShade.Source = shade;
+        window.GlassShade.Visibility = shade == null ? Visibility.Collapsed : Visibility.Visible;
     }
 
     public static void SetFlow(IslandWindow window, double vx, double vy, bool moving)
@@ -190,85 +156,6 @@ static class GlassSkin
         return brush;
     }
 
-    static Brush MakeScrim()
-    {
-        var brush = new RadialGradientBrush
-        {
-            GradientOrigin = new Point(0.50, 0.46),
-            Center = new Point(0.50, 0.50),
-            RadiusX = 0.96,
-            RadiusY = 0.98
-        };
-        // 中心完全透出桌面，只在外沿留一圈很淡的冷色月牙。
-        brush.GradientStops.Add(Stop(0x00, 0xE8, 0xF4, 0xFF, 0));
-        brush.GradientStops.Add(Stop(0x00, 0xD0, 0xE8, 0xF8, 0.58));
-        brush.GradientStops.Add(Stop(0x10, 0xC0, 0xDC, 0xF0, 0.84));
-        brush.GradientStops.Add(Stop(0x24, 0xB0, 0xD0, 0xE8, 1));
-        brush.Freeze();
-        return brush;
-    }
-
-    static Brush MakeThickness()
-    {
-        var brush = new RadialGradientBrush
-        {
-            GradientOrigin = new Point(0.50, 0.46),
-            Center = new Point(0.50, 0.50),
-            RadiusX = 0.98,
-            RadiusY = 1.00
-        };
-        brush.GradientStops.Add(Stop(0x00, 0xF4, 0xFB, 0xFF, 0));
-        brush.GradientStops.Add(Stop(0x00, 0xE8, 0xF4, 0xFF, 0.64));
-        brush.GradientStops.Add(Stop(0x16, 0xD8, 0xEE, 0xFF, 0.86));
-        brush.GradientStops.Add(Stop(0x2C, 0xEC, 0xF8, 0xFF, 1));
-        brush.Freeze();
-        return brush;
-    }
-
-    static Brush MakeSpecular()
-    {
-        var brush = new LinearGradientBrush
-        {
-            StartPoint = new Point(0.06, 0.00),
-            EndPoint = new Point(0.62, 0.48)
-        };
-        brush.GradientStops.Add(Stop(0x68, 0xFF, 0xFF, 0xFF, 0));
-        brush.GradientStops.Add(Stop(0x28, 0xE0, 0xF2, 0xFF, 0.18));
-        brush.GradientStops.Add(Stop(0x00, 0xFF, 0xFF, 0xFF, 0.44));
-        brush.Freeze();
-        return brush;
-    }
-
-    static Brush MakeLip()
-    {
-        var brush = new LinearGradientBrush
-        {
-            StartPoint = new Point(0.5, 0),
-            EndPoint = new Point(0.5, 0.16)
-        };
-        brush.GradientStops.Add(Stop(0x7A, 0xFF, 0xFF, 0xFF, 0));
-        brush.GradientStops.Add(Stop(0x2E, 0xF0, 0xF8, 0xFF, 0.34));
-        brush.GradientStops.Add(Stop(0x00, 0xFF, 0xFF, 0xFF, 1));
-        brush.Freeze();
-        return brush;
-    }
-
-    static Brush MakeBead()
-    {
-        var brush = new RadialGradientBrush
-        {
-            GradientOrigin = new Point(0.30, 0.24),
-            Center = new Point(0.40, 0.36),
-            RadiusX = 0.62,
-            RadiusY = 0.62
-        };
-        brush.GradientStops.Add(Stop(0xC0, 0xFF, 0xFF, 0xFF, 0));
-        brush.GradientStops.Add(Stop(0x5A, 0xF4, 0xFB, 0xFF, 0.28));
-        brush.GradientStops.Add(Stop(0x00, 0xFF, 0xFF, 0xFF, 1));
-        brush.Freeze();
-        return brush;
-    }
-
     static Brush MakeRim()
     {
         var brush = new LinearGradientBrush
@@ -279,37 +166,6 @@ static class GlassSkin
         brush.GradientStops.Add(Stop(0xA8, 0xF4, 0xFB, 0xFF, 0));
         brush.GradientStops.Add(Stop(0x6A, 0xFF, 0xFF, 0xFF, 0.38));
         brush.GradientStops.Add(Stop(0x52, 0xC8, 0xE4, 0xF4, 1));
-        brush.Freeze();
-        return brush;
-    }
-
-    static Brush MakeBlob(byte a, byte r, byte g, byte b)
-    {
-        var brush = new RadialGradientBrush
-        {
-            GradientOrigin = new Point(0.32, 0.28),
-            Center = new Point(0.42, 0.40),
-            RadiusX = 0.72,
-            RadiusY = 0.72
-        };
-        brush.GradientStops.Add(Stop(a, r, g, b, 0));
-        brush.GradientStops.Add(Stop((byte)(a * 0.45), r, g, b, 0.45));
-        brush.GradientStops.Add(Stop(0x00, r, g, b, 1));
-        brush.Freeze();
-        return brush;
-    }
-
-    static Brush MakeStreak()
-    {
-        var brush = new LinearGradientBrush
-        {
-            StartPoint = new Point(0, 0.5),
-            EndPoint = new Point(1, 0.5)
-        };
-        brush.GradientStops.Add(Stop(0x00, 0xFF, 0xFF, 0xFF, 0));
-        brush.GradientStops.Add(Stop(0x3A, 0xF4, 0xFB, 0xFF, 0.46));
-        brush.GradientStops.Add(Stop(0x20, 0xD8, 0xEE, 0xFF, 0.62));
-        brush.GradientStops.Add(Stop(0x00, 0xFF, 0xFF, 0xFF, 1));
         brush.Freeze();
         return brush;
     }

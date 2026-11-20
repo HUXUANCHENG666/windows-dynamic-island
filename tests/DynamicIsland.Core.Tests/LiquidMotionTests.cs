@@ -1,3 +1,4 @@
+using DynamicIsland.Core.Geometry;
 using DynamicIsland.Core.Island;
 using DynamicIsland.Core.Motion;
 
@@ -222,5 +223,52 @@ public class LiquidMotionTests
             out var u1, out _, out _, out _, out _, out _, out _));
         Assert.True(u1 > u0);
         Assert.True(LiquidRefraction.InPad(u1, 72 + 50, 200, 100, 72));
+    }
+
+    [Fact]
+    public void Outline_UsesRoundedRect_NotAnInscribedEllipse()
+    {
+        const double w = 400;
+        const double h = 120;
+        const double radius = 24;
+        // 宽卡片顶边中点内侧：离真实边缘很近，但按椭圆半径还在 0.78 以内。
+        double x = 200;
+        double y = 14;
+        double ellipse = IslandOutline.EllipseRadius(x, y, w, h);
+        Assert.True(ellipse < LiquidRefraction.InnerRadius);
+        Assert.True(IslandOutline.SignedDistance(x, y, w, h, radius) < 0);
+        Assert.True(IslandOutline.Along(x, y, w, h, radius) > 0.15);
+        Assert.True(LiquidRefraction.TryMap(x, y, w, h, 72, radius, 0, 0, 0,
+            out var u, out var v, out var alpha, out _, out _, out _, out _));
+        Assert.True(alpha > 0.1);
+        Assert.True(LiquidRefraction.InPad(u, v, w, h, 72));
+        Assert.True(IslandOutline.EllipseRadius(w / 2, h / 2, w, h) < 0.01);
+    }
+
+    [Fact]
+    public void Shade_FollowsTheStadiumRim_NotACenterEllipse()
+    {
+        const double w = 428;
+        const double h = 184;
+        const double radius = 52;
+        int center = IslandOutline.ShadeArgb(w * 0.5, h * 0.5, w, h, radius);
+        int midTop = IslandOutline.ShadeArgb(w * 0.5, 10, w, h, radius);
+        int blob = IslandOutline.ShadeArgb(w * 0.38, h * 0.36, w, h, radius);
+        int topCorner = IslandOutline.ShadeArgb(w - radius, 12, w, h, radius);
+        static int Alpha(int argb) => (argb >> 24) & 0xFF;
+        Assert.Equal(0, center);
+        Assert.True(Alpha(midTop) > 20);
+        Assert.True(Alpha(midTop) > Alpha(blob) + 10);
+        Assert.True(Alpha(topCorner) > 20);
+        // 底部月牙弱于顶部高光，仍然贴边而不是椭圆心。
+        int midBottom = IslandOutline.ShadeArgb(w * 0.5, h - 10, w, h, radius);
+        Assert.True(Alpha(midTop) > Alpha(midBottom));
+    }
+
+    [Fact]
+    public void GlassWork_DoesNotCaptureWhileMoving()
+    {
+        Assert.True(GlassWork.ShouldCapture(moving: false));
+        Assert.False(GlassWork.ShouldCapture(moving: true));
     }
 }

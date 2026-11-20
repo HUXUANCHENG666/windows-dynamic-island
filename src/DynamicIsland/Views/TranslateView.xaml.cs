@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using DynamicIsland.Core.Island;
 using DynamicIsland.Core.Translation;
 using DynamicIsland.Visuals;
 
@@ -14,6 +15,15 @@ public partial class TranslateView : UserControl
     public event EventHandler<string>? CopyRequested;
     public event EventHandler? DismissClicked;
     public event EventHandler? ResultMenuClosed;
+
+    readonly HoverFill _goLook = new();
+    readonly HoverFill _copyLook = new();
+    readonly HoverFill _autoLook = new();
+    readonly HoverFill _zhEnLook = new();
+    readonly HoverFill _enZhLook = new();
+    readonly HoverFill _closeLook = new();
+    IslandSkin _skin = IslandSkin.Default;
+    TranslateDirection _direction = TranslateDirection.Auto;
 
     public TranslateView()
     {
@@ -32,22 +42,17 @@ public partial class TranslateView : UserControl
         Result.CaretBrush = Theme.Title;
         Result.SelectionBrush = Theme.ChipHover;
         Result.SelectionTextBrush = Theme.Title;
-        GoText.Foreground = Theme.Ink;
         AutoText.Foreground = Theme.Title;
         ZhEnText.Foreground = Theme.Title;
         EnZhText.Foreground = Theme.Title;
-        CopyText.Foreground = Theme.Ink;
         CloseText.Foreground = Theme.Title;
-        Go.Background = Theme.Title;
-        Copy.Background = Theme.Title;
-        Go.Cursor = Cursors.Hand;
-        Go.Focusable = false;
-        Copy.Cursor = Cursors.Hand;
-        Copy.Focusable = false;
-        Ui.Hover(Auto, Theme.Chip, Theme.ChipHover);
-        Ui.Hover(ZhEn, Theme.Chip, Theme.ChipHover);
-        Ui.Hover(EnZh, Theme.Chip, Theme.ChipHover);
-        Ui.Hover(Close, Theme.Chip, Theme.ChipHover);
+        Ui.Hover(Go, _goLook);
+        Ui.Hover(Copy, _copyLook);
+        Ui.Hover(Auto, _autoLook);
+        Ui.Hover(ZhEn, _zhEnLook);
+        Ui.Hover(EnZh, _enZhLook);
+        Ui.Hover(Close, _closeLook);
+        ApplySkin(IslandSkin.Default);
         Go.MouseLeftButtonUp += (_, e) =>
         {
             e.Handled = true;
@@ -90,6 +95,51 @@ public partial class TranslateView : UserControl
     public bool IsShowing(string text) =>
         IsShowingResult && string.Equals(Result.Text, text, StringComparison.Ordinal);
 
+    public void ApplySkin(IslandSkin skin)
+    {
+        _skin = skin;
+        bool glass = skin == IslandSkin.Glass;
+        StyleKey(Go, _goLook, glass, primary: true);
+        StyleKey(Copy, _copyLook, glass, primary: true);
+        StyleKey(Auto, _autoLook, glass, primary: false);
+        StyleKey(ZhEn, _zhEnLook, glass, primary: false);
+        StyleKey(EnZh, _enZhLook, glass, primary: false);
+        StyleKey(Close, _closeLook, glass, primary: false);
+        GoText.Foreground = glass ? Theme.Title : Theme.Ink;
+        CopyText.Foreground = glass ? Theme.Title : Theme.Ink;
+        SetDirection(_direction);
+    }
+
+    static void StyleKey(Border border, HoverFill fill, bool glass, bool primary)
+    {
+        if (glass)
+        {
+            fill.Normal = Theme.GlassKey;
+            fill.Hover = Theme.GlassKeyHover;
+            fill.Pressed = Theme.GlassKeyPress;
+            border.BorderBrush = Theme.GlassKeyStroke;
+            border.BorderThickness = new Thickness(1);
+        }
+        else if (primary)
+        {
+            fill.Normal = Theme.Title;
+            fill.Hover = Theme.Title;
+            fill.Pressed = Theme.ChipHover;
+            border.BorderBrush = Brushes.Transparent;
+            border.BorderThickness = new Thickness(0);
+        }
+        else
+        {
+            fill.Normal = Theme.Chip;
+            fill.Hover = Theme.ChipHover;
+            fill.Pressed = Theme.Hover;
+            border.BorderBrush = Brushes.Transparent;
+            border.BorderThickness = new Thickness(0);
+        }
+
+        Ui.Paint(border, fill);
+    }
+
     public void SetVertical(bool vertical)
     {
         // 竖排时不要把六个按钮竖着堆起来——那样会把译文挤出画面。
@@ -111,9 +161,20 @@ public partial class TranslateView : UserControl
 
     public void SetDirection(TranslateDirection direction)
     {
-        Auto.Background = direction == TranslateDirection.Auto ? Theme.ChipHover : Theme.Chip;
-        ZhEn.Background = direction == TranslateDirection.ChineseToEnglish ? Theme.ChipHover : Theme.Chip;
-        EnZh.Background = direction == TranslateDirection.EnglishToChinese ? Theme.ChipHover : Theme.Chip;
+        _direction = direction;
+        bool glass = _skin == IslandSkin.Glass;
+        Brush selected = glass ? Theme.GlassKeyHover : Theme.ChipHover;
+        Brush idle = glass ? Theme.GlassKey : Theme.Chip;
+        PaintChoice(Auto, _autoLook, direction == TranslateDirection.Auto, selected, idle);
+        PaintChoice(ZhEn, _zhEnLook, direction == TranslateDirection.ChineseToEnglish, selected, idle);
+        PaintChoice(EnZh, _enZhLook, direction == TranslateDirection.EnglishToChinese, selected, idle);
+    }
+
+    static void PaintChoice(Border border, HoverFill fill, bool on, Brush selected, Brush idle)
+    {
+        fill.Normal = on ? selected : idle;
+        fill.Hover = selected;
+        Ui.Paint(border, fill);
     }
 
     public void ShowInvite(string text)

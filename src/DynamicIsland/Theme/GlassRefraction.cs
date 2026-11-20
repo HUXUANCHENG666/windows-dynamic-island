@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using DynamicIsland.Core.Geometry;
 using DynamicIsland.Core.Motion;
 using DynamicIsland.Native;
 
@@ -15,16 +16,23 @@ sealed class GlassRefractionBuffer : IDisposable
     public const int Pad = LiquidRefraction.DefaultPad;
 
     WriteableBitmap? _bitmap;
+    WriteableBitmap? _shade;
     int[] _pad = Array.Empty<int>();
     int[] _output = Array.Empty<int>();
+    int[] _shadePixels = Array.Empty<int>();
     int _padW;
     int _padH;
 
     public ImageSource? Image => _bitmap;
+    public ImageSource? Shade => _shade;
 
-    public void Clear() => _bitmap = null;
+    public void Clear()
+    {
+        _bitmap = null;
+        _shade = null;
+    }
 
-    public bool TryUpdate(int pillLeft, int pillTop, int pillW, int pillH, int visualLeft, int visualTop, int visualW, int visualH, LiquidSurface? surface = null)
+    public bool TryUpdate(int pillLeft, int pillTop, int pillW, int pillH, int visualLeft, int visualTop, int visualW, int visualH, double radius, LiquidSurface? surface = null)
     {
         if (pillW < 8 || pillH < 8 || !Capture(pillLeft, pillTop, pillW, pillH, visualLeft, visualTop, visualW, visualH))
         {
@@ -32,7 +40,19 @@ sealed class GlassRefractionBuffer : IDisposable
             return false;
         }
 
-        return Warp(pillW, pillH, surface);
+        WriteShade(pillW, pillH, radius, surface);
+        return Warp(pillW, pillH, radius, surface);
+    }
+
+    public bool TryUpdateShade(int pillW, int pillH, double radius, LiquidSurface? surface)
+    {
+        if (pillW < 8 || pillH < 8)
+        {
+            _shade = null;
+            return false;
+        }
+
+        return WriteShade(pillW, pillH, radius, surface);
     }
 
     bool Capture(int left, int top, int width, int height, int visualLeft, int visualTop, int visualW, int visualH)
@@ -119,11 +139,55 @@ sealed class GlassRefractionBuffer : IDisposable
         }
     }
 
-    bool Warp(int width, int height, LiquidSurface? surface)
+    bool WriteShade(int width, int height, double radius, LiquidSurface? surface)
+    {
+        var (outW, outH) = OutputSize(width, height);
+        if (_shadePixels.Length != outW * outH)
+            _shadePixels = new int[outW * outH];
+        else
+            Array.Clear(_shadePixels);
+
+        bool any = false;
+        if (radius < 0)
+            radius = Math.Min(width, height) * 0.5;
+        for (int y = 0; y < outH; y++)
+        {
+            double py = (y + 0.5) * height / outH;
+            for (int x = 0; x < outW; x++)
+            {
+                double px = (x + 0.5) * width / outW;
+                float field = 0;
+                if (surface != null)
+                    field = surface.Sample(px / width, py / height);
+                int color = IslandOutline.ShadeArgb(px, py, width, height, radius, field);
+                if (color == 0)
+                    continue;
+                _shadePixels[y * outW + x] = color;
+                any = true;
+            }
+        }
+
+        if (!any)
+        {
+            _shade = null;
+            return false;
+        }
+
+        if (_shade == null || _shade.PixelWidth != outW || _shade.PixelHeight != outH)
+            _shade = new WriteableBitmap(outW, outH, 96, 96, PixelFormats.Pbgra32, null);
+        _shade.WritePixels(new Int32Rect(0, 0, outW, outH), _shadePixels, outW * 4, 0);
+        return true;
+    }
+
+    static (int Width, int Height) OutputSize(int width, int height)
     {
         double scale = Math.Min(1, 280.0 / Math.Max(width, height));
-        int outW = Math.Max(8, (int)Math.Round(width * scale));
-        int outH = Math.Max(8, (int)Math.Round(height * scale));
+        return (Math.Max(8, (int)Math.Round(width * scale)), Math.Max(8, (int)Math.Round(height * scale)));
+    }
+
+    bool Warp(int width, int height, double radius, LiquidSurface? surface)
+    {
+        var (outW, outH) = OutputSize(width, height);
         if (_output.Length != outW * outH)
             _output = new int[outW * outH];
         else
@@ -140,7 +204,7 @@ sealed class GlassRefractionBuffer : IDisposable
                 float slopeX = 0, slopeY = 0, surfaceH = 0;
                 if (surface != null)
                     surface.SampleSlope(px / width, py / height, out surfaceH, out slopeX, out slopeY);
-                if (!LiquidRefraction.TryMap(px, py, width, height, pad, slopeX, slopeY, surfaceH,
+                if (!LiquidRefraction.TryMap(px, py, width, height, pad, radius, slopeX, slopeY, surfaceH,
                         out var u, out var v, out var alpha,
                         out var ru, out var rv, out var bu, out var bv))
                     continue;
@@ -215,7 +279,9 @@ sealed class GlassRefractionBuffer : IDisposable
     public void Dispose()
     {
         _bitmap = null;
+        _shade = null;
         _pad = Array.Empty<int>();
         _output = Array.Empty<int>();
+        _shadePixels = Array.Empty<int>();
     }
 }
