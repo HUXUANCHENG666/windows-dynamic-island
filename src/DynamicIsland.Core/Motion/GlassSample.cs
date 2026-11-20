@@ -55,6 +55,72 @@ public static class GlassSample
             fy);
     }
 
+    // 捕获的 alpha 是有效性掩码：纯黑也必须为 FF，未捕获/遮挡像素为 0。
+    // 每点 5 个局部双线性 tap（中心 + 十字 0.65px），所有通道共用权重。
+    public const double TapRadius = 0.65;
+    public static int Footprint(int[] pixels, int width, int height, double u, double v,
+        int sourceW, int sourceH, int targetW, int targetH, int pad)
+    {
+        if (width < 1 || height < 1 || pixels.Length < (long)width * height) return 0;
+        (u, v) = MapPad(u, v, sourceW, sourceH, targetW, targetH, pad);
+        (u, v) = SafePadPoint(u, v, sourceW, sourceH, pad);
+        double a = 0, r = 0, g = 0, b = 0;
+        Tap(u, v); Tap(u - TapRadius, v); Tap(u + TapRadius, v);
+        Tap(u, v - TapRadius); Tap(u, v + TapRadius);
+        if (a < 1e-6) return 0;
+        return unchecked((int)0xFF000000) | ((int)Math.Round(r / a) << 16)
+            | ((int)Math.Round(g / a) << 8) | (int)Math.Round(b / a);
+
+        void Tap(double x, double y)
+        {
+            x = Math.Clamp(x, 0, width - 1);
+            y = Math.Clamp(y, 0, height - 1);
+            int x0 = (int)x, y0 = (int)y;
+            double fx = x - x0, fy = y - y0;
+            Add(x0, y0, (1 - fx) * (1 - fy));
+            Add(Math.Min(x0 + 1, width - 1), y0, fx * (1 - fy));
+            Add(x0, Math.Min(y0 + 1, height - 1), (1 - fx) * fy);
+            Add(Math.Min(x0 + 1, width - 1), Math.Min(y0 + 1, height - 1), fx * fy);
+        }
+        void Add(int x, int y, double weight)
+        {
+            int c = pixels[y * width + x];
+            weight *= ((uint)c >> 24) / 255.0;
+            a += weight;
+            r += ((c >> 16) & 255) * weight;
+            g += ((c >> 8) & 255) * weight;
+            b += (c & 255) * weight;
+        }
+    }
+
+    public static (double U, double V) SafePadPoint(double u, double v, double w, double h, int pad)
+    {
+        u = Math.Clamp(u, 1, w + 2 * pad - 2);
+        v = Math.Clamp(v, 1, h + 2 * pad - 2);
+        // 双线性 + 小 footprint 不接触空洞；最近一条边只作用于回到洞内的点。
+        double l = u - (pad - 2), r = pad + w + 1 - u;
+        double t = v - (pad - 2), b = pad + h + 1 - v;
+        double near = Math.Min(Math.Min(l, r), Math.Min(t, b));
+        if (near > 0)
+        {
+            if (near == l) u = pad - 2;
+            else if (near == r) u = pad + w + 1;
+            else if (near == t) v = pad - 2;
+            else v = pad + h + 1;
+        }
+        return (u, v);
+    }
+
+    /// <summary>清除 DIB 未写的岛洞，捕获条带（包括黑色）显式标记有效。</summary>
+    public static void NormalizeCapture(int[] pixels, int w, int h, int pad)
+    {
+        int stride = w + 2 * pad;
+        for (int y = 0; y < h + 2 * pad; y++)
+            for (int x = 0; x < stride; x++)
+                pixels[y * stride + x] = LiquidRefraction.InPad(x, y, w, h, pad)
+                    ? pixels[y * stride + x] | unchecked((int)0xFF000000) : 0;
+    }
+
     /// <summary>
     /// 把当前岛尺寸下的采样点，映射到另一帧（尺寸不同）的周围图上。
     /// 垫边宽度不变，只缩放岛洞，展开动画期间也能用上一帧周围图。

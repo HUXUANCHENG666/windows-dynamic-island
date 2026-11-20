@@ -109,7 +109,7 @@ public class LiquidMotionTests
     }
 
     [Fact]
-    public void Refraction_RimSamplesThePad_WithChromaticSplit()
+    public void Refraction_RimSamplesThePad_WithoutChromaticSplit()
     {
         Assert.True(LiquidRefraction.TryMap(198, 50, 200, 100, 72,
             out var u, out var v, out var alpha, out var ru, out var rv, out var bu, out var bv));
@@ -117,9 +117,9 @@ public class LiquidMotionTests
         Assert.True(LiquidRefraction.InPad(u, v, 200, 100, 72));
         Assert.True(LiquidRefraction.InPad(ru, rv, 200, 100, 72));
         Assert.True(LiquidRefraction.InPad(bu, bv, 200, 100, 72));
-        // 右边缘：红通道采得更靠外。
-        Assert.True(ru > u);
-        Assert.True(bu < u);
+        // 所有 RGB 通道共用一个位置，灰阶不会被拆成彩虹。
+        Assert.Equal(u, ru);
+        Assert.Equal(u, bu);
         Assert.InRange(v, 72, 72 + 100);
     }
 
@@ -331,7 +331,7 @@ public class LiquidMotionTests
     }
 
     [Fact]
-    public void Refraction_WarpAndChromaFadeTowardTheInnerEdge()
+    public void Refraction_WarpFadesTowardInnerEdge_ChannelsStayCoLocated()
     {
         const double w = 200;
         const double h = 100;
@@ -343,7 +343,8 @@ public class LiquidMotionTests
         double chromaOuter = Math.Sqrt((ru0 - u0) * (ru0 - u0) + (rv0 - v0) * (rv0 - v0));
         double chromaInner = Math.Sqrt((ru1 - u1) * (ru1 - u1) + (rv1 - v1) * (rv1 - v1));
         Assert.True(outer > inner);
-        Assert.True(chromaInner < chromaOuter * 0.75);
+        Assert.Equal(0, chromaInner);
+        Assert.Equal(0, chromaOuter);
         Assert.True(chromaOuter < 2.5);
         Assert.True(inner > 0.01);
     }

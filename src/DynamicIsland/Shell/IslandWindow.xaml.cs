@@ -920,7 +920,7 @@ public partial class IslandWindow : Window
         {
             if (!moving)
                 _liquid.Reset();
-            if (GlassRefraction.Source != null || GlassShade.Source != null)
+            if (GlassRefraction.Source != null || GlassShade.Source != null || GlassGpu.Source != null)
             {
                 _refraction.Clear();
                 GlassSkin.UpdateRefraction(this, null, null);
@@ -977,7 +977,7 @@ public partial class IslandWindow : Window
         int visualTop = pillTop + (int)Math.Round(originY * pillH * (1 - scaleY) * dpi);
 
         // 先用当前流体和上一帧周围图出画面，不等待 BitBlt。
-        if (_refraction.TryPresent(pillWidth, pillHeight, radius, _liquid, moving))
+        if (_refraction.TryPresent(pillWidth, pillHeight, radius * dpi, _liquid, moving))
             GlassSkin.UpdateRefraction(this, _refraction.Image, _refraction.Shade, _refraction.GpuImage);
 
         double age = _lastCaptureUtc == default

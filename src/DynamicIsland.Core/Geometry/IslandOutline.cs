@@ -133,9 +133,9 @@ public static class IslandOutline
         int a = Math.Clamp((int)Math.Round(alpha * 255), 0, 255);
         if (a <= 1)
             return 0;
-        int r = 0xF4 * a / 255;
-        int g = 0xFB * a / 255;
-        int b = 0xFF * a / 255;
+        int r = a;
+        int g = a;
+        int b = a;
         return (a << 24) | (r << 16) | (g << 8) | b;
     }
 }

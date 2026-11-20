@@ -39,6 +39,14 @@ public sealed class LiquidSurface
             return;
         Array.Copy(_height, dest, Math.Min(dest.Length, _height.Length));
     }
+    /// <summary>给后台渲染的独立高度快照，不与 UI 积分数组共享可变内存。</summary>
+    public LiquidSurface Snapshot() => new()
+    {
+        _cols = _cols, _rows = _rows, _height = (float[])_height.Clone(),
+        _velocity = (float[])_velocity.Clone(), _scratch = new float[_height.Length],
+        _maxAbs = _maxAbs, _maxVel = _maxVel
+    };
+
     public bool IsSettled => _maxAbs <= SettledHeight && _maxVel <= SettledVelocity;
 
     public void EnsureSize(double width, double height)

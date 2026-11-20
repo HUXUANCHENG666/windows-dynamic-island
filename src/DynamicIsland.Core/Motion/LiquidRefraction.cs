@@ -11,7 +11,7 @@ public static class LiquidRefraction
     public const int DefaultPad = 72;
     public const double InnerRadius = 0.78;
     public const double SampleGain = 0.88;
-    public const double Chromatic = 0.022;
+    public const double Chromatic = 0; // 同一点采完整 RGB，默认无色散。
     public const double HeightWarp = 0.20;
     public const double SlopeWarp = 0.55;
 
@@ -92,34 +92,21 @@ public static class LiquidRefraction
             return false;
 
         var (ux, uy) = IslandOutline.Normal(x, y, width, height, radius);
-        double cx = width * 0.5;
-        double cy = height * 0.5;
-        double halfW = width * 0.5;
-        double halfH = height * 0.5;
-        double tx = Math.Abs(ux) < 1e-8 ? double.PositiveInfinity : halfW / Math.Abs(ux);
-        double ty = Math.Abs(uy) < 1e-8 ? double.PositiveInfinity : halfH / Math.Abs(uy);
-        double tRect = Math.Min(tx, ty);
-        if (double.IsInfinity(tRect) || tRect <= 0)
-            return false;
-
-        double offset = 0.6 + along * Math.Max(4, (pad - 1) * SampleGain)
-            + surface * pad * HeightWarp;
-        double sx = cx + pad + ux * (tRect + offset) + slopeX * pad * SlopeWarp;
-        double sy = cy + pad + uy * (tRect + offset) + slopeY * pad * SlopeWarp;
-        double paddedW = width + pad * 2;
-        double paddedH = height + pad * 2;
-        sx = Math.Clamp(sx, 0, paddedW - 1);
-        sy = Math.Clamp(sy, 0, paddedH - 1);
-
-        // 色差按距离平方衰减，靠近外沿再淡一点，避免一道硬的 RGB 描边。
-        double chroma = Chromatic * pad * along * along
-            * (1 - 0.55 * IslandOutline.Smootherstep(0.72, 1, along));
-        u = sx;
-        v = sy;
-        redU = Math.Clamp(sx + ux * chroma, 0, paddedW - 1);
-        redV = Math.Clamp(sy + uy * chroma, 0, paddedH - 1);
-        blueU = Math.Clamp(sx - ux * chroma, 0, paddedW - 1);
-        blueV = Math.Clamp(sy - uy * chroma, 0, paddedH - 1);
+        // 从当前像素沿局部法线出发，而不是从岛中心发射。
+        // 顶/底直线段法线相同，但切向 x 必须各自保留（左右段同理）。
+        double tx = Math.Abs(ux) < 1e-8 ? double.PositiveInfinity
+            : (ux > 0 ? width - x : -x) / ux;
+        double ty = Math.Abs(uy) < 1e-8 ? double.PositiveInfinity
+            : (uy > 0 ? height - y : -y) / uy;
+        double tRect = Math.Max(0, Math.Min(tx, ty));
+        double offset = Math.Clamp(2 + along * Math.Max(4, (pad - 3) * SampleGain)
+            + surface * pad * HeightWarp, 2, pad - 2);
+        double sx = pad + x + ux * (tRect + offset) + slopeX * pad * SlopeWarp;
+        double sy = pad + y + uy * (tRect + offset) + slopeY * pad * SlopeWarp;
+        // 波浪可能把点推回未捕获的岛洞；投影到有完整过滤足迹的外侧条带。
+        (u, v) = GlassSample.SafePadPoint(sx, sy, width, height, pad);
+        redU = blueU = u;
+        redV = blueV = v;
         alpha = IslandOutline.Smootherstep(0, 0.88, along)
             * (1 - 0.20 * IslandOutline.Smootherstep(0.84, 1, along));
         return alpha > 0.01;

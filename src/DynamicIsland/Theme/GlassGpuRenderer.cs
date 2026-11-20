@@ -15,7 +15,7 @@ using MapFlags = Vortice.Direct3D11.MapFlags;
 namespace DynamicIsland.Visuals;
 
 /// <summary>
-/// 用 D3D11 在显卡上做边缘折射、色差和高光。初始化失败或设备丢失时由调用方退回 CPU。
+/// 用 D3D11 在显卡上做局部多点边缘折射和高光（RGB 共用位置，不做色散）。初始化失败或设备丢失时由调用方退回 CPU。
 /// </summary>
 sealed class GlassGpuRenderer : IDisposable
 {
@@ -376,7 +376,7 @@ sealed class GlassGpuRenderer : IDisposable
         MappedSubresource mapped = _context!.Map(_staging!, 0, MapMode.Read, MapFlags.None);
         try
         {
-            if (_bitmap == null || _bitmap.PixelWidth != width || _bitmap.PixelHeight != height)
+            if (_bitmap == null || _bitmap.IsFrozen || _bitmap.PixelWidth != width || _bitmap.PixelHeight != height)
                 _bitmap = new WriteableBitmap(width, height, 96, 96, PixelFormats.Pbgra32, null);
             _bitmap.Lock();
             try
@@ -581,17 +581,23 @@ float2 NormalOf(float2 p, float w, float h, float r)
     return float2(dx, dy) / len;
 }
 
+float FieldAt(float2 uv)
+{
+    float2 size = float2(FieldCols, FieldRows);
+    return FieldTex.SampleLevel(LinearClamp, (saturate(uv) * (size - 1) + 0.5) / size, 0).r;
+}
+
 float SampleField(float2 uv, out float slopeX, out float slopeY)
 {
     slopeX = 0;
     slopeY = 0;
     if (HasField < 0.5)
         return 0;
-    float h = FieldTex.SampleLevel(LinearClamp, uv, 0).r;
+    float h = FieldAt(uv);
     float e = FieldCols <= 1 ? 0.08 : 1.0 / max(1, FieldCols - 1);
     float n = FieldRows <= 1 ? 0.08 : 1.0 / max(1, FieldRows - 1);
-    slopeX = (FieldTex.SampleLevel(LinearClamp, uv + float2(e, 0), 0).r - FieldTex.SampleLevel(LinearClamp, uv - float2(e, 0), 0).r) / (2 * e);
-    slopeY = (FieldTex.SampleLevel(LinearClamp, uv + float2(0, n), 0).r - FieldTex.SampleLevel(LinearClamp, uv - float2(0, n), 0).r) / (2 * n);
+    slopeX = (FieldAt(uv + float2(e, 0)) - FieldAt(uv - float2(e, 0))) / (2 * e);
+    slopeY = (FieldAt(uv + float2(0, n)) - FieldAt(uv - float2(0, n))) / (2 * n);
     return h;
 }
 
@@ -612,7 +618,7 @@ float4 ShadeColor(float2 p, float surface)
     alpha = min(alpha, 0.70);
     if (alpha <= 1.0 / 255.0)
         return 0;
-    return float4(float3(0.956, 0.984, 1) * alpha, alpha);
+    return float4(alpha, alpha, alpha, alpha);
 }
 
 float MapAxis(float x, float source, float target)
@@ -631,15 +637,44 @@ float2 MapToSource(float2 uv)
     return float2(MapAxis(uv.x, SrcW, IslandW), MapAxis(uv.y, SrcH, IslandH));
 }
 
+float2 SafePadPoint(float2 p, float2 size)
+{
+    p = clamp(p, 1, size + 2 * Pad - 2);
+    float4 distances = float4(p.x - (Pad - 2), Pad + size.x + 1 - p.x,
+                              p.y - (Pad - 2), Pad + size.y + 1 - p.y);
+    float nearest = min(min(distances.x, distances.y), min(distances.z, distances.w));
+    if (nearest > 0)
+    {
+        if (nearest == distances.x) p.x = Pad - 2;
+        else if (nearest == distances.y) p.x = Pad + size.x + 1;
+        else if (nearest == distances.z) p.y = Pad - 2;
+        else p.y = Pad + size.y + 1;
+    }
+    return p;
+}
+
+// Captured RGB is straight; alpha is validity. Premultiply BEFORE filtering,
+// so erased/uncaptured texels never darken or introduce garbage into valid taps.
+float4 PadTap(float2 p)
+{
+    float2 size = float2(SrcPadW, SrcPadH);
+    p = clamp(p, 0, size - 1);
+    int2 q = (int2)floor(p);
+    float2 f = frac(p);
+    float4 a = PadTex.Load(int3(q, 0)); a.rgb *= a.a;
+    float4 b = PadTex.Load(int3(min(q + int2(1, 0), (int2)size - 1), 0)); b.rgb *= b.a;
+    float4 c = PadTex.Load(int3(min(q + int2(0, 1), (int2)size - 1), 0)); c.rgb *= c.a;
+    float4 d = PadTex.Load(int3(min(q + 1, (int2)size - 1), 0)); d.rgb *= d.a;
+    return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
+}
+
 float4 SamplePad(float2 uv)
 {
-    float2 tex = (MapToSource(uv) + 0.5) / max(float2(SrcPadW, SrcPadH), 1);
-    float4 c = PadTex.SampleLevel(LinearClamp, tex, 0);
-    if (dot(c.rgb, 1) <= 0 && c.a <= 0)
-        return 0;
-    if (c.a <= 0)
-        c.a = 1;
-    return c;
+    float2 p = SafePadPoint(MapToSource(uv), float2(SrcW, SrcH));
+    const float tap = 0.65;
+    float4 c = PadTap(p) + PadTap(p + float2(tap, 0)) + PadTap(p - float2(tap, 0))
+        + PadTap(p + float2(0, tap)) + PadTap(p - float2(0, tap));
+    return c.a > 1e-6 ? float4(c.rgb / c.a, 1) : 0;
 }
 
 bool TryMap(float2 p, float2 slope, float surface, out float2 u, out float2 ru, out float2 bu, out float alpha)
@@ -656,19 +691,12 @@ bool TryMap(float2 p, float2 slope, float surface, out float2 u, out float2 ru, 
     if (along <= 0)
         return false;
     float2 nrm = NormalOf(p, IslandW, IslandH, r);
-    float2 halfSize = float2(IslandW, IslandH) * 0.5;
-    float tx = abs(nrm.x) < 1e-8 ? 1e9 : halfSize.x / abs(nrm.x);
-    float ty = abs(nrm.y) < 1e-8 ? 1e9 : halfSize.y / abs(nrm.y);
-    float tRect = min(tx, ty);
-    if (tRect <= 0)
-        return false;
-    float offset = 0.6 + along * max(4, (Pad - 1) * SampleGain) + surface * Pad * HeightWarp;
-    float2 sample = halfSize + Pad + nrm * (tRect + offset) + slope * Pad * SlopeWarp;
-    sample = clamp(sample, 0, float2(IslandW, IslandH) + Pad * 2 - 1);
-    float chroma = Chromatic * Pad * along * along * (1 - 0.55 * Smootherstep(0.72, 1, along));
-    u = sample;
-    ru = clamp(sample + nrm * chroma, 0, float2(IslandW, IslandH) + Pad * 2 - 1);
-    bu = clamp(sample - nrm * chroma, 0, float2(IslandW, IslandH) + Pad * 2 - 1);
+    float tx = abs(nrm.x) < 1e-8 ? 1e9 : (nrm.x > 0 ? IslandW - p.x : -p.x) / nrm.x;
+    float ty = abs(nrm.y) < 1e-8 ? 1e9 : (nrm.y > 0 ? IslandH - p.y : -p.y) / nrm.y;
+    float tRect = max(0, min(tx, ty));
+    float offset = clamp(2 + along * max(4, (Pad - 3) * SampleGain) + surface * Pad * HeightWarp, 2, Pad - 2);
+    u = SafePadPoint(Pad + p + nrm * (tRect + offset) + slope * Pad * SlopeWarp, float2(IslandW, IslandH));
+    ru = bu = u; // RGB shares the exact same spatial footprint: no artificial dispersion.
     alpha = Smootherstep(0, 0.88, along) * (1 - 0.20 * Smootherstep(0.84, 1, along));
     return alpha > 0.01;
 }
@@ -690,12 +718,8 @@ float4 PSMain(VSOut i) : SV_Target
             float4 green = SamplePad(u);
             if (dot(green, 1) > 0)
             {
-                float4 red = SamplePad(ru);
-                float4 blue = SamplePad(bu);
-                if (dot(red, 1) <= 0) red = green;
-                if (dot(blue, 1) <= 0) blue = green;
                 float a = saturate(alpha);
-                float4 refr = float4(red.r, green.g, blue.b, 1) * a;
+                float4 refr = float4(green.rgb, 1) * a;
                 color = refr + color * (1 - a);
             }
         }

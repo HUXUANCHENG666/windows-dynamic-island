@@ -11,7 +11,7 @@ namespace DynamicIsland.Visuals;
 
 /// <summary>
 /// 只采集岛外一圈桌面，再弯到玻璃边缘上。中心保持透明，桌面仍从分层窗口透出来。
-/// 完整捕获放到后台线程；界面线程只用上一帧周围图按当前形状再扭曲。
+/// 捕获和渲染各最多一个后台任务；界面线程仅提交快照并显示已完成的冻结帧。
 /// </summary>
 sealed class GlassRefractionBuffer : IDisposable
 {
@@ -37,6 +37,13 @@ sealed class GlassRefractionBuffer : IDisposable
     DateTime _gpuRetryUtc;
     bool _gpuRejected;
 
+    readonly object _renderGate = new();
+    GlassRefractionBuffer? _renderer;
+    bool _renderBusy;
+    int _presentationEpoch;
+    record Frame(ImageSource? Refraction, ImageSource? Shade, ImageSource? Gpu);
+    Frame? _readyFrame;
+
     public ImageSource? Image => _bitmap;
     public ImageSource? Shade => _shade;
     public ImageSource? GpuImage { get; private set; }
@@ -45,6 +52,7 @@ sealed class GlassRefractionBuffer : IDisposable
 
     public void Clear()
     {
+        lock (_renderGate) { _presentationEpoch++; _readyFrame = null; }
         _bitmap = null;
         _shade = null;
         GpuImage = null;
@@ -53,22 +61,71 @@ sealed class GlassRefractionBuffer : IDisposable
     public bool CanReusePad(int width, int height) =>
         GlassWork.ShouldReuseCapture(HasCachedPad);
 
-    public bool TryUpdate(int pillLeft, int pillTop, int pillW, int pillH, int visualLeft, int visualTop, int visualW, int visualH, double radius, LiquidSurface? surface = null)
+    // 一帧运行、零帧排队。GPU Map/readback 和 CPU warp 都不占 UI 线程。
+    // 忙时直接保留最近完成帧；下一次 Rendering 只提交当时最新形状，不积压旧形状。
+    public bool TryPresent(int pillW, int pillH, double radius, LiquidSurface? surface, bool moving)
     {
-        if (pillW < 8 || pillH < 8 || !CaptureInto(ref _pad, out _padW, out _padH, pillLeft, pillTop, pillW, pillH, visualLeft, visualTop, visualW, visualH))
+        lock (_renderGate)
         {
-            _bitmap = null;
-            return false;
+            if (_disposed) return false;
+            if (_readyFrame is { } ready)
+            {
+                _bitmap = ready.Refraction as WriteableBitmap;
+                _shade = ready.Shade as WriteableBitmap;
+                GpuImage = ready.Gpu;
+                _readyFrame = null;
+            }
+            if (!_renderBusy && pillW >= 8 && pillH >= 8)
+            {
+                _renderBusy = true;
+                _renderer ??= new GlassRefractionBuffer();
+                var renderer = _renderer;
+                var pad = (int[])_pad.Clone();
+                var field = surface?.Snapshot();
+                int padW = _padW, padH = _padH, srcW = _padIslandW, srcH = _padIslandH;
+                int epoch = _presentationEpoch;
+                _ = Task.Run(() =>
+                {
+                    Frame? frame = null;
+                    try
+                    {
+                        renderer._pad = pad;
+                        renderer._padW = padW; renderer._padH = padH;
+                        renderer._padIslandW = srcW; renderer._padIslandH = srcH;
+                        if (renderer.RenderFrame(pillW, pillH, radius, field, moving))
+                        {
+                            renderer._bitmap?.Freeze(); renderer._shade?.Freeze();
+                            renderer.GpuImage?.Freeze();
+                            frame = new Frame(renderer.Image, renderer.Shade, renderer.GpuImage);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Glass render skipped: {ex.GetType().Name}");
+                        // 即便不是 DXGI 的标准 device-lost 异常，下次也先安全退回 CPU。
+                        renderer._gpu?.Dispose(); renderer._gpu = null;
+                        renderer._gpuRejected = true; renderer._gpuRetryUtc = DateTime.UtcNow;
+                        renderer._bitmap = null; renderer._shade = null; renderer.GpuImage = null;
+                    }
+                    finally
+                    {
+                        bool dispose;
+                        lock (_renderGate)
+                        {
+                            dispose = _disposed;
+                            if (!dispose && epoch == _presentationEpoch) _readyFrame = frame;
+                            _renderBusy = false;
+                            if (dispose) _renderer = null;
+                        }
+                        if (dispose) renderer.Dispose();
+                    }
+                });
+            }
         }
-
-        _padIslandW = pillW;
-        _padIslandH = pillH;
-
-        WriteShade(pillW, pillH, radius, surface, moving: false);
-        return Warp(pillW, pillH, radius, surface, moving: false);
+        return _bitmap != null || _shade != null || GpuImage != null;
     }
 
-    public bool TryPresent(int pillW, int pillH, double radius, LiquidSurface? surface, bool moving)
+    bool RenderFrame(int pillW, int pillH, double radius, LiquidSurface? surface, bool moving)
     {
         if (pillW < 8 || pillH < 8)
             return false;
@@ -124,17 +181,6 @@ sealed class GlassRefractionBuffer : IDisposable
 
         _gpuRejected = false;
         return true;
-    }
-
-    public bool TryUpdateShade(int pillW, int pillH, double radius, LiquidSurface? surface)
-    {
-        if (pillW < 8 || pillH < 8)
-        {
-            _shade = null;
-            return false;
-        }
-
-        return WriteShade(pillW, pillH, radius, surface, moving: false);
     }
 
     public bool TryBeginCapture(
@@ -242,14 +288,17 @@ sealed class GlassRefractionBuffer : IDisposable
             if (dib == IntPtr.Zero || bits == IntPtr.Zero)
                 return false;
             old = NativeMethods.SelectObject(dc, dib);
+            unsafe { new Span<byte>((void*)bits, checked(padW * padH * 4)).Clear(); }
 
             // 只拷岛外四条边，中间保持空，避免把岛自己折进去。
-            BitBltStrip(dc, screen, 0, 0, padW, pad, left - pad, top - pad);
-            BitBltStrip(dc, screen, 0, pad + height, padW, pad, left - pad, top + height);
-            BitBltStrip(dc, screen, 0, pad, pad, height, left - pad, top);
-            BitBltStrip(dc, screen, pad + width, pad, pad, height, left + width, top);
+            if (!BitBltStrip(dc, screen, 0, 0, padW, pad, left - pad, top - pad)
+                || !BitBltStrip(dc, screen, 0, pad + height, padW, pad, left - pad, top + height)
+                || !BitBltStrip(dc, screen, 0, pad, pad, height, left - pad, top)
+                || !BitBltStrip(dc, screen, pad + width, pad, pad, height, left + width, top))
+                return false;
 
             Marshal.Copy(bits, dest, 0, dest.Length);
+            GlassSample.NormalizeCapture(dest, width, height, pad);
             EraseVisual(dest, padW, padH, left - pad, top - pad, visualLeft, visualTop, visualW, visualH);
             return true;
         }
@@ -265,11 +314,11 @@ sealed class GlassRefractionBuffer : IDisposable
         }
     }
 
-    static void BitBltStrip(IntPtr dest, IntPtr screen, int dx, int dy, int width, int height, int sx, int sy)
+    static bool BitBltStrip(IntPtr dest, IntPtr screen, int dx, int dy, int width, int height, int sx, int sy)
     {
         if (width <= 0 || height <= 0)
-            return;
-        NativeMethods.BitBlt(dest, dx, dy, width, height, screen, sx, sy, NativeMethods.SRCCOPY);
+            return false;
+        return NativeMethods.BitBlt(dest, dx, dy, width, height, screen, sx, sy, NativeMethods.SRCCOPY);
     }
 
     static void EraseVisual(int[] dest, int padW, int padH, int originX, int originY, int visualLeft, int visualTop, int visualW, int visualH)
@@ -320,7 +369,7 @@ sealed class GlassRefractionBuffer : IDisposable
             return false;
         }
 
-        if (_shade == null || _shade.PixelWidth != outW || _shade.PixelHeight != outH)
+        if (_shade == null || _shade.IsFrozen || _shade.PixelWidth != outW || _shade.PixelHeight != outH)
             _shade = new WriteableBitmap(outW, outH, 96, 96, PixelFormats.Pbgra32, null);
         _shade.WritePixels(new Int32Rect(0, 0, outW, outH), _shadePixels, outW * 4, 0);
         return true;
@@ -358,18 +407,12 @@ sealed class GlassRefractionBuffer : IDisposable
                 int green = Sample(u, v, width, height);
                 if (green == 0)
                     continue;
-                int red = Sample(ru, rv, width, height);
-                int blue = Sample(bu, bv, width, height);
-                if (red == 0)
-                    red = green;
-                if (blue == 0)
-                    blue = green;
                 int a = Math.Clamp((int)Math.Round(alpha * 255), 0, 255);
                 if (a <= 2)
                     continue;
-                int r = ((red >> 16) & 0xFF) * a / 255;
+                int r = ((green >> 16) & 0xFF) * a / 255;
                 int g = ((green >> 8) & 0xFF) * a / 255;
-                int b = (blue & 0xFF) * a / 255;
+                int b = (green & 0xFF) * a / 255;
                 _output[y * outW + x] = (a << 24) | (r << 16) | (g << 8) | b;
                 any = true;
             }
@@ -381,7 +424,7 @@ sealed class GlassRefractionBuffer : IDisposable
             return false;
         }
 
-        if (_bitmap == null || _bitmap.PixelWidth != outW || _bitmap.PixelHeight != outH)
+        if (_bitmap == null || _bitmap.IsFrozen || _bitmap.PixelWidth != outW || _bitmap.PixelHeight != outH)
             _bitmap = new WriteableBitmap(outW, outH, 96, 96, PixelFormats.Pbgra32, null);
         _bitmap.WritePixels(new Int32Rect(0, 0, outW, outH), _output, outW * 4, 0);
         return true;
@@ -393,13 +436,19 @@ sealed class GlassRefractionBuffer : IDisposable
             return 0;
         int srcW = _padIslandW > 0 ? _padIslandW : islandW;
         int srcH = _padIslandH > 0 ? _padIslandH : islandH;
-        (u, v) = GlassSample.MapPad(u, v, srcW, srcH, islandW, islandH, Pad);
-        return GlassSample.Bilinear(_pad, _padW, _padH, u, v);
+        return GlassSample.Footprint(_pad, _padW, _padH, u, v, srcW, srcH, islandW, islandH, Pad);
     }
 
     public void Dispose()
     {
-        _disposed = true;
+        GlassRefractionBuffer? renderer = null;
+        lock (_renderGate)
+        {
+            _disposed = true;
+            _readyFrame = null;
+            if (!_renderBusy) { renderer = _renderer; _renderer = null; }
+        }
+        renderer?.Dispose();
         _captureBusy = false;
         _gpu?.Dispose();
         _gpu = null;
