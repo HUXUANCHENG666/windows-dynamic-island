@@ -303,6 +303,17 @@ static class NativeMethods
     public const int SM_XVIRTUALSCREEN = 76;
     public const int SM_YVIRTUALSCREEN = 77;
     public const uint SRCCOPY = 0x00CC0020;
+    public const uint CAPTUREBLT = 0x40000000;
+    public const uint WDA_NONE = 0x00000000;
+    public const uint WDA_MONITOR = 0x00000001;
+    public const uint WDA_EXCLUDEFROMCAPTURE = 0x00000011;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint affinity);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool GetWindowDisplayAffinity(IntPtr hWnd, out uint affinity);
+
     public const int BI_RGB = 0;
     public const uint DIB_RGB_COLORS = 0;
 

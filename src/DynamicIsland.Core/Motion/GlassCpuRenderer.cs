@@ -8,7 +8,7 @@ public static class GlassCpuRenderer
     public static void Render(int[] pixels, int ow, int oh, int w, int h, double radius, double dpi,
         LiquidSurface? field, int[]? padPixels, int sourceW, int sourceH, double sourceRadius,
         double shiftX = 0, double shiftY = 0, double scaleX = 1, double scaleY = 1,
-        LiquidOpticsFrame optics = default)
+        LiquidOpticsFrame optics = default, bool liveInterior = false)
     {
         const int Pad = LiquidRefraction.DefaultPad;
         if (!optics.IsActive) optics = LiquidOpticsFrame.Identity;
@@ -33,7 +33,7 @@ public static class GlassCpuRenderer
                 c = GlassSample.Footprint(padPixels, sourceW + 2 * Pad, sourceH + 2 * Pad, u, v,
                     sourceW, sourceH, w, h, Pad, sourceRadius, dpi, shiftX, shiftY, true, scaleX, scaleY);
             else if (padPixels != null && LiquidOptics.TryMapInterior(px, py, w, h, Pad, radius, dpi, optics, sx, sy, height,
-                out u, out v, out alpha))
+                out u, out v, out alpha, liveInterior))
                 c = GlassSample.Footprint(padPixels, sourceW + 2 * Pad, sourceH + 2 * Pad, u, v,
                     sourceW, sourceH, w, h, Pad, sourceRadius, dpi, shiftX, shiftY, true, scaleX, scaleY);
             int a = c == 0 ? 0 : (int)Math.Round(alpha * ((uint)c >> 24));

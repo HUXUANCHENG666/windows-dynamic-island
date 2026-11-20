@@ -201,7 +201,7 @@ sealed class GlassGpuRenderer : IDisposable
         int sourceIslandH,
         double radius,
         LiquidSurface? surface,
-        bool moving, double dpi = 1, double sourceRadius = 0, double shiftX = 0, double shiftY = 0, long started = 0, long captureVersion = 0, double scaleX = 1, double scaleY = 1, LiquidOpticsFrame optics = default)
+        bool moving, double dpi = 1, double sourceRadius = 0, double shiftX = 0, double shiftY = 0, long started = 0, long captureVersion = 0, double scaleX = 1, double scaleY = 1, LiquidOpticsFrame optics = default, bool liveInterior = false)
     {
         if (!IsAvailable || islandW < 8 || islandH < 8)
             return false;
@@ -247,7 +247,8 @@ sealed class GlassGpuRenderer : IDisposable
                 LagScaleX = optics.IsActive ? (float)optics.LagScaleX : 1,
                 LagScaleY = optics.IsActive ? (float)optics.LagScaleY : 1,
                 InteriorGain = optics.IsActive ? (float)optics.Strength : 0,
-                InteriorWarp = (float)LiquidOptics.InteriorSlopeWarp
+                InteriorWarp = (float)LiquidOptics.InteriorSlopeWarp,
+                InteriorLive = liveInterior && optics.IsActive ? 1 : 0
             };
             WriteConstants(data);
 
@@ -491,6 +492,7 @@ sealed class GlassGpuRenderer : IDisposable
         public float Dpi, SrcRadius, ShiftX, ShiftY;
         public float ScaleX, ScaleY, LagX, LagY;
         public float LagScaleX, LagScaleY, InteriorGain, InteriorWarp;
+        public float InteriorLive, Pad0, Pad1, Pad2;
     }
 
     const string ShaderSource = """
@@ -524,6 +526,10 @@ cbuffer Params : register(b0)
     float LagScaleY;
     float InteriorGain;
     float InteriorWarp;
+    float InteriorLive;
+    float _p0;
+    float _p1;
+    float _p2;
 };
 
 Texture2D PadTex : register(t0);
@@ -690,13 +696,15 @@ bool TryMapInterior(float2 p, float2 slope, float surface, out float2 u, out flo
     strain = clamp(strain, -maxStrain, maxStrain);
     float2 sample = p - float2(LagX, LagY) + strain
         + slope / (1 + abs(slope)) * InteriorWarp * Dpi;
-    // Only the current live pad: never sample the punched hole (no under-island desktop, no old pixels).
-    if (SignedDistance(sample, IslandW, IslandH, r) < 0.5)
-        return false;
+    // In-island UVs are allowed: live underlay texels have alpha, punched holes stay 0 in SamplePad.
     u = Pad + sample;
+    bool sampleInside = SignedDistance(sample, IslandW, IslandH, r) < 0.5;
+    if (sampleInside && InteriorLive < 0.5)
+        return false;
+    float cap = sampleInside ? 0.92 : 0.50;
     float near = Smootherstep(-band - 4 * Dpi, -band + 2 * Dpi, d);
-    alpha = saturate(InteriorGain * (0.42 + 0.28 * saturate(abs(surface))) * (1 - 0.35 * near));
-    alpha = min(alpha, 0.50);
+    alpha = saturate(InteriorGain * (0.42 + 0.28 * saturate(abs(surface))) * (1 - 0.35 * near) * (cap / 0.50));
+    alpha = min(alpha, cap);
     return alpha > 0.01;
 }
 

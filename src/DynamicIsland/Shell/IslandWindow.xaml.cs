@@ -482,6 +482,7 @@ public partial class IslandWindow : Window
             _refraction.Clear();
             GlassSkin.UpdateRefraction(this, null, null);
         }
+        SyncCaptureAffinity();
     }
 
     internal void DecorateGlass(Geometry geometry, double width, double height, double radius)
@@ -645,6 +646,7 @@ public partial class IslandWindow : Window
         var source = (HwndSource)PresentationSource.FromVisual(this)!;
         source.AddHook(WndProc);
         ApplyChrome(source.Handle);
+        SyncCaptureAffinity();
         Position();
         _watcher.Start(source.Handle);
         _clipboardHooked = NativeMethods.AddClipboardFormatListener(source.Handle);
@@ -682,6 +684,7 @@ public partial class IslandWindow : Window
     protected override async void OnClosed(EventArgs e)
     {
         _shutdown = true;
+        SyncCaptureAffinity();
         SaveTimer();
         _renderLive = false;
         CompositionTarget.Rendering -= OnRendering;
@@ -2064,6 +2067,19 @@ public partial class IslandWindow : Window
 
         _gliding = false;
         SyncLoops();
+    }
+
+    void SyncCaptureAffinity()
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero)
+        {
+            _refraction.AllowLiveInterior = false;
+            return;
+        }
+        bool glass = !_shutdown && AppearancePolicy.ParseSkin(Settings.IslandSkin) == IslandSkin.Glass;
+        bool enabled = GlassCaptureAffinity.TrySet(hwnd, glass);
+        _refraction.AllowLiveInterior = enabled;
     }
 
     static void ApplyChrome(IntPtr hwnd)

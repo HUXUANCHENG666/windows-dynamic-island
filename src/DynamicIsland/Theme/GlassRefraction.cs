@@ -29,6 +29,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
     public ImageSource? Image => _gpuImage ? null : _bitmap;
     public ImageSource? Shade => null;
     public ImageSource? GpuImage => _gpuImage ? _bitmap : null;
+    public bool AllowLiveInterior;
     public bool CaptureInFlight { get { lock (_gate) return _captureBusy; } }
     public void Clear()
     {
@@ -111,7 +112,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
             long submit = Stopwatch.GetTimestamp();
             bool healthy = _gpu.TryPresent(pad?.Pixels, pad == null ? 0 : pad.Width + 2 * Pad,
                 pad == null ? 0 : pad.Height + 2 * Pad, w, h, pad?.Width ?? w, pad?.Height ?? h,
-                radius, field, moving, dpi, pad?.Radius ?? radius, left - (pad?.Left ?? left), top - (pad?.Top ?? top), start, pad?.Id ?? 0, scaleX, scaleY, optics);
+                radius, field, moving, dpi, pad?.Radius ?? radius, left - (pad?.Left ?? left), top - (pad?.Top ?? top), start, pad?.Id ?? 0, scaleX, scaleY, optics, pad?.HasLiveInterior ?? false);
             _stats.Time(3, submit);
             if (healthy)
             {
@@ -126,7 +127,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
         var result = new GlassPixels(ow, oh, false, start);
         GlassCpuRenderer.Render(result.Pixels, ow, oh, w, h, radius, dpi, field,
             pad?.Pixels, pad?.Width ?? w, pad?.Height ?? h, pad?.Radius ?? radius,
-            left - (pad?.Left ?? left), top - (pad?.Top ?? top), scaleX, scaleY, optics);
+            left - (pad?.Left ?? left), top - (pad?.Top ?? top), scaleX, scaleY, optics, pad?.HasLiveInterior ?? false);
         return result;
     }
 
@@ -140,7 +141,8 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
         _captureTask = Task.Run(() =>
         {
             long start = Stopwatch.GetTimestamp(); CapturedPad? frame = null;
-            try { frame = _capture.Capture(left, top, w, h, radius, dpi, visualLeft, visualTop, visualW, visualH); }
+            bool underlay; lock (_gate) underlay = AllowLiveInterior;
+            try { frame = _capture.Capture(left, top, w, h, radius, dpi, visualLeft, visualTop, visualW, visualH, underlay); }
             catch (Exception ex) { Debug.WriteLine($"Glass capture skipped: {ex.GetType().Name}"); }
             bool ok;
             lock (_gate)

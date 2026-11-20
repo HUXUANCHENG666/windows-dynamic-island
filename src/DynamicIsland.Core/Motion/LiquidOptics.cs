@@ -3,7 +3,7 @@ using DynamicIsland.Core.Geometry;
 namespace DynamicIsland.Core.Motion;
 
 /// <summary>
-/// 透过玻璃的光学惯性：岛的位置仍 1:1 跟手，用有阻尼的位移/应变场当场扭曲「此刻」捕获的实况背景。
+/// 透过玻璃的光学惯性：岛的位置仍 1:1 跟手，用有阻尼的位移/应变场当场扭曲「此刻」捕获的实况背景（含已取得的正下方像素）。
 /// 不是冻结或拼贴旧截图，也不是整块平移玻璃层。
 /// </summary>
 public readonly record struct LiquidOpticsFrame(double LagX, double LagY, double LagScaleX, double LagScaleY, double Strength)
@@ -18,6 +18,7 @@ public sealed class LiquidOptics
     public const double MaxSizeLagDip = 56;
     public const double InteriorSlopeWarp = 2.5;
     public const double InteriorAlpha = 0.50;
+    public const double InteriorLiveAlpha = 0.92;
     public const double SettlePosition = 0.35;
     public const double SettleVelocity = 2;
     public const double TeleportPixels = 240;
@@ -113,7 +114,7 @@ public sealed class LiquidOptics
     public static bool TryMapInterior(
         double x, double y, double width, double height, int pad, double radius, double dpi,
         LiquidOpticsFrame optics, double slopeX, double slopeY, double surface,
-        out double u, out double v, out double alpha)
+        out double u, out double v, out double alpha, bool liveInterior = false)
     {
         u = v = alpha = 0;
         if (!optics.IsActive || width < 2 || height < 2 || pad < 4)
@@ -127,16 +128,18 @@ public sealed class LiquidOptics
             return false;
 
         DisplacedUv(x, y, width, height, dpi, optics, slopeX, slopeY, out double sx, out double sy);
-        // 岛洞里没有可靠的正下方桌面：扭曲落到洞内就放弃，让真透明透出实况，绝不取洞内旧像素。
-        if (IslandOutline.SignedDistance(sx, sy, width, height, radius) < 0.5)
-            return false;
-
+        // 采样点可落在当前岛内：若这一帧捕获带着正下方实况（alpha 有效）就取它；
+        // 若仍是挖洞后的空像素，Footprint/采样会得到 0，不会用旧截图填上。
         u = pad + sx;
         v = pad + sy;
+        bool sampleInside = IslandOutline.SignedDistance(sx, sy, width, height, radius) < 0.5;
+        if (sampleInside && !liveInterior)
+            return false; // 挖洞回退时不取岛内像素（包括误留下的颜色）。
+        double cap = sampleInside ? InteriorLiveAlpha : InteriorAlpha;
         double near = IslandOutline.Smootherstep(-band - 4 * dpi, -band + 2 * dpi, d);
         alpha = optics.Strength * (0.42 + 0.28 * Math.Clamp(Math.Abs(surface), 0, 1))
-            * (1 - 0.35 * near) * (InteriorAlpha / 0.50);
-        alpha = Math.Clamp(alpha, 0, InteriorAlpha);
+            * (1 - 0.35 * near) * (cap / 0.50);
+        alpha = Math.Clamp(alpha, 0, cap);
         return alpha > 0.01;
     }
 

@@ -70,8 +70,10 @@ public class LiquidOpticsTests
         Assert.InRange(v, Pad + sy - 0.01, Pad + sy + 0.01);
         Assert.True(sx < 0); // pulled into the left pad of this frame
         Assert.InRange(alpha, 0.2, LiquidOptics.InteriorAlpha);
-        // Center warp still sits in the punched hole: no invented under-island sample.
         Assert.False(LiquidOptics.TryMapInterior(160, 70, W, H, Pad, R, 1, optics, 0, 0, 0, out _, out _, out _));
+        Assert.True(LiquidOptics.TryMapInterior(160, 70, W, H, Pad, R, 1, optics, 0, 0, 0, out var cu, out _, out var ca, liveInterior: true));
+        Assert.InRange(cu, Pad + 160 - 28 - 0.01, Pad + 160 - 28 + 0.01);
+        Assert.InRange(ca, 0.2, LiquidOptics.InteriorLiveAlpha);
         Assert.False(LiquidOptics.TryMapInterior(22, 70, W, H, Pad, R, 1, LiquidOpticsFrame.Identity, 0, 0, 0, out _, out _, out _));
         Assert.False(LiquidOptics.TryMapInterior(2, 70, W, H, Pad, R, 1, optics, 0, 0, 0, out _, out _, out _)); // rim stays on the rim path
         // Size lag is a radial strain of the current frame, still RGB-shared.
@@ -139,6 +141,29 @@ public class LiquidOpticsTests
     }
 
     [Fact]
+    public void CpuLiveInteriorSamplesCurrentUnderlayRatherThanAHole()
+    {
+        int[] live = Filled(Dark, Yellow); // no punch: interior is the current underlay
+        var lagged = new int[W * H];
+        var optics = new LiquidOpticsFrame(28, 0, 1, 1, 1);
+        GlassCpuRenderer.Render(lagged, W, H, W, H, R, 1, null, live, W, H, R, 0, 0, 1, 1, optics, liveInterior: true);
+        int center = lagged[(H / 2) * W + 160]; // samples x-28=132, still the dark half of the live underlay
+        int right = lagged[(H / 2) * W + 210]; // samples x-28=182, yellow underlay
+        Assert.NotEqual(0, center);
+        Assert.NotEqual(0, right);
+        static int UnpremultiplyRed(int c)
+        {
+            int a = (int)((uint)c >> 24);
+            return a == 0 ? 0 : ((c >> 16) & 255) * 255 / a;
+        }
+        Assert.InRange(UnpremultiplyRed(center), 0, 80);
+        Assert.InRange(UnpremultiplyRed(right), 180, 255);
+        var settled = new int[W * H];
+        GlassCpuRenderer.Render(settled, W, H, W, H, R, 1, null, live, W, H, R);
+        Assert.Equal(0, settled[(H / 2) * W + W / 2]); // settled stays truly clear
+    }
+
+    [Fact]
     public void DpiScaleAndSizeChangeKeepInteriorCoordinatesFiniteAndRgbAligned()
     {
         foreach (double dpi in new[] { 1.0, 1.25, 1.5, 2.0 })
@@ -150,9 +175,13 @@ public class LiquidOpticsTests
                 out var u, out var v, out var alpha));
             Assert.InRange(u, 1, w + 2 * Pad - 1);
             Assert.InRange(v, 1, h + 2 * Pad - 1);
-            Assert.InRange(alpha, 0.05, LiquidOptics.InteriorAlpha);
+            Assert.InRange(alpha, 0.05, LiquidOptics.InteriorLiveAlpha);
             Assert.False(LiquidOptics.TryMapInterior(w * 0.5, h * 0.5, w, h, Pad, 35 * dpi, dpi, optics, 0, 0, 0,
                 out _, out _, out _));
+            Assert.True(LiquidOptics.TryMapInterior(w * 0.5, h * 0.5, w, h, Pad, 35 * dpi, dpi, optics, 0, 0, 0,
+                out var cu, out _, out var ca, liveInterior: true));
+            Assert.InRange(cu, 1, w + 2 * Pad - 1);
+            Assert.InRange(ca, 0.05, LiquidOptics.InteriorLiveAlpha);
         }
     }
 
@@ -167,6 +196,16 @@ public class LiquidOpticsTests
             bool inside = IslandOutline.SignedDistance(px + 0.5, py + 0.5, W, H, R) < 0.5;
             source[y * stride + x] = inside ? hole : (px < W / 2.0 ? leftPad : rightPad);
         }
+        return source;
+    }
+
+    static int[] Filled(int left, int right)
+    {
+        int stride = W + 2 * Pad;
+        var source = new int[stride * (H + 2 * Pad)];
+        for (int y = 0; y < H + 2 * Pad; y++)
+        for (int x = 0; x < stride; x++)
+            source[y * stride + x] = (x - Pad) < W / 2.0 ? left : right;
         return source;
     }
 }

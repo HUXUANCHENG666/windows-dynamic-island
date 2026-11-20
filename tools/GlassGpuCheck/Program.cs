@@ -60,16 +60,16 @@ foreach (int kind in new[] { 0, 1, 2, 3 })
 
 
 async Task Check(string label, int w, int h, double r, double dpi, int[] source, LiquidSurface? field,
-    double shiftX, double shiftY, double scaleX, double scaleY, LiquidOpticsFrame optics)
+    double shiftX, double shiftY, double scaleX, double scaleY, LiquidOpticsFrame optics, bool liveInterior = false)
 {
     var expected = new int[w * h];
-    GlassCpuRenderer.Render(expected, w, h, w, h, r, dpi, field, source, w, h, r, shiftX, shiftY, scaleX, scaleY, optics);
+    GlassCpuRenderer.Render(expected, w, h, w, h, r, dpi, field, source, w, h, r, shiftX, shiftY, scaleX, scaleY, optics, liveInterior);
     long id = Stopwatch.GetTimestamp();
     GlassPixels? actual = null;
     var deadline = Stopwatch.StartNew();
     while (actual == null && deadline.Elapsed.TotalSeconds < 15)
     {
-        if (!gpu.TryPresent(source, w + 2 * pad, h + 2 * pad, w, h, w, h, r, field, false, dpi, r, shiftX, shiftY, id, 100 + cases, scaleX, scaleY, optics))
+        if (!gpu.TryPresent(source, w + 2 * pad, h + 2 * pad, w, h, w, h, r, field, false, dpi, r, shiftX, shiftY, id, 100 + cases, scaleX, scaleY, optics, liveInterior))
             throw new InvalidOperationException("WARP lag render/readback device failure.");
         var candidate = gpu.TakeFrame();
         if (candidate?.Started == id) actual = candidate;
@@ -113,6 +113,23 @@ int[] Fill(int w, int h, double r, int kind)
     return source;
 }
 
+int[] FillLive(int w, int h, double r, int kind)
+{
+    var source = Fill(w, h, r, kind);
+    // Restore the island interior so WARP can check sampling of live underlay pixels (not a historical atlas).
+    for (int y = 0; y < h + 2 * pad; y++)
+    for (int x = 0; x < w + 2 * pad; x++)
+    {
+        double px = x - pad, py = y - pad;
+        if (IslandOutline.SignedDistance(px + 0.5, py + 0.5, w, h, r) < 0.5)
+        {
+            int value = kind == 0 ? (px < w / 2.0 ? 0x10 : 0xE0) : (int)Math.Round(127.5 + 127.5 * Math.Sin((px + py) * 0.10));
+            source[y * (w + 2 * pad) + x] = unchecked((int)0xFF000000) | (value << 16) | ((kind == 0 && px >= w / 2.0 ? 0xB0 : value) << 8) | (kind == 0 && px >= w / 2.0 ? 0x30 : value);
+        }
+    }
+    return source;
+}
+
 // Isolated lag (no fluid, unit scale) then the live-pad warp cases. Sources are punched, never a historical atlas.
 foreach (double dpi in new[] { 1.0, 1.5, 2.0 })
 {
@@ -129,6 +146,13 @@ foreach (int kind in new[] { 0, 3 })
     var field = new LiquidSurface(); field.EnsureSize(w, h);
     field.InjectForce(0.2, 0.25, 0.18f); field.Step(1.0 / 60, 0, 0, false, false);
     await Check($"lag-parity dpi={dpi} pattern={kind}", w, h, r, dpi, Fill(w, h, r, kind == 0 ? 0 : 1), field, 0.3, -0.4, 1.08, 0.96, lagOptics);
+}
+
+foreach (double dpi in new[] { 1.0, 1.5 })
+{
+    int w = (int)(320 * dpi), h = (int)(140 * dpi);
+    double r = 35 * dpi;
+    await Check($"lag-live dpi={dpi}", w, h, r, dpi, FillLive(w, h, r, 0), null, 0, 0, 1, 1, new LiquidOpticsFrame(18 * dpi, 0, 1, 1, 1), true);
 }
 
 Console.WriteLine($"WARP {cases} cases passed; worst-channel-error={worst}; software D3D11, no hardware FPS, no WPF-present measurement.");
