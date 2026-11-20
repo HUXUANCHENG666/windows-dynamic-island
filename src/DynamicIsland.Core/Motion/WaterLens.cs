@@ -10,9 +10,10 @@ public static class WaterLens
 {
     public const double Magnification = 1.18;
     /// <summary>从岛内多少倍边带开始混向边缘折射。</summary>
-    public const double BlendStartBands = 1.15;
+    public const double BlendStartBands = 2.0; // 约 9 DIP 内渐隐，避免在边带内沿只剩 1～2 像素的硬缝
     /// <summary>混到纯边缘折射的位置（负边带的很小一部分，靠近外沿）。</summary>
-    public const double BlendEndBands = 0.08;
+    /// <summary>在边带内沿（-band）结束混合，9 DIP 轮廓折射带由原边缘路径单独绘制。</summary>
+    public const double BlendEndBands = 1.0;
 
     public static void Map(double x, double y, double w, double h, double radius, double dpi,
         double distance, LiquidOpticsFrame optics, double slopeX, double slopeY, double surface,
@@ -29,6 +30,7 @@ public static class WaterLens
         double blend = IslandOutline.Smootherstep(-BlendStartBands * band, -BlendEndBands * band, distance);
         double bx = x - nx * contraction + (dx - x) * 0.18 * (1 - blend);
         double by = y - ny * contraction + (dy - y) * 0.18 * (1 - blend);
+        double lensAlpha = 0.96 * (1 - blend);
         if (blend <= 0)
         {
             u = pad + bx;
@@ -43,6 +45,6 @@ public static class WaterLens
         double ey = y + normal.Ny * (depth - distance) + slopeY / (1 + Math.Abs(slopeY)) * LiquidRefraction.SlopeWarp * dpi;
         u = pad + bx + (ex - bx) * blend;
         v = pad + by + (ey - by) * blend;
-        alpha = (0.96 - 0.18 * blend) * Math.Clamp(0.5 - distance, 0, 1);
+        alpha = lensAlpha;
     }
 }

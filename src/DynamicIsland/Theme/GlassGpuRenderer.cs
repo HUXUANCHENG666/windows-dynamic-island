@@ -745,18 +745,18 @@ float4 WaterColor(float2 p, float distance, float2 slope, float surface)
     float2 center=float2(IslandW,IslandH)*0.5;
     float2 n=(p-center)/center;
     float dome=max(0,(1-n.x*n.x)*(1-n.y*n.y));
-    float contraction=(1-1/max(LensMagnification,1.01))*dome*dome;
+    float contraction=(1-1/1.18)*dome*dome; // WaterLens.Magnification
     float2 lagScale=clamp(float2(LagScaleX,LagScaleY),0.25,4);
     float2 strain=clamp((p-center)*(1/lagScale-1),-56*Dpi,56*Dpi);
     float2 displacement=-float2(LagX,LagY)+strain+slope/(1+abs(slope))*InteriorWarp*Dpi;
     float band=RimBand(IslandW,IslandH);
-    float blend=Smootherstep(-LensBlendStart*band,-LensBlendEnd*band,distance);
+    float blend=Smootherstep(-2.0*band,-band,distance); // WaterLens.BlendStart/EndBands, ends at inner rim
     float2 b=p-(p-center)*contraction+displacement*0.18*(1-blend);
     float along=Smootherstep(0,1,1+distance/band);
     float depth=(4+3.5*along+clamp(surface,-1,1)*HeightWarp)*Dpi;
     float2 edge=p+NormalOf(p,IslandW,IslandH,Radius)*(depth-distance)+slope/(1+abs(slope))*SlopeWarp*Dpi;
     float4 c=SamplePad(Pad+lerp(b,edge,blend));
-    float a=(0.96-0.16*blend)*saturate(0.5-distance)*c.a;
+    float a=0.96*(1-blend)*c.a;
     float4 shade=ShadeColor(p,surface);
     return float4(c.rgb,1)*a+shade*(1-a);
 }
@@ -771,7 +771,8 @@ float4 PSMain(VSOut i) : SV_Target
     if (distance >= 0.5) return 0;
     float slopeX, slopeY;
     float surface = SampleField(uv, slopeX, slopeY);
-    if (HasPad > 0.5 && InteriorLive > 0.5) return WaterColor(p,distance,float2(slopeX,slopeY),surface);
+    if (HasPad > 0.5 && InteriorLive > 0.5 && distance <= -RimBand(IslandW, IslandH))
+        return WaterColor(p,distance,float2(slopeX,slopeY),surface);
     if (distance <= -RimBand(IslandW, IslandH))
     {
         if (HasPad < 0.5 || InteriorGain < 0.01) return 0;

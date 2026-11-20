@@ -38,22 +38,45 @@ public class WaterLensTests
         // 内部采样点被拉向中心：水滴放大。
         Assert.InRange(200 - mid.U, 4, 20);
         Assert.True(mid.Distance < -WaterLens.BlendStartBands * band);
+        Assert.InRange(mid.A, 0.9, 0.97);
 
-        double rimX = W - 2.5;
-        var rim = Map(rimX, 70);
-        Assert.InRange(rim.Distance, -band, 0.4);
-        // 边缘带向外折射，与内部收缩方向相反。
-        Assert.True(rim.U > rimX);
-        Assert.True(mid.U < 200);
-        Assert.True(rim.A < mid.A);
+        // 透镜在边带内沿收束，9 DIP 轮廓折射由原边缘路径负责。
+        var atInnerRim = Map(W / 2.0, band + 0.5);
+        Assert.True(atInnerRim.A < 0.35);
 
-        double previous = Map(160, 70).U;
-        for (double x = 160.1; x < W - 0.6; x += 0.1)
+        int[] source = new int[(W + 2 * P) * (H + 2 * P)], pixels = new int[W * H];
+        for (int y = 0; y < H + 2 * P; y++)
+        for (int x = 0; x < W + 2 * P; x++)
         {
-            double u = Map(x, 70).U;
-            Assert.InRange(u - previous, -0.000001, 0.85);
-            previous = u;
+            int v = ((x - P) / 10 & 1) == 0 ? 0x28 : 0xD8;
+            source[y * (W + 2 * P) + x] = unchecked((int)0xFF000000) | (v << 16) | (v << 8) | v;
         }
+        GlassCpuRenderer.Render(pixels, W, H, W, H, R, 1, null, source, W, H, R, liveInterior: true);
+        Assert.True(InteriorOpaque(pixels, W, H));
+        Assert.True(RimOpaque(pixels, W, H));
+
+        int interior = Unpremultiply(pixels[(H / 2) * W + W / 2]);
+        int rim = Unpremultiply(pixels[(H / 2) * W + 3]);
+        // 条纹垫边：中心放大与贴边折射取到的相位/亮度不应完全一样。
+        Assert.NotEqual(interior, rim);
+
+        // 只检查透镜收束到边带内沿这一段；外轮廓本身的月牙高光可以在近边缘较快升起。
+        int? previous = null;
+        for (int x = W / 2; x < W - 1; x++)
+        {
+            double d = IslandOutline.SignedDistance(x + 0.5, H / 2 + 0.5, W, H, R);
+            if (d < -2.1 * band || d > -0.85 * band) { previous = null; continue; }
+            int a = (int)((uint)pixels[(H / 2) * W + x] >> 24);
+            if (previous is int last) Assert.InRange(a - last, -55, 55);
+            previous = a;
+        }
+    }
+
+    static int Unpremultiply(int c)
+    {
+        int a = (int)((uint)c >> 24);
+        if (a <= 0) return 0;
+        return (int)Math.Round(((c >> 16) & 255) * 255.0 / a);
     }
 
     [Fact]

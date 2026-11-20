@@ -28,7 +28,7 @@ public static class GlassCpuRenderer
             field?.SampleSlope(px / w, py / h, out height, out sx, out sy);
             int shade = distance <= -band ? 0 : IslandOutline.ShadeArgb(px, py, w, h, radius, height, dpi);
             int c = 0; double u = 0, v = 0, alpha = 0;
-            if (liveInterior && padPixels != null)
+            if (liveInterior && padPixels != null && distance <= -band)
             {
                 WaterLens.Map(px, py, w, h, radius, dpi, distance, optics, sx, sy, height, out u, out v, out alpha);
                 c = GlassSample.Footprint(padPixels, sourceW + 2 * Pad, sourceH + 2 * Pad, u, v,
