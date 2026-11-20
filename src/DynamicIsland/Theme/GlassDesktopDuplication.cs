@@ -16,7 +16,7 @@ sealed class GlassDesktopDuplication : IDisposable
     ID3D11Device? _device;
     ID3D11DeviceContext? _context;
     IDXGIOutputDuplication? _dup;
-    ID3D11Texture2D? _staging;
+    ID3D11Texture2D? _staging, _desktop;
     int _outputLeft, _outputTop, _outputRight, _outputBottom;
     int _stageW, _stageH;
     DateTime _retry;
@@ -37,49 +37,53 @@ sealed class GlassDesktopDuplication : IDisposable
             if (_dup == null || _device == null || _context == null)
                 return false;
 
-            Result acquired = _dup.AcquireNextFrame(50, out _, out IDXGIResource? resource);
-            if (acquired.Failure || resource == null)
+            // Zero-timeout latest-desktop acquisition: unchanged desktop is not a failed frame.
+            Result acquired = _dup.AcquireNextFrame(0, out _, out IDXGIResource? resource);
+            if (acquired.Success && resource != null)
             {
-                // 无新帧不算设备死亡；让调用方继续用 BitBlt。
-                if (resource != null) resource.Dispose();
-                return false;
-            }
-            try
-            {
-                using var texture = resource.QueryInterface<ID3D11Texture2D>();
-                int srcX = destLeft - _outputLeft, srcY = destTop - _outputTop;
-                if (srcX < 0 || srcY < 0 || srcX + destW > _outputRight - _outputLeft || srcY + destH > _outputBottom - _outputTop)
-                    return false;
-                EnsureStaging(destW, destH);
-                if (_staging == null)
-                    return false;
-                var box = new Box(srcX, srcY, 0, srcX + destW, srcY + destH, 1);
-                _context.CopySubresourceRegion(_staging, 0, 0, 0, 0, texture, 0, box);
-                MappedSubresource mapped = _context.Map(_staging, 0, MapMode.Read, MapFlags.None);
                 try
                 {
-                    unsafe
+                    using var texture=resource.QueryInterface<ID3D11Texture2D>();
+                    if (_desktop == null)
                     {
-                        byte* rows = (byte*)mapped.DataPointer;
-                        int pitch = (int)mapped.RowPitch;
-                        for (int y = 0; y < destH; y++)
-                        {
-                            int* src = (int*)(rows + y * pitch);
-                            int destRow = y * destStride;
-                            for (int x = 0; x < destW; x++)
-                                dest[destRow + x] = src[x] | unchecked((int)0xFF000000);
-                        }
+                        var desc=texture.Description;
+                        // Owned GPU copy remains valid after ReleaseFrame; never retain the borrowed resource.
+                        desc.Usage=ResourceUsage.Default; desc.BindFlags=BindFlags.None;
+                        desc.CPUAccessFlags=CpuAccessFlags.None; desc.MiscFlags=ResourceOptionFlags.None;
+                        _desktop=_device.CreateTexture2D(desc);
+                    }
+                    _context.CopyResource(_desktop,texture);
+                }
+                finally { resource.Dispose(); _dup.ReleaseFrame(); }
+            }
+            else
+            {
+                resource?.Dispose();
+                if (acquired.Code != unchecked((int)0x887A0027)) // DXGI_ERROR_WAIT_TIMEOUT
+                    acquired.CheckError(); // device/access loss clears cached desktop in catch
+                if (_desktop == null) return false;
+            }
+            int srcX=destLeft-_outputLeft, srcY=destTop-_outputTop;
+            EnsureStaging(destW,destH);
+            if (_staging == null || _desktop == null) return false;
+            _context.CopySubresourceRegion(_staging,0,0,0,0,_desktop,0,new Box(srcX,srcY,0,srcX+destW,srcY+destH,1));
+            MappedSubresource mapped=_context.Map(_staging,0,MapMode.Read,MapFlags.None);
+            try
+            {
+                unsafe
+                {
+                    byte* rows=(byte*)mapped.DataPointer;
+                    for(int y=0;y<destH;y++)
+                    {
+                        int* src=(int*)(rows+y*(int)mapped.RowPitch);
+                        for(int x=0;x<destW;x++) dest[y*destStride+x]=src[x] | unchecked((int)0xFF000000);
                     }
                 }
-                finally { _context.Unmap(_staging, 0); }
-                return true;
             }
-            finally
-            {
-                resource.Dispose();
-                _dup.ReleaseFrame();
-            }
+            finally { _context.Unmap(_staging,0); }
+            return true;
         }
+
         catch
         {
             DisposeDevice();
@@ -114,6 +118,9 @@ sealed class GlassDesktopDuplication : IDisposable
             using (output)
             {
                 var rect = output.Description.DesktopCoordinates;
+                // Rotation needs a separate coordinate transform; prefer correct GDI fallback to rotated pixels.
+                if ((int)output.Description.Rotation != 1 || (long)(rect.Right-rect.Left)*(rect.Bottom-rect.Top)>16_777_216)
+                    continue; // owned desktop texture cap 64 MiB (BGRA8)
                 if (left < rect.Left || top < rect.Top || right > rect.Right || bottom > rect.Bottom)
                     continue;
                 using var output1 = output.QueryInterfaceOrNull<IDXGIOutput1>();
@@ -144,14 +151,14 @@ sealed class GlassDesktopDuplication : IDisposable
     {
         if (_device == null)
             return;
-        if (_staging != null && _stageW == w && _stageH == h)
+        if (_staging != null && _stageW >= w && _stageH >= h)
             return;
         _staging?.Dispose();
         _staging = null;
         var desc = new Texture2DDescription
         {
-            Width = (uint)w,
-            Height = (uint)h,
+            Width = (uint)(((w+63)/64)*64),
+            Height = (uint)(((h+63)/64)*64),
             MipLevels = 1,
             ArraySize = 1,
             Format = Format.B8G8R8A8_UNorm,
@@ -162,12 +169,13 @@ sealed class GlassDesktopDuplication : IDisposable
             MiscFlags = ResourceOptionFlags.None
         };
         _staging = _device.CreateTexture2D(desc);
-        _stageW = w;
-        _stageH = h;
+        _stageW = (int)desc.Width;
+        _stageH = (int)desc.Height;
     }
 
     void DisposeDup()
     {
+        _desktop?.Dispose(); _desktop=null;
         _dup?.Dispose();
         _dup = null;
         _staging?.Dispose();

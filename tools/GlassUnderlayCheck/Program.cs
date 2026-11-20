@@ -105,15 +105,38 @@ try
             using var dda = new GlassDesktopDuplication();
             int[] dup = new int[OverlayW * OverlayH];
             bool ok = dda.TryCapture(x, y, OverlayW, OverlayH, dup, OverlayW);
+            for(int retry=0;!ok && retry<10;retry++) { Thread.Sleep(5); ok=dda.TryCapture(x,y,OverlayW,OverlayH,dup,OverlayW); }
             Console.WriteLine($"dda-acquire={ok}");
             if (ok)
+            {
                 Report("dda-exclude", dup, OverlayColor, BackColor);
+                int center=dup[dup.Length/2];
+                Array.Clear(dup);
+                if (!dda.TryCapture(x,y,OverlayW,OverlayH,dup,OverlayW)) throw new Exception("DDA unchanged desktop lost its current snapshot");
+                Console.WriteLine($"dda-unchanged same-center={dup[dup.Length/2]==center}");
+                if (dup[dup.Length/2]!=center) throw new Exception("DDA unchanged snapshot mismatch");
+                if (center==BackColor)
+                {
+                    const int changed=unchecked((int)0xFF2255D4);
+                    SetWindowLongPtr(back,-21,new IntPtr(changed));
+                    InvalidateRect(back,IntPtr.Zero,true); FillWindow(back,changed); Pump(4);
+                    bool updated=false;
+                    for(int retry=0;retry<100;retry++)
+                    {
+                        Thread.Sleep(5); Pump(1);
+                        if(dda.TryCapture(x,y,OverlayW,OverlayH,dup,OverlayW) && dup[dup.Length/2]==changed) { updated=true; break; }
+                    }
+                    Console.WriteLine($"dda-current-update={updated}");
+                    if(!updated) throw new Exception("DDA retained old pixels after the live desktop changed");
+                }
+            }
             else
                 Console.WriteLine("dda-exclude result=unavailable (not a failure of the harness)");
         }
         catch (Exception ex)
         {
             Console.WriteLine($"dda-exclude result=error type={ex.GetType().Name}");
+            throw;
         }
     }
     else

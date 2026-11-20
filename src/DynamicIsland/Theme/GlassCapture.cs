@@ -6,10 +6,11 @@ using DynamicIsland.Native;
 
 namespace DynamicIsland.Visuals;
 
-sealed class CapturedPad(int[] pixels, int w, int h, int left, int top, double radius, double dpi, bool hasLiveInterior = false, long started = 0) : IDisposable
+sealed class CapturedPad(int[] pixels, int w, int h, int left, int top, double radius, double dpi, bool hasLiveInterior = false, long started = 0, bool duplication = false) : IDisposable
 {
     static long _nextId;
     public readonly long Started = started;
+    public readonly bool Duplication = duplication;
     public readonly long Id = Interlocked.Increment(ref _nextId);
     int _references = 1;
     public readonly int[] Pixels = pixels;
@@ -32,12 +33,22 @@ sealed class GlassCapture : IDisposable
         long started = Stopwatch.GetTimestamp();
         const int pad = GlassRefractionBuffer.Pad;
         int pw = visualW + pad * 2, ph = visualH + pad * 2;
-        if (_screen == IntPtr.Zero) _screen = NativeMethods.CreateDC("DISPLAY", null, null, IntPtr.Zero);
-        IntPtr screen = _screen;
-        if (screen == IntPtr.Zero) return null;
         int[]? rented = null;
         try
         {
+            if (allowLiveInterior)
+            {
+                rented=ArrayPool<int>.Shared.Rent(pw*ph);
+                if (_duplication.TryCapture(visualLeft-pad,visualTop-pad,pw,ph,rented,pw) &&
+                    DynamicIsland.Core.Motion.GlassUnderlay.ShouldKeepInterior(DynamicIsland.Core.Motion.GlassUnderlay.Classify(rented,pw,ph,visualW,visualH,pad,radius)))
+                {
+                    var livePad=new CapturedPad(rented,visualW,visualH,visualLeft,visualTop,radius,dpi,true,started,true);
+                    rented=null; return livePad;
+                }
+            }
+            if (_screen == IntPtr.Zero) _screen = NativeMethods.CreateDC("DISPLAY", null, null, IntPtr.Zero);
+            IntPtr screen = _screen;
+            if (screen == IntPtr.Zero) return null;
             if (_dc == IntPtr.Zero || _width < pw || _height < ph)
             {
                 DisposeGdi();
@@ -58,7 +69,7 @@ sealed class GlassCapture : IDisposable
             // 圆角外、矩形内的真实桌面也要捕获；随后仅排除真正的当前圆角岛。
             if (!NativeMethods.BitBlt(_dc, 0, 0, pw, ph, screen, visualLeft - pad, visualTop - pad, NativeMethods.SRCCOPY))
             { NativeMethods.DeleteDC(_screen); _screen = IntPtr.Zero; return null; }
-            int[] dest = rented = ArrayPool<int>.Shared.Rent(pw * ph);
+            int[] dest = rented ??= ArrayPool<int>.Shared.Rent(pw * ph);
             for (int y = 0; y < ph; y++)
                 Marshal.Copy(_bits + y * _width * 4, dest, y * pw, pw);
             bool live = false;
@@ -66,12 +77,6 @@ sealed class GlassCapture : IDisposable
             {
                 StampOpaque(dest, pw, ph);
                 var kind = DynamicIsland.Core.Motion.GlassUnderlay.Classify(dest, pw, ph, visualW, visualH, pad, radius);
-                if (!DynamicIsland.Core.Motion.GlassUnderlay.ShouldKeepInterior(kind))
-                {
-                    // BitBlt 在 Win8+ 常仍带上分层窗，或给出黑块：再试 Desktop Duplication。
-                    if (_duplication.TryCapture(visualLeft - pad, visualTop - pad, pw, ph, dest, pw))
-                        kind = DynamicIsland.Core.Motion.GlassUnderlay.Classify(dest, pw, ph, visualW, visualH, pad, radius);
-                }
                 live = DynamicIsland.Core.Motion.GlassUnderlay.ShouldKeepInterior(kind);
             }
             if (!live)

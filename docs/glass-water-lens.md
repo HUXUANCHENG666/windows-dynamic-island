@@ -32,3 +32,9 @@
 仍需用户硬件实测：真实桌面流畅度、驱动/多屏/保护内容、WPF/显示器实际呈现、快速拖动时的丢帧。目标 16.67ms，但没有声称在未测机器达到 60fps。超预算或捕获失败时可暂时退透明，而不是滞后拉伸截图。
 
 CI 首轮扩展 WARP 覆盖发现 200% DPI、宽 420 DIP、缩放 1.08 时的真实缺陷：五 tap 在实际捕获边界附近越入较大的复用纹理桶，GPU 混进桶内空像素而 CPU 已 clamp 到内容边界（最大通道差 27）。已把 GPU 每个 tap 的 clamp 改为实际 SrcW/SrcH，保留该边界回归，不放宽 4/255 阈值。
+
+## CI 进一步定位：不能只改调度
+
+60eb935 的实际 CI 全链路给出 capture p95=30.99ms、worker=33.43ms、capture-to-ui=35.54ms、UI submit=25.6/s（非显示 FPS）。这暴露 BitBlt 才是该 runner 的主瓶颈，因此没有停在“调度变快”的假设上：现优先持续复用 DDA output、零超时 AcquireNextFrame；无新桌面帧是“当前桌面未改变”，复用最近发布的整张 GPU 桌面而非截图拼贴。只在新 desktop update 到来时 CopyResource；每次只读回岛附近 ROI，输出仍用同一 UV/CPU/GPU 路径。DDA staging 改为增长桶，展开不再每像素重建。
+
+为在 ReleaseFrame 后合法使用当前桌面，持有一张自己拥有的 GPU copy（最多 16,777,216 BGRA8 像素 / 64 MiB）；切输出或设备/访问丢失即销毁，绝不在错误后沿用。无新帧 timeout 才可复用。旋转屏、跨输出 ROI、超 64MiB 桌面、DDA 不支持/失败/黑块 → 复用 GDI DC 的 BitBlt → 非 Live 则挖洞透明。没有强行 GPU-only 改写 WPF 呈现。日志额外计数 capture-dda / capture-gdi；探针对“无更新仍正确”和“底层变色立即换当前桌面”做回归。此额外 GPU copy 的内存与旋转屏回退是明确限制，Windows CI 性能仍不能等同用户硬件。

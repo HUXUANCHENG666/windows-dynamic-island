@@ -21,13 +21,14 @@ sealed class GlassDiagnostics
     readonly double[][] _times = Enumerable.Range(0, 7).Select(_ => new double[256]).ToArray();
     readonly int[] _count = new int[7];
     long _start = Stopwatch.GetTimestamp();
+    int _dda, _gdi;
     int _completed, _gpu, _cpu, _ui, _capture, _busy, _gpuBusy, _replaced, _failed, _discarded;
     public void Time(int stage, long start)
     {
         double ms = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
         lock (_gate) { _times[stage][_count[stage]++ % 256] = ms; }
     }
-    public void Capture(bool ok) { lock (_gate) { if (ok) _capture++; else _failed++; } }
+    public void Capture(bool ok, bool dda = false) { lock (_gate) { if (ok) { _capture++; if(dda) _dda++; else _gdi++; } else _failed++; } }
     public void Completed(bool gpu) { lock (_gate) { _completed++; if (gpu) _gpu++; else _cpu++; } }
     public void Ui() { lock (_gate) _ui++; }
     public void Busy() { lock (_gate) _busy++; }
@@ -48,9 +49,10 @@ sealed class GlassDiagnostics
                 Array.Sort(copy); return copy[(int)Math.Ceiling(count * 0.95) - 1];
             }
             string s = $"glass completed/s={_completed / seconds:F1} ui-submit/s={_ui / seconds:F1} capture/s={_capture / seconds:F1} "
-                + $"path gpu={_gpu} cpu={_cpu} p95-ms capture={P95(0):F2} render-worker={P95(1):F2} ui-write={P95(2):F2} gpu-submit-poll={P95(3):F2} capture-to-ui-age={P95(4):F2} gpu-poll-readback={P95(5):F2} ready-to-ui-age={P95(6):F2} "
+                + $"path gpu={_gpu} cpu={_cpu} capture-dda={_dda} capture-gdi={_gdi} p95-ms capture={P95(0):F2} render-worker={P95(1):F2} ui-write={P95(2):F2} gpu-submit-poll={P95(3):F2} capture-to-ui-age={P95(4):F2} gpu-poll-readback={P95(5):F2} ready-to-ui-age={P95(6):F2} "
                 + $"skips render-busy={_busy} gpu-busy={_gpuBusy} replaced={_replaced} discarded={_discarded} capture-fail={_failed} presented-fps=unknown";
             _completed = _gpu = _cpu = _ui = _capture = _busy = _gpuBusy = _replaced = _failed = _discarded = 0;
+            _dda = _gdi = 0;
             Array.Clear(_count); _start = Stopwatch.GetTimestamp(); return s;
         }
     }

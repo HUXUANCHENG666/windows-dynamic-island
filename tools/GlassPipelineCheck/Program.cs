@@ -35,7 +35,7 @@ internal static class Program
         timer.Start(); Dispatcher.Run();
         buffer.FrameReady=null;
         buffer.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        Console.WriteLine($"PIPELINE runner-desktop ticks={ticks} ui-submits={submitted} elapsed-ms={elapsed.Elapsed.TotalMilliseconds:F1}; synthetic resize/clear/exit; not user hardware FPS");
+        Console.WriteLine($"PIPELINE runner-desktop ticks={ticks} ui-changes-including-clear={submitted} elapsed-ms={elapsed.Elapsed.TotalMilliseconds:F1}; synthetic resize/clear/exit; not user hardware FPS");
         if(submitted<5) throw new Exception("Pipeline produced too few UI submissions.");
     }
 }

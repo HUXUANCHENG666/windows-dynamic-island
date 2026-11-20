@@ -195,7 +195,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
                 else frame?.Dispose();
                 _captureBusy = false;
             }
-            _stats.Time(0, start); _stats.Capture(ok);
+            _stats.Time(0, start); _stats.Capture(ok, frame?.Duplication ?? false);
         });
         return true;
         }
