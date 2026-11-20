@@ -25,7 +25,7 @@ public static class GlassWork
 
     public const int IdleOutputLongSide = 640;
     public const int MovingOutputLongSide = 640;
-    public const int CpuLiveOutputLongSide = 480; // full interior five-tap cost: bound CPU fallback
+    public const int CpuLiveOutputLongSide = 384; // full interior five-tap cost: bound CPU fallback
     public const int GpuOutputLongSide = 1024;
 
     /// <summary>有可用显卡时优先走 GPU 折射和高光。</summary>

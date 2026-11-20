@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 using DynamicIsland.Core.Island;
 using DynamicIsland.Core.Motion;
 using SharpGen.Runtime;
@@ -285,6 +286,29 @@ sealed class GlassGpuRenderer : IDisposable
         }
     }
 
+    SafeWaitHandle? _pollTimer;
+    bool _timerAttempted;
+    // Worker only. A private high-resolution timer avoids Task.Delay(1)'s measured ~15ms quantum.
+    // No timeBeginPeriod/global timer-resolution change, no spin, at most two 1ms waits per render.
+    public bool WaitForReadbackProbe()
+    {
+        if (!_timerAttempted)
+        {
+            _timerAttempted=true;
+            _pollTimer=CreateWaitableTimerEx(IntPtr.Zero,null,2,0x00100002); // HIGH_RESOLUTION; SYNCHRONIZE|MODIFY_STATE
+        }
+        if (_pollTimer == null || _pollTimer.IsInvalid) return false;
+        long due=-10_000;
+        return SetWaitableTimer(_pollTimer,ref due,0,IntPtr.Zero,IntPtr.Zero,false) && WaitForSingleObject(_pollTimer,8)==0;
+    }
+    [DllImport("kernel32.dll",EntryPoint="CreateWaitableTimerExW",CharSet=CharSet.Unicode)]
+    static extern SafeWaitHandle CreateWaitableTimerEx(IntPtr attributes,string? name,uint flags,uint access);
+    [DllImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool SetWaitableTimer(SafeWaitHandle timer,ref long due,int period,IntPtr callback,IntPtr arg,[MarshalAs(UnmanagedType.Bool)] bool resume);
+    [DllImport("kernel32.dll")]
+    static extern uint WaitForSingleObject(SafeWaitHandle handle,uint milliseconds);
+
     void WriteConstants(in GpuConstants data)
     {
         MappedSubresource mapped = _context!.Map(_constants!, 0, MapMode.WriteDiscard, MapFlags.None);
@@ -459,6 +483,7 @@ sealed class GlassGpuRenderer : IDisposable
 
     public void Dispose()
     {
+        _pollTimer?.Dispose(); _pollTimer=null;
         _disposed = true;
         _lost = true;
         _frame?.Dispose(); _frame = null;

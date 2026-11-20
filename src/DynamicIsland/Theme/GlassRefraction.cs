@@ -76,13 +76,13 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
                         if (pad != null && !GlassFrameGeometry.IsFresh(Stopwatch.GetElapsedTime(pad.Started).TotalMilliseconds))
                         { pad.Dispose(); pad = null; }
                         frame = Render(pad, w, h, radius, surface == null ? null : _field, moving, dpi, left, top, start, scaleX, scaleY, optics);
-                        // Bounded nonblocking staging polls on worker: avoid the old compulsory next UI-tick wait.
+                        // Bounded nonblocking staging probes; only the worker can wait on its private timer.
                         for (int i = 0; _gpu != null && i < 3; i++)
                         {
-                            await Task.Delay(1).ConfigureAwait(false);
                             long poll = Stopwatch.GetTimestamp();
                             var newer = _gpu.PollFrame(); _stats.Time(5, poll);
                             if (newer != null) { frame?.Dispose(); frame = newer; break; }
+                            if (i == 2 || !_gpu.WaitForReadbackProbe()) break;
                         }
                     }
                     catch (Exception ex)

@@ -38,3 +38,9 @@ CI 首轮扩展 WARP 覆盖发现 200% DPI、宽 420 DIP、缩放 1.08 时的真
 60eb935 的实际 CI 全链路给出 capture p95=30.99ms、worker=33.43ms、capture-to-ui=35.54ms、UI submit=25.6/s（非显示 FPS）。这暴露 BitBlt 才是该 runner 的主瓶颈，因此没有停在“调度变快”的假设上：现优先持续复用 DDA output、零超时 AcquireNextFrame；无新桌面帧是“当前桌面未改变”，复用最近发布的整张 GPU 桌面而非截图拼贴。只在新 desktop update 到来时 CopyResource；每次只读回岛附近 ROI，输出仍用同一 UV/CPU/GPU 路径。DDA staging 改为增长桶，展开不再每像素重建。
 
 为在 ReleaseFrame 后合法使用当前桌面，持有一张自己拥有的 GPU copy（最多 16,777,216 BGRA8 像素 / 64 MiB）；切输出或设备/访问丢失即销毁，绝不在错误后沿用。无新帧 timeout 才可复用。旋转屏、跨输出 ROI、超 64MiB 桌面、DDA 不支持/失败/黑块 → 复用 GDI DC 的 BitBlt → 非 Live 则挖洞透明。没有强行 GPU-only 改写 WPF 呈现。日志额外计数 capture-dda / capture-gdi；探针对“无更新仍正确”和“底层变色立即换当前桌面”做回归。此额外 GPU copy 的内存与旋转屏回退是明确限制，Windows CI 性能仍不能等同用户硬件。
+
+### 再次测量后的节拍修正
+
+188ffd7 在另一 CI runner 观察：DDA capture p95=1.04ms（386 次 DDA、1 次 GDI），但 worker p95=15.87ms、采集到 UI=16.27ms，UI submit=37.3/s。瓶颈已转到 Task.Delay(1) 的粗粒度唤醒/runner 的 DispatcherTimer 节拍，不能据此声称 60fps。最终用公开 [CreateWaitableTimerExW HIGH_RESOLUTION](https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-createwaitabletimerexw) 的私有单次 1ms 等待代替 Task.Delay；只在后台最多等待两次，不自旋、不改变全系统 timer resolution；不支持时跳过等待、下一 tick 再取，句柄随 GPU 退出释放。UI 始终不等待。
+
+同轮 Windows CPU 合成 480×210 p95=21.932ms，仍超预算，因此最终 CPU Live 长边进一步有界到 **384**（算法和 UV 不变，精细文字在 CPU 回退下可能比 GPU 软）；上文 480 的数字为调优过程，不是最终上限。最终 run 日志是交付指标。所有窗口/动画、翻译、设置和正式版号不变。
