@@ -26,6 +26,8 @@ jobs:
       - name: Compile embedded glass GPU shaders
         shell: pwsh
         run: ./build/check-glass-shader.ps1
+      - name: Validate D3D11 shader pixels with headless WARP (not hardware FPS)
+        run: dotnet run --project tools/GlassGpuCheck/GlassGpuCheck.csproj -c Release --property:WarningLevel=9999 --property:TreatWarningsAsErrors=true
       - name: Publish self-contained exe
         shell: bash
         run: ./build/publish.sh "${{ runner.temp }}/publish"

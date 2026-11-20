@@ -1,3 +1,4 @@
+using DynamicIsland.Core.Geometry;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Windows;
@@ -66,7 +67,7 @@ public partial class IslandWindow : Window
     readonly Stopwatch _dragClock = Stopwatch.StartNew();
     readonly LiquidBounce _bounce = new();
     readonly LiquidSurface _liquid = new();
-    double _pillRadius;
+    GlassGeometry _glassGeometry;
     readonly GlassRefractionBuffer _refraction = new();
     DateTime _lastCaptureUtc;
     bool _liquidWasMoving;
@@ -110,7 +111,7 @@ public partial class IslandWindow : Window
     public string? ForeignProcess { get; private set; }
     public bool CameraIsOpen => _deviceOpen || _director.CameraOpen || _director.Mode == IslandMode.Camera;
     public bool LiveTranslateIsOpen => _liveTranslate.IsRunning || _director.LiveTranslateOpen || _director.Mode == IslandMode.LiveTranslate;
-    public StreamGeometry? HitGeometry { get; set; }
+    public Geometry? HitGeometry { get; set; }
     public StreamGeometry? SlopGeometry { get; set; }
 
     public IslandWindow(DynamicIsland.Core.Settings.AppSettings settings)
@@ -440,7 +441,7 @@ public partial class IslandWindow : Window
 
     internal void DecorateGlass(Geometry geometry, double width, double height, double radius)
     {
-        _pillRadius = radius > 0 ? radius : Math.Min(width, height) * 0.5;
+        _glassGeometry = new GlassGeometry(width, height, radius > 0 ? radius : Math.Min(width, height) * 0.5);
         bool motion = AppearancePolicy.ParseSkin(Settings.IslandSkin) == IslandSkin.Glass
             && _director.Expanded
             && !_director.ShowAsDot
@@ -963,7 +964,7 @@ public partial class IslandWindow : Window
             return;
         }
 
-        double radius = _pillRadius > 0 ? _pillRadius : Math.Min(pillW, pillH) * 0.5;
+        double radius = _glassGeometry.SafeRadius > 0 ? _glassGeometry.SafeRadius : Math.Min(pillW, pillH) * 0.5;
         double dpi = Math.Max(0.5, CurrentDpi());
         int pillLeft = rect.Left + (int)Math.Round(left * dpi);
         int pillTop = rect.Top + (int)Math.Round(top * dpi);
@@ -977,7 +978,7 @@ public partial class IslandWindow : Window
         int visualTop = pillTop + (int)Math.Round(originY * pillH * (1 - scaleY) * dpi);
 
         // 先用当前流体和上一帧周围图出画面，不等待 BitBlt。
-        if (_refraction.TryPresent(pillWidth, pillHeight, radius * dpi, _liquid, moving))
+        if (_refraction.TryPresent(pillWidth, pillHeight, radius * dpi, _liquid, moving, dpi, visualLeft, visualTop, visualW / (double)pillWidth, visualH / (double)pillHeight))
             GlassSkin.UpdateRefraction(this, _refraction.Image, _refraction.Shade, _refraction.GpuImage);
 
         double age = _lastCaptureUtc == default
@@ -987,7 +988,7 @@ public partial class IslandWindow : Window
             return;
 
         _lastCaptureUtc = DateTime.UtcNow;
-        _refraction.TryBeginCapture(pillLeft, pillTop, pillWidth, pillHeight, visualLeft, visualTop, visualW, visualH, ok =>
+        _refraction.TryBeginCapture(pillLeft, pillTop, pillWidth, pillHeight, visualLeft, visualTop, visualW, visualH, radius * dpi, dpi, ok =>
         {
             if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
                 return;
@@ -1063,7 +1064,9 @@ public partial class IslandWindow : Window
             && GlassHost.Visibility == Visibility.Visible
             && !_liquid.IsSettled;
         bool motion = _dragging || _throwActive || _gliding || !_bounce.IsSettled || glassRipple;
-        bool animate = motion || EffectsPolicy.UseHighFrameRate(expanded, transitioning, waveform);
+        bool glass = AppearancePolicy.ParseSkin(Settings.IslandSkin) == IslandSkin.Glass
+            && GlassHost.Visibility == Visibility.Visible;
+        bool animate = glass || motion || EffectsPolicy.UseHighFrameRate(expanded, transitioning, waveform);
         if (animate && !_renderLive)
         {
             _renderLive = true;
@@ -1080,8 +1083,6 @@ public partial class IslandWindow : Window
             });
         }
 
-        bool glass = AppearancePolicy.ParseSkin(Settings.IslandSkin) == IslandSkin.Glass
-            && GlassHost.Visibility == Visibility.Visible;
         bool slow = _director.HasScheduledWork || _timer.IsRunning || waveform || clock || _director.Mode == IslandMode.Timer || glass;
         if ((slow || animate) && !_slowLive)
         {

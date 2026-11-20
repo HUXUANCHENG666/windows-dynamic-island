@@ -1,8 +1,10 @@
+using DynamicIsland.Core.Geometry;
+
 namespace DynamicIsland.Core.Motion;
 
 /// <summary>
-/// 周围画面的取色：始终做双线性插值，颜色交界是渐变而不是硬切。
-/// 屏幕捕获常常没有 alpha，有颜色的像素按不透明处理。
+/// 周围画面的取色：局部五 tap 双线性、RGB 同位，捕获 alpha 为有效性掩码。
+/// 生产捕获在入口将有效像素（包括黑色）标为 FF；Prepare/Bilinear 保留为旧输入兼容。
 /// </summary>
 public static class GlassSample
 {
@@ -59,16 +61,29 @@ public static class GlassSample
     // 每点 5 个局部双线性 tap（中心 + 十字 0.65px），所有通道共用权重。
     public const double TapRadius = 0.65;
     public static int Footprint(int[] pixels, int width, int height, double u, double v,
-        int sourceW, int sourceH, int targetW, int targetH, int pad)
+        int sourceW, int sourceH, int targetW, int targetH, int pad, double sourceRadius = -1,
+        double dpi = 1, double shiftX = 0, double shiftY = 0, bool screenCoordinates = false, double scaleX = 1, double scaleY = 1)
     {
         if (width < 1 || height < 1 || pixels.Length < (long)width * height) return 0;
-        (u, v) = MapPad(u, v, sourceW, sourceH, targetW, targetH, pad);
-        (u, v) = SafePadPoint(u, v, sourceW, sourceH, pad);
+        if (screenCoordinates)
+        {
+            u = pad + (u - pad) * scaleX + shiftX;
+            v = pad + (v - pad) * scaleY + shiftY;
+            if (u < 0 || v < 0 || u > width - 1 || v > height - 1) return 0;
+            // 旧捕获洞里的背景未知：不把点强行拉到另一条边，按有效覆盖率淡出等新捕获。
+        }
+        else
+        {
+            (u, v) = MapPad(u, v, sourceW, sourceH, targetW, targetH, pad);
+            (u, v) = sourceRadius >= 0
+                ? SafeRoundedPoint(u, v, sourceW, sourceH, sourceRadius, pad, dpi)
+                : SafePadPoint(u, v, sourceW, sourceH, pad);
+        }
         double a = 0, r = 0, g = 0, b = 0;
         Tap(u, v); Tap(u - TapRadius, v); Tap(u + TapRadius, v);
         Tap(u, v - TapRadius); Tap(u, v + TapRadius);
         if (a < 1e-6) return 0;
-        return unchecked((int)0xFF000000) | ((int)Math.Round(r / a) << 16)
+        return ((int)Math.Clamp(Math.Round(a / 5 * 255), 0, 255) << 24) | ((int)Math.Round(r / a) << 16)
             | ((int)Math.Round(g / a) << 8) | (int)Math.Round(b / a);
 
         void Tap(double x, double y)
@@ -93,6 +108,21 @@ public static class GlassSample
         }
     }
 
+    public static (double U, double V) SafeRoundedPoint(double u, double v, double w, double h,
+        double radius, int pad, double dpi = 1)
+    {
+        double x = u - pad, y = v - pad;
+        double d = IslandOutline.SignedDistance(x, y, w, h, radius);
+        double guard = 3 * dpi;
+        if (d < guard)
+        {
+            var (nx, ny) = IslandOutline.Normal(x, y, w, h, radius);
+            u += nx * (guard - d); v += ny * (guard - d);
+        }
+        return (Math.Clamp(u, 1, w + 2 * pad - 2), Math.Clamp(v, 1, h + 2 * pad - 2));
+    }
+
+    // 旧矩形 pad 的兼容采样工具；实时渲染不再使用此分支投影。
     public static (double U, double V) SafePadPoint(double u, double v, double w, double h, int pad)
     {
         u = Math.Clamp(u, 1, w + 2 * pad - 2);

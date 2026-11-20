@@ -13,17 +13,19 @@ public enum GlassRenderPath
 public static class GlassWork
 {
     /// <summary>拖动、甩出时完整屏幕捕获的最短间隔（秒）。</summary>
-    public const double MovingCaptureSeconds = 0.05;
+    public const double MovingCaptureSeconds = 1.0 / 60;
 
     /// <summary>停稳后完整捕获的最短间隔（秒）。</summary>
-    public const double IdleCaptureSeconds = 0.016;
+    public const double IdleCaptureSeconds = 1.0 / 60;
 
     /// <summary>展开/收起改变尺寸时，上一次捕获一结束就再抓。</summary>
     public const double ResizeCaptureSeconds = 0;
 
-    public const int IdleOutputLongSide = 280;
-    public const int MovingOutputLongSide = 168;
-    public const int GpuOutputLongSide = 640;
+    public const double CaptureSlackSeconds = 0.00075; // 避免 16.66ms 时钟抖动误变隔帧捕获。
+
+    public const int IdleOutputLongSide = 640;
+    public const int MovingOutputLongSide = 640;
+    public const int GpuOutputLongSide = 1024;
 
     /// <summary>有可用显卡时优先走 GPU 折射和高光。</summary>
     public static bool PreferGpu => true;
@@ -54,7 +56,7 @@ public static class GlassWork
         double interval = resizing
             ? ResizeCaptureSeconds
             : moving ? MovingCaptureSeconds : IdleCaptureSeconds;
-        return secondsSinceCapture >= interval;
+        return secondsSinceCapture + CaptureSlackSeconds >= interval;
     }
 
     /// <summary>没有新画面时，用上一帧周围图按当前形状再扭曲；尺寸不同也可以先映射过去。</summary>

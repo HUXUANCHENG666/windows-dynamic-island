@@ -1,7 +1,4 @@
 using System.Runtime.InteropServices;
-using System.Windows;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using DynamicIsland.Core.Island;
 using DynamicIsland.Core.Motion;
 using SharpGen.Runtime;
@@ -31,40 +28,56 @@ sealed class GlassGpuRenderer : IDisposable
     ID3D11ShaderResourceView? _fieldView;
     ID3D11Texture2D? _target;
     ID3D11RenderTargetView? _rtv;
-    ID3D11Texture2D? _staging;
-    WriteableBitmap? _bitmap;
+    sealed class Readback
+    {
+        public ID3D11Texture2D? Texture;
+        public bool Pending;
+        public int Width, Height;
+        public long Sequence, Started;
+    }
+    readonly Readback[] _readbacks = { new(), new(), new() };
+    long _sequence;
+    GlassPixels? _frame;
+    long _lastPadVersion;
+    float[] _heights = Array.Empty<float>();
+    public bool Skipped { get; private set; }
+    public int Dropped { get; private set; }
     int _padW, _padH, _fieldW, _fieldH, _outW, _outH;
     bool _lost;
     bool _disposed;
 
     public bool IsAvailable => !_disposed && !_lost && _device != null && _context != null && _ps != null;
-    public ImageSource? Image => _bitmap;
+    public GlassPixels? TakeFrame() { var frame = _frame; _frame = null; return frame; }
 
     public static GlassGpuRenderer? TryCreate()
     {
-        try
-        {
-            var gpu = new GlassGpuRenderer();
-            if (gpu.Initialize())
-                return gpu;
-            gpu.Dispose();
-        }
-        catch
-        {
-            // 显卡或编译器不可用时走 CPU，不能让初始化把窗口打掉。
-        }
-
+        var gpu = new GlassGpuRenderer();
+        try { if (gpu.Initialize()) return gpu; }
+        catch { /* 不让编译器/设备初始化打掉窗口。 */ }
+        gpu.Dispose();
         return null;
     }
 
-    bool Initialize()
+#if GLASS_VERIFICATION
+    // 仅 headless 验证项目编译此入口；正式程序绝不把 WARP 当硬件路径。
+    public static GlassGpuRenderer? TryCreateWarpForVerification()
     {
-        if (!TryCreateDevice(out _device, out _context) || _device == null || _context == null)
+        var gpu = new GlassGpuRenderer();
+        try { if (gpu.Initialize(warp: true)) return gpu; }
+        catch (Exception ex) { Console.Error.WriteLine(ex); }
+        gpu.Dispose(); return null;
+    }
+#endif
+
+    bool Initialize(bool warp = false)
+    {
+        if (!TryCreateDevice(out _device, out _context, warp) || _device == null || _context == null)
             return false;
 
-        if (!TryCompile("VSMain", "vs_5_0", out var vsBlob) && !TryCompile("VSMain", "vs_4_0", out vsBlob))
+        bool shader5 = (int)_device.FeatureLevel >= (int)FeatureLevel.Level_11_0;
+        if (!TryCompile("VSMain", shader5 ? "vs_5_0" : "vs_4_0", out var vsBlob) && !TryCompile("VSMain", "vs_4_0", out vsBlob))
             return false;
-        if (!TryCompile("PSMain", "ps_5_0", out var psBlob) && !TryCompile("PSMain", "ps_4_0", out psBlob))
+        if (!TryCompile("PSMain", shader5 ? "ps_5_0" : "ps_4_0", out var psBlob) && !TryCompile("PSMain", "ps_4_0", out psBlob))
         {
             vsBlob?.Dispose();
             return false;
@@ -100,7 +113,7 @@ sealed class GlassGpuRenderer : IDisposable
         return _vs != null && _ps != null && _sampler != null && _constants != null;
     }
 
-    static bool TryCreateDevice(out ID3D11Device? device, out ID3D11DeviceContext? context)
+    static bool TryCreateDevice(out ID3D11Device? device, out ID3D11DeviceContext? context, bool warp = false)
     {
         device = null;
         context = null;
@@ -114,7 +127,7 @@ sealed class GlassGpuRenderer : IDisposable
         var flags = DeviceCreationFlags.BgraSupport;
         var result = D3D11.D3D11CreateDevice(
             IntPtr.Zero,
-            DriverType.Hardware,
+            warp ? DriverType.Warp : DriverType.Hardware,
             flags,
             levels,
             out device,
@@ -127,6 +140,7 @@ sealed class GlassGpuRenderer : IDisposable
         device = null;
         context = null;
 
+        if (warp) return false;
         IDXGIFactory1? factory;
         try
         {
@@ -170,12 +184,8 @@ sealed class GlassGpuRenderer : IDisposable
     {
         blob = null;
         Result result = Compiler.Compile(
-            ShaderSource,
-            entry,
-            "GlassGpu.hlsl",
-            profile,
-            out blob,
-            out Blob? errors);
+            ShaderSource, Array.Empty<ShaderMacro>(), null!, entry, "GlassGpu.hlsl", profile,
+            ShaderFlags.OptimizationLevel3, EffectFlags.None, out blob, out Blob? errors);
         errors?.Dispose();
         return result.Success && blob != null;
     }
@@ -190,21 +200,26 @@ sealed class GlassGpuRenderer : IDisposable
         int sourceIslandH,
         double radius,
         LiquidSurface? surface,
-        bool moving)
+        bool moving, double dpi = 1, double sourceRadius = 0, double shiftX = 0, double shiftY = 0, long started = 0, long captureVersion = 0, double scaleX = 1, double scaleY = 1)
     {
         if (!IsAvailable || islandW < 8 || islandH < 8)
             return false;
 
         try
         {
+            Skipped = false; Dropped = 0;
+            TryReadback(); // DO_NOT_WAIT：上一帧未完成则不阻塞、不重试自旋。
             var (outW, outH) = OutputSize(islandW, islandH, moving);
             EnsureTarget(outW, outH);
+            Readback? slot = null;
+            foreach (var candidate in _readbacks) if (!candidate.Pending) { slot = candidate; break; }
+            if (slot == null) { Skipped = true; return true; }
             bool hasPad = pad != null && padW >= 2 && padH >= 2 && pad!.Length >= padW * padH;
-            if (hasPad)
-                UploadPad(pad!, padW, padH);
+            if (hasPad && (captureVersion == 0 || captureVersion != _lastPadVersion))
+            { UploadPad(pad!, padW, padH); _lastPadVersion = captureVersion; }
             UploadField(surface);
 
-            if (_target == null || _rtv == null || _staging == null || _constants == null || _context == null)
+            if (_target == null || _rtv == null || _constants == null || _context == null)
                 return false;
 
             var data = new GpuConstants
@@ -215,19 +230,18 @@ sealed class GlassGpuRenderer : IDisposable
                 Pad = LiquidRefraction.DefaultPad,
                 SrcW = hasPad ? sourceIslandW : islandW,
                 SrcH = hasPad ? sourceIslandH : islandH,
-                SrcPadW = hasPad ? padW : 1,
-                SrcPadH = hasPad ? padH : 1,
+                SrcPadW = hasPad ? _padW : 1,
+                SrcPadH = hasPad ? _padH : 1,
                 FieldCols = surface?.Columns ?? 0,
                 FieldRows = surface?.Rows ?? 0,
                 HasPad = hasPad ? 1 : 0,
                 HasField = surface != null && surface.Columns > 0 ? 1 : 0,
-                SampleGain = (float)LiquidRefraction.SampleGain,
+                RimWidth = (float)Core.Geometry.IslandOutline.RimWidthDip,
                 Chromatic = (float)LiquidRefraction.Chromatic,
                 HeightWarp = (float)LiquidRefraction.HeightWarp,
                 SlopeWarp = (float)LiquidRefraction.SlopeWarp,
-                RimFraction = (float)Core.Geometry.IslandOutline.RimFraction,
-                MinInnerFrac = (float)Core.Geometry.IslandOutline.MinInnerCornerFraction,
-                MinInnerCorner = (float)Core.Geometry.IslandOutline.MinInnerCorner
+                Dpi = (float)dpi, SrcRadius = (float)sourceRadius, ShiftX = (float)shiftX, ShiftY = (float)shiftY,
+                ScaleX = (float)scaleX, ScaleY = (float)scaleY
             };
             WriteConstants(data);
 
@@ -250,9 +264,11 @@ sealed class GlassGpuRenderer : IDisposable
             _context.PSUnsetShaderResource(0);
             _context.PSUnsetShaderResource(1);
             _context.OMSetRenderTargets(Array.Empty<ID3D11RenderTargetView>(), null);
-            _context.CopyResource(_staging, _target);
-            CopyStagingToBitmap(outW, outH);
-            return _bitmap != null;
+            _context.CopySubresourceRegion(slot.Texture!, 0, 0, 0, 0, _target, 0, new Box(0, 0, 0, outW, outH, 1));
+            slot.Pending = true; slot.Width = outW; slot.Height = outH;
+            slot.Sequence = ++_sequence; slot.Started = started;
+            _context.Flush(); // 提交命令，不等待 GPU；让后续非阻塞 Map 有进展。
+            return true;
         }
         catch (SharpGenException)
         {
@@ -276,15 +292,15 @@ sealed class GlassGpuRenderer : IDisposable
 
     void EnsureTarget(int width, int height)
     {
-        if (_target != null && _outW == width && _outH == height)
+        if (_target != null && _outW >= width && _outH >= height)
             return;
         DisposeTarget();
-        _outW = width;
-        _outH = height;
+        _outW = ((width + 63) / 64) * 64;
+        _outH = ((height + 63) / 64) * 64;
         var desc = new Texture2DDescription
         {
-            Width = (uint)width,
-            Height = (uint)height,
+            Width = (uint)_outW,
+            Height = (uint)_outH,
             MipLevels = 1,
             ArraySize = 1,
             Format = Format.B8G8R8A8_UNorm,
@@ -297,21 +313,21 @@ sealed class GlassGpuRenderer : IDisposable
         desc.Usage = ResourceUsage.Staging;
         desc.BindFlags = BindFlags.None;
         desc.CPUAccessFlags = CpuAccessFlags.Read;
-        _staging = _device.CreateTexture2D(desc);
+        foreach (var slot in _readbacks) slot.Texture = _device.CreateTexture2D(desc);
     }
 
     void UploadPad(int[] pad, int width, int height)
     {
-        if (_padTex == null || _padW != width || _padH != height)
+        if (_padTex == null || _padW < width || _padH < height)
         {
             _padView?.Dispose();
             _padTex?.Dispose();
-            _padW = width;
-            _padH = height;
+            _padW = ((width + 63) / 64) * 64;
+            _padH = ((height + 63) / 64) * 64;
             _padTex = _device!.CreateTexture2D(new Texture2DDescription
             {
-                Width = (uint)width,
-                Height = (uint)height,
+                Width = (uint)_padW,
+                Height = (uint)_padH,
                 MipLevels = 1,
                 ArraySize = 1,
                 Format = Format.B8G8R8A8_UNorm,
@@ -326,7 +342,7 @@ sealed class GlassGpuRenderer : IDisposable
         {
             fixed (int* src = pad)
             {
-                _context!.UpdateSubresource(_padTex, 0, null, (IntPtr)src, (uint)(width * 4), 0);
+                _context!.UpdateSubresource(_padTex, 0, new Box(0, 0, 0, width, height, 1), (IntPtr)src, (uint)(width * 4), 0);
             }
         }
     }
@@ -360,58 +376,56 @@ sealed class GlassGpuRenderer : IDisposable
             _fieldView = _device.CreateShaderResourceView(_fieldTex);
         }
 
-        var heights = new float[cols * rows];
-        surface.CopyHeights(heights);
+        if (_heights.Length < cols * rows) _heights = new float[cols * rows];
+        surface.CopyHeights(_heights);
         unsafe
         {
-            fixed (float* src = heights)
+            fixed (float* src = _heights)
             {
                 _context!.UpdateSubresource(_fieldTex, 0, null, (IntPtr)src, (uint)(cols * 4), 0);
             }
         }
     }
 
-    void CopyStagingToBitmap(int width, int height)
+    void TryReadback()
     {
-        MappedSubresource mapped = _context!.Map(_staging!, 0, MapMode.Read, MapFlags.None);
+        Readback? oldest = null;
+        MappedSubresource mapped = default;
+        long below = long.MaxValue;
+        // 最多检查三个槽，取最新已完成帧；不阻塞、不自旋等 GPU。
+        for (int attempt = 0; attempt < _readbacks.Length; attempt++)
+        {
+            Readback? candidate = null;
+            foreach (var slot in _readbacks)
+                if (slot.Pending && slot.Sequence < below && (candidate == null || slot.Sequence > candidate.Sequence)) candidate = slot;
+            if (candidate?.Texture == null) break;
+            below = candidate.Sequence;
+            Result status = _context!.Map(candidate.Texture, 0, MapMode.Read, MapFlags.DoNotWait, out mapped);
+            if (status.Code == unchecked((int)0x887A000A)) continue;
+            status.CheckError(); oldest = candidate; break;
+        }
+        if (oldest?.Texture == null) return;
+        foreach (var slot in _readbacks)
+            if (slot.Pending && slot.Sequence < oldest.Sequence) { slot.Pending = false; Dropped++; }
+        var frame = new GlassPixels(oldest.Width, oldest.Height, true, oldest.Started);
         try
         {
-            if (_bitmap == null || _bitmap.IsFrozen || _bitmap.PixelWidth != width || _bitmap.PixelHeight != height)
-                _bitmap = new WriteableBitmap(width, height, 96, 96, PixelFormats.Pbgra32, null);
-            _bitmap.Lock();
-            try
+            unsafe
             {
-                nint dest = _bitmap.BackBuffer;
-                int destPitch = _bitmap.BackBufferStride;
-                int srcPitch = (int)mapped.RowPitch;
-                int rowBytes = width * 4;
-                for (int y = 0; y < height; y++)
-                {
-                    unsafe
-                    {
-                        Buffer.MemoryCopy(
-                            (void*)(mapped.DataPointer + y * srcPitch),
-                            (void*)(dest + y * destPitch),
-                            destPitch,
-                            rowBytes);
-                    }
-                }
-                _bitmap.AddDirtyRect(new Int32Rect(0, 0, width, height));
+                fixed (int* dest = frame.Pixels)
+                    for (int y = 0; y < oldest.Height; y++)
+                        Buffer.MemoryCopy((void*)(mapped.DataPointer + y * (int)mapped.RowPitch),
+                            dest + y * oldest.Width, oldest.Width * 4, oldest.Width * 4);
             }
-            finally
-            {
-                _bitmap.Unlock();
-            }
+            _frame?.Dispose(); _frame = frame;
         }
-        finally
-        {
-            _context.Unmap(_staging, 0);
-        }
+        catch { frame.Dispose(); throw; }
+        finally { _context!.Unmap(oldest.Texture, 0); oldest.Pending = false; }
     }
 
     static (int Width, int Height) OutputSize(int width, int height, bool moving)
     {
-        int cap = moving ? Math.Max(GlassWork.MovingOutputLongSide, 240) : GlassWork.GpuOutputLongSide;
+        int cap = GlassWork.GpuOutputLongSide;
         double scale = Math.Min(1, cap / (double)Math.Max(width, height));
         return (Math.Max(8, (int)Math.Round(width * scale)), Math.Max(8, (int)Math.Round(height * scale)));
     }
@@ -420,10 +434,10 @@ sealed class GlassGpuRenderer : IDisposable
     {
         _rtv?.Dispose();
         _target?.Dispose();
-        _staging?.Dispose();
+        foreach (var slot in _readbacks) { if (slot.Pending) Dropped++; slot.Texture?.Dispose(); slot.Texture = null; slot.Pending = false; }
         _rtv = null;
         _target = null;
-        _staging = null;
+
         _outW = _outH = 0;
     }
 
@@ -431,7 +445,7 @@ sealed class GlassGpuRenderer : IDisposable
     {
         _disposed = true;
         _lost = true;
-        _bitmap = null;
+        _frame?.Dispose(); _frame = null;
         DisposeTarget();
         _padView?.Dispose();
         _padTex?.Dispose();
@@ -461,8 +475,9 @@ sealed class GlassGpuRenderer : IDisposable
         public float IslandW, IslandH, Radius, Pad;
         public float SrcW, SrcH, SrcPadW, SrcPadH;
         public float FieldCols, FieldRows, HasPad, HasField;
-        public float SampleGain, Chromatic, HeightWarp, SlopeWarp;
-        public float RimFraction, MinInnerFrac, MinInnerCorner, Unused;
+        public float RimWidth, Chromatic, HeightWarp, SlopeWarp;
+        public float Dpi, SrcRadius, ShiftX, ShiftY;
+        public float ScaleX, ScaleY, Unused1, Unused2;
     }
 
     const string ShaderSource = """
@@ -480,14 +495,18 @@ cbuffer Params : register(b0)
     float FieldRows;
     float HasPad;
     float HasField;
-    float SampleGain;
+    float RimWidth;
     float Chromatic;
     float HeightWarp;
     float SlopeWarp;
-    float RimFraction;
-    float MinInnerFrac;
-    float MinInnerCorner;
-    float Unused;
+    float Dpi;
+    float SrcRadius;
+    float ShiftX;
+    float ShiftY;
+    float ScaleX;
+    float ScaleY;
+    float Unused1;
+    float Unused2;
 };
 
 Texture2D PadTex : register(t0);
@@ -532,55 +551,22 @@ float SignedDistance(float2 p, float w, float h, float r)
     return length(max(q, 0)) + min(max(q.x, q.y), 0) - r;
 }
 
-float RimBand(float w, float h)
-{
-    return max(8, min(max(1, w), max(1, h)) * RimFraction);
-}
-
-float InnerCornerRadius(float w, float h, float r)
-{
-    r = SafeRadius(w, h, r);
-    float inset = RimBand(w, h);
-    float innerShort = max(1, min(w, h) - 2 * inset);
-    float maxR = innerShort * 0.5;
-    float minR = min(maxR, max(MinInnerCorner, r * MinInnerFrac));
-    return min(max(minR, r - inset), maxR);
-}
-
-float InnerSignedDistance(float2 p, float w, float h, float r)
-{
-    float inset = RimBand(w, h);
-    float innerW = max(1, w - 2 * inset);
-    float innerH = max(1, h - 2 * inset);
-    float innerR = InnerCornerRadius(w, h, r);
-    return SignedDistance(p - inset, innerW, innerH, innerR);
-}
-
+float RimBand(float w, float h) { return min(RimWidth * Dpi, min(w, h) * 0.20); }
 float Along(float2 p, float w, float h, float r)
 {
-    float dOuter = SignedDistance(p, w, h, r);
-    if (dOuter >= 0)
-        return 1;
-    float dInner = InnerSignedDistance(p, w, h, r);
-    if (dInner <= 0)
-        return 0;
-    float span = dInner - dOuter;
-    if (span <= 1e-6)
-        return 1;
-    return Smootherstep(0, 1, dInner / span);
+    return Smootherstep(0, 1, 1 + SignedDistance(p, w, h, r) / RimBand(w, h));
 }
-
 float2 NormalOf(float2 p, float w, float h, float r)
 {
-    const float e = 0.75;
-    float dx = SignedDistance(p + float2(e, 0), w, h, r) - SignedDistance(p - float2(e, 0), w, h, r);
-    float dy = SignedDistance(p + float2(0, e), w, h, r) - SignedDistance(p - float2(0, e), w, h, r);
-    float len = length(float2(dx, dy));
-    if (len < 1e-8)
-        return float2(0, -1);
-    return float2(dx, dy) / len;
+    float2 halfSize = float2(w, h) * 0.5;
+    r = SafeRadius(w, h, r);
+    float2 q = abs(p - halfSize) - (halfSize - r);
+    float2 o = max(q, 0);
+    float len = length(o);
+    float2 direction = float2(p.x < halfSize.x ? -1 : 1, p.y < halfSize.y ? -1 : 1);
+    if (len > 1e-9) return o / len * direction;
+    return q.x > q.y ? float2(direction.x, 0) : float2(0, direction.y);
 }
-
 float FieldAt(float2 uv)
 {
     float2 size = float2(FieldCols, FieldRows);
@@ -621,60 +607,30 @@ float4 ShadeColor(float2 p, float surface)
     return float4(alpha, alpha, alpha, alpha);
 }
 
-float MapAxis(float x, float source, float target)
+float2 SafeRoundedPoint(float2 p, float2 size, float radius)
 {
-    if (x < Pad)
-        return x;
-    if (x >= Pad + target)
-        return x - target + source;
-    if (target <= 0)
-        return Pad;
-    return Pad + (x - Pad) * source / target;
+    float2 local = p - Pad;
+    float d = SignedDistance(local, size.x, size.y, radius);
+    float guard = 3 * Dpi;
+    if (d < guard) p += NormalOf(local, size.x, size.y, radius) * (guard - d);
+    return clamp(p, 1, size + 2 * Pad - 2);
 }
-
-float2 MapToSource(float2 uv)
-{
-    return float2(MapAxis(uv.x, SrcW, IslandW), MapAxis(uv.y, SrcH, IslandH));
-}
-
-float2 SafePadPoint(float2 p, float2 size)
-{
-    p = clamp(p, 1, size + 2 * Pad - 2);
-    float4 distances = float4(p.x - (Pad - 2), Pad + size.x + 1 - p.x,
-                              p.y - (Pad - 2), Pad + size.y + 1 - p.y);
-    float nearest = min(min(distances.x, distances.y), min(distances.z, distances.w));
-    if (nearest > 0)
-    {
-        if (nearest == distances.x) p.x = Pad - 2;
-        else if (nearest == distances.y) p.x = Pad + size.x + 1;
-        else if (nearest == distances.z) p.y = Pad - 2;
-        else p.y = Pad + size.y + 1;
-    }
-    return p;
-}
-
-// Captured RGB is straight; alpha is validity. Premultiply BEFORE filtering,
-// so erased/uncaptured texels never darken or introduce garbage into valid taps.
+// 捕获已将无效像素清零、有效 RGB 标 alpha=1；硬件双线性同时滤 RGB 和有效性。
 float4 PadTap(float2 p)
 {
     float2 size = float2(SrcPadW, SrcPadH);
     p = clamp(p, 0, size - 1);
-    int2 q = (int2)floor(p);
-    float2 f = frac(p);
-    float4 a = PadTex.Load(int3(q, 0)); a.rgb *= a.a;
-    float4 b = PadTex.Load(int3(min(q + int2(1, 0), (int2)size - 1), 0)); b.rgb *= b.a;
-    float4 c = PadTex.Load(int3(min(q + int2(0, 1), (int2)size - 1), 0)); c.rgb *= c.a;
-    float4 d = PadTex.Load(int3(min(q + 1, (int2)size - 1), 0)); d.rgb *= d.a;
-    return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
+    return PadTex.SampleLevel(LinearClamp, (p + 0.5) / size, 0);
 }
 
 float4 SamplePad(float2 uv)
 {
-    float2 p = SafePadPoint(MapToSource(uv), float2(SrcW, SrcH));
+    float2 p = Pad + (uv - Pad) * float2(ScaleX, ScaleY) + float2(ShiftX, ShiftY);
+    if (any(p < 0) || any(p > float2(SrcW, SrcH) + 2 * Pad - 1)) return 0;
     const float tap = 0.65;
     float4 c = PadTap(p) + PadTap(p + float2(tap, 0)) + PadTap(p - float2(tap, 0))
         + PadTap(p + float2(0, tap)) + PadTap(p - float2(0, tap));
-    return c.a > 1e-6 ? float4(c.rgb / c.a, 1) : 0;
+    return c.a > 1e-6 ? float4(c.rgb / c.a, saturate(c.a / 5)) : 0;
 }
 
 bool TryMap(float2 p, float2 slope, float surface, out float2 u, out float2 ru, out float2 bu, out float alpha)
@@ -691,11 +647,9 @@ bool TryMap(float2 p, float2 slope, float surface, out float2 u, out float2 ru, 
     if (along <= 0)
         return false;
     float2 nrm = NormalOf(p, IslandW, IslandH, r);
-    float tx = abs(nrm.x) < 1e-8 ? 1e9 : (nrm.x > 0 ? IslandW - p.x : -p.x) / nrm.x;
-    float ty = abs(nrm.y) < 1e-8 ? 1e9 : (nrm.y > 0 ? IslandH - p.y : -p.y) / nrm.y;
-    float tRect = max(0, min(tx, ty));
-    float offset = clamp(2 + along * max(4, (Pad - 3) * SampleGain) + surface * Pad * HeightWarp, 2, Pad - 2);
-    u = SafePadPoint(Pad + p + nrm * (tRect + offset) + slope * Pad * SlopeWarp, float2(IslandW, IslandH));
+    float depth = (4 + 3.5 * along + clamp(surface, -1, 1) * HeightWarp) * Dpi;
+    float2 warped = Pad + p + nrm * (depth - d) + slope / (1 + abs(slope)) * SlopeWarp * Dpi;
+    u = SafeRoundedPoint(warped, float2(IslandW, IslandH), r);
     ru = bu = u; // RGB shares the exact same spatial footprint: no artificial dispersion.
     alpha = Smootherstep(0, 0.88, along) * (1 - 0.20 * Smootherstep(0.84, 1, along));
     return alpha > 0.01;
@@ -705,6 +659,8 @@ float4 PSMain(VSOut i) : SV_Target
 {
     float2 p = i.uv * float2(IslandW, IslandH);
     float2 uv = i.uv;
+    float distance = SignedDistance(p, IslandW, IslandH, Radius);
+    if (distance >= 0.5 || distance <= -RimBand(IslandW, IslandH)) return 0;
     float slopeX, slopeY;
     float surface = SampleField(uv, slopeX, slopeY);
     float4 shade = ShadeColor(p, surface);
@@ -718,7 +674,7 @@ float4 PSMain(VSOut i) : SV_Target
             float4 green = SamplePad(u);
             if (dot(green, 1) > 0)
             {
-                float a = saturate(alpha);
+                float a = saturate(alpha * green.a);
                 float4 refr = float4(green.rgb, 1) * a;
                 color = refr + color * (1 - a);
             }

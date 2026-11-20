@@ -3,20 +3,13 @@ namespace DynamicIsland.Core.Geometry;
 /// <summary>
 /// 岛身真实外轮廓：圆角矩形 / 跑道形的有向距离，而不是内切椭圆。
 /// 宽卡片中间那一块如果按 x²/a²+y²/b² 来算，高光会收成一颗独立的椭圆。
-/// 内沿用同一套圆角矩形，圆角随内缩减小，但不会被切成直角。
+/// 内沿从同一外 SDF 等距内缩，不再独立 clamp 圆角。
 /// </summary>
 public static class IslandOutline
 {
-    /// <summary>边缘月牙约占短边的这么多，沿轮廓走，不随椭圆半径变厚。</summary>
-    public const double RimFraction = 0.26;
-
-    /// <summary>内沿圆角至少保留外圆角的这么多，避免内缩后变成尖角矩形。</summary>
-    public const double MinInnerCornerFraction = 0.55;
-
-    public const double MinInnerCorner = 12;
-
-    public static double RimBand(double width, double height) =>
-        Math.Max(8, Math.Min(Math.Max(1, width), Math.Max(1, height)) * RimFraction);
+    public const double RimWidthDip = 6;
+    public static double RimBand(double width, double height, double dpi = 1) =>
+        Math.Min(RimWidthDip * dpi, Math.Min(width, height) * 0.20);
 
     /// <summary>点到圆角矩形的有向距离：内部为负，边上为 0，外部为正。</summary>
     public static double SignedDistance(double x, double y, double width, double height, double radius)
@@ -37,7 +30,7 @@ public static class IslandOutline
         return Math.Sqrt(ox * ox + oy * oy) + Math.Min(Math.Max(qx, qy), 0) - r;
     }
 
-    /// <summary>与外轮廓同心的内缩圆角矩形距离。内圆角不会小于安全下限。</summary>
+    /// <summary>与外轮廓同心、等距内缩的圆角矩形距离。</summary>
     public static double InnerSignedDistance(double x, double y, double width, double height, double radius)
     {
         double inset = RimBand(width, height);
@@ -47,15 +40,8 @@ public static class IslandOutline
         return SignedDistance(x - inset, y - inset, innerW, innerH, innerR);
     }
 
-    public static double InnerCornerRadius(double width, double height, double radius)
-    {
-        double r = Squircle.SafeRadius(width, height, radius);
-        double inset = RimBand(width, height);
-        double innerShort = Math.Max(1, Math.Min(width, height) - 2 * inset);
-        double maxR = innerShort * 0.5;
-        double minR = Math.Min(maxR, Math.Max(MinInnerCorner, r * MinInnerCornerFraction));
-        return Math.Min(Math.Max(minR, r - inset), maxR);
-    }
+    public static double InnerCornerRadius(double width, double height, double radius) =>
+        Math.Max(0, Squircle.SafeRadius(width, height, radius) - RimBand(width, height));
 
     public static double EllipseRadius(double x, double y, double width, double height)
     {
@@ -68,32 +54,19 @@ public static class IslandOutline
 
     public static (double Nx, double Ny) Normal(double x, double y, double width, double height, double radius)
     {
-        const double e = 0.75;
-        double dx = SignedDistance(x + e, y, width, height, radius) - SignedDistance(x - e, y, width, height, radius);
-        double dy = SignedDistance(x, y + e, width, height, radius) - SignedDistance(x, y - e, width, height, radius);
-        double len = Math.Sqrt(dx * dx + dy * dy);
-        if (len < 1e-8)
-            return (0, -1);
-        return (dx / len, dy / len);
+        double hx = width * 0.5, hy = height * 0.5;
+        double r = Squircle.SafeRadius(width, height, radius);
+        double qx = Math.Abs(x - hx) - (hx - r), qy = Math.Abs(y - hy) - (hy - r);
+        double ox = Math.Max(qx, 0), oy = Math.Max(qy, 0);
+        double len = Math.Sqrt(ox * ox + oy * oy);
+        if (len > 1e-9)
+            return (ox / len * (x < hx ? -1 : 1), oy / len * (y < hy ? -1 : 1));
+        return qx > qy ? (x < hx ? -1 : 1, 0) : (0, y < hy ? -1 : 1);
     }
 
-    /// <summary>
-    /// 到边缘的归一化进度：0 在内缩后的圆角矩形内侧，1 在外轮廓上。
-    /// 用 smootherstep 做更宽的衰减，中间保持通透。
-    /// </summary>
-    public static double Along(double x, double y, double width, double height, double radius)
-    {
-        double dOuter = SignedDistance(x, y, width, height, radius);
-        if (dOuter >= 0)
-            return 1;
-        double dInner = InnerSignedDistance(x, y, width, height, radius);
-        if (dInner <= 0)
-            return 0;
-        double span = dInner - dOuter;
-        if (span <= 1e-6)
-            return 1;
-        return Smootherstep(0, 1, dInner / span);
-    }
+    // 真正的等距内沿：仅从外 SDF 推进，没有第二套独立 clamp 的内圆角。
+    public static double Along(double x, double y, double width, double height, double radius, double dpi = 1) =>
+        Smootherstep(0, 1, 1 + SignedDistance(x, y, width, height, radius) / RimBand(width, height, dpi));
 
     public static double Smoothstep(double edge0, double edge1, double x)
     {
@@ -114,13 +87,13 @@ public static class IslandOutline
     /// <summary>
     /// 贴合跑道形边缘的月牙和高光。中心几乎是 0，内沿带圆角，不会在中间单独画出一块椭圆反光。
     /// </summary>
-    public static int ShadeArgb(double x, double y, double width, double height, double radius, double surface = 0)
+    public static int ShadeArgb(double x, double y, double width, double height, double radius, double surface = 0, double dpi = 1)
     {
         double d = SignedDistance(x, y, width, height, radius);
         if (d >= 0.5)
             return 0;
 
-        double along = Along(x, y, width, height, radius);
+        double along = Along(x, y, width, height, radius, dpi);
         if (along <= 0)
             return 0;
 

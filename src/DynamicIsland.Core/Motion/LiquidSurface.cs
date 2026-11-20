@@ -39,6 +39,14 @@ public sealed class LiquidSurface
             return;
         Array.Copy(_height, dest, Math.Min(dest.Length, _height.Length));
     }
+    public void CopySnapshotTo(LiquidSurface target)
+    {
+        if (target._height.Length != _height.Length) target._height = new float[_height.Length];
+        _height.CopyTo(target._height, 0);
+        target._cols = _cols; target._rows = _rows;
+        target._maxAbs = _maxAbs; target._maxVel = _maxVel;
+    }
+
     /// <summary>给后台渲染的独立高度快照，不与 UI 积分数组共享可变内存。</summary>
     public LiquidSurface Snapshot() => new()
     {

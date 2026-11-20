@@ -155,7 +155,8 @@ public class GlassSpatialTests
                     if ((x + y) % 3 == 0) pixels[y * (w + Pad * 2) + x] = 0x00FF007F;
             int c = GlassSample.Footprint(pixels, w + 2 * Pad, h + 2 * Pad,
                 Pad + 90.2, Pad - 12.6, w, h, w, h, Pad);
-            Assert.Equal(color, c);
+            Assert.Equal(color & 0xFFFFFF, c & 0xFFFFFF);
+            Assert.InRange((uint)c >> 24, 1u, 255u);
         }
     }
 

@@ -126,8 +126,8 @@ public class LiquidMotionTests
     [Fact]
     public void Refraction_AlphaRisesTowardTheEdge()
     {
-        Assert.True(LiquidRefraction.TryMap(182, 50, 200, 100, 72, out _, out _, out var inner, out _, out _, out _, out _));
-        Assert.True(LiquidRefraction.TryMap(194, 50, 200, 100, 72, out _, out _, out var outer, out _, out _, out _, out _));
+        Assert.True(LiquidRefraction.TryMap(196, 50, 200, 100, 72, out _, out _, out var inner, out _, out _, out _, out _));
+        Assert.True(LiquidRefraction.TryMap(198, 50, 200, 100, 72, out _, out _, out var outer, out _, out _, out _, out _));
         Assert.True(outer > inner);
     }
 
@@ -232,10 +232,10 @@ public class LiquidMotionTests
         const double h = 120;
         const double radius = 24;
         // 宽卡片顶边中点内侧：离真实边缘很近，但按椭圆半径还在 0.78 以内。
-        double x = 200;
-        double y = 14;
+        double x = 60;
+        double y = 3;
         double ellipse = IslandOutline.EllipseRadius(x, y, w, h);
-        Assert.True(ellipse < LiquidRefraction.InnerRadius);
+        Assert.True(ellipse > 1);
         Assert.True(IslandOutline.SignedDistance(x, y, w, h, radius) < 0);
         Assert.True(IslandOutline.Along(x, y, w, h, radius) > 0.15);
         Assert.True(LiquidRefraction.TryMap(x, y, w, h, 72, radius, 0, 0, 0,
@@ -252,16 +252,16 @@ public class LiquidMotionTests
         const double h = 184;
         const double radius = 52;
         int center = IslandOutline.ShadeArgb(w * 0.5, h * 0.5, w, h, radius);
-        int midTop = IslandOutline.ShadeArgb(w * 0.5, 10, w, h, radius);
+        int midTop = IslandOutline.ShadeArgb(w * 0.5, 3, w, h, radius);
         int blob = IslandOutline.ShadeArgb(w * 0.38, h * 0.36, w, h, radius);
-        int topCorner = IslandOutline.ShadeArgb(w - radius, 12, w, h, radius);
+        int topCorner = IslandOutline.ShadeArgb(w - radius, 3, w, h, radius);
         static int Alpha(int argb) => (argb >> 24) & 0xFF;
         Assert.Equal(0, center);
         Assert.True(Alpha(midTop) > 20);
         Assert.True(Alpha(midTop) > Alpha(blob) + 10);
         Assert.True(Alpha(topCorner) > 20);
         // 底部月牙弱于顶部高光，仍然贴边而不是椭圆心。
-        int midBottom = IslandOutline.ShadeArgb(w * 0.5, h - 10, w, h, radius);
+        int midBottom = IslandOutline.ShadeArgb(w * 0.5, h - 3, w, h, radius);
         Assert.True(Alpha(midTop) > Alpha(midBottom));
     }
 
@@ -284,7 +284,7 @@ public class LiquidMotionTests
         Assert.True(GlassWork.PreferGpu);
         Assert.Equal(GlassRenderPath.Gpu, GlassWork.ChoosePath(gpuAvailable: true));
         Assert.Equal(GlassRenderPath.Cpu, GlassWork.ChoosePath(gpuAvailable: false));
-        Assert.True(GlassWork.OutputLongSide(moving: true) < GlassWork.OutputLongSide(moving: false));
+        Assert.Equal(GlassWork.OutputLongSide(moving: true), GlassWork.OutputLongSide(moving: false));
         Assert.True(GlassWork.GpuOutputLongSide >= GlassWork.IdleOutputLongSide);
     }
 
@@ -320,8 +320,8 @@ public class LiquidMotionTests
         const double h = 292;
         const double radius = 40;
         double inset = IslandOutline.RimBand(w, h);
-        Assert.True(inset > radius);
-        Assert.True(IslandOutline.InnerCornerRadius(w, h, radius) >= IslandOutline.MinInnerCorner);
+        Assert.Equal(6, inset);
+        Assert.Equal(radius - inset, IslandOutline.InnerCornerRadius(w, h, radius));
         // 直角内缩的左上角点落在圆角扇形外，应在边缘带里；中点内沿仍贴边。
         Assert.True(IslandOutline.Along(inset, inset, w, h, radius) > 0);
         Assert.True(IslandOutline.Along(w / 2, inset, w, h, radius) < 0.08);
@@ -336,9 +336,9 @@ public class LiquidMotionTests
         const double w = 200;
         const double h = 100;
         const int pad = 72;
-        Assert.True(LiquidRefraction.TryMap(196, 50, w, h, pad,
+        Assert.True(LiquidRefraction.TryMap(198, 50, w, h, pad,
             out var u0, out var v0, out var outer, out var ru0, out var rv0, out _, out _));
-        Assert.True(LiquidRefraction.TryMap(186, 50, w, h, pad,
+        Assert.True(LiquidRefraction.TryMap(196, 50, w, h, pad,
             out var u1, out var v1, out var inner, out var ru1, out var rv1, out _, out _));
         double chromaOuter = Math.Sqrt((ru0 - u0) * (ru0 - u0) + (rv0 - v0) * (rv0 - v0));
         double chromaInner = Math.Sqrt((ru1 - u1) * (ru1 - u1) + (rv1 - v1) * (rv1 - v1));

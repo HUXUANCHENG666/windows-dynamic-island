@@ -102,9 +102,17 @@ sealed class IslandAnimator
         System.Windows.Controls.Canvas.SetTop(window.PillHost, top);
 
         double safeRadius = Squircle.SafeRadius(snapW, snapH, radius);
-        var geometry = ToGeometry(Squircle.Build(snapW, snapH, safeRadius, corner, 18));
+        bool glass = AppearancePolicy.ParseSkin(window.Settings.IslandSkin) == IslandSkin.Glass;
+        var shape = new GlassGeometry(snapW, snapH, safeRadius, dpi);
+        Geometry geometry = glass
+            ? new RectangleGeometry(new Rect(0, 0, shape.Width, shape.Height), shape.SafeRadius, shape.SafeRadius)
+            : ToGeometry(Squircle.Build(snapW, snapH, safeRadius, corner, 18));
         window.Pill.Data = geometry;
-        window.PillStroke.Data = geometry;
+        double halfStroke = window.PillStroke.StrokeThickness * 0.5;
+        var stroke = shape.Inset(halfStroke);
+        window.PillStroke.Data = glass
+            ? new RectangleGeometry(new Rect(halfStroke, halfStroke, stroke.Width, stroke.Height), stroke.SafeRadius, stroke.SafeRadius)
+            : geometry;
         window.PillStroke.Clip = geometry;
         window.ContentHost.Clip = geometry;
         window.DecorateGlass(geometry, snapW, snapH, safeRadius);

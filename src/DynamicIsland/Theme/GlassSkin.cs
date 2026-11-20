@@ -113,12 +113,12 @@ static class GlassSkin
         window.GlassBlobBLag.Y = lagY * 0.8;
         window.GlassStreakLag.X = lagX * 1.15;
         window.GlassStreakLag.Y = lagY * 1.15;
-        window.GlassShadeLag.X = lagX * 0.7;
-        window.GlassShadeLag.Y = lagY * 0.7;
-        window.GlassRefractionLag.X = lagX * 0.5;
-        window.GlassRefractionLag.Y = lagY * 0.5;
-        window.GlassGpuLag.X = lagX * 0.55;
-        window.GlassGpuLag.Y = lagY * 0.55;
+        window.GlassShadeLag.X = 0;
+        window.GlassShadeLag.Y = 0;
+        window.GlassRefractionLag.X = 0;
+        window.GlassRefractionLag.Y = 0;
+        window.GlassGpuLag.X = 0;
+        window.GlassGpuLag.Y = 0;
     }
 
     static Brush MakeBody()
