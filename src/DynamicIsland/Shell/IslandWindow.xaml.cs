@@ -42,8 +42,9 @@ public partial class IslandWindow : Window
     readonly FullscreenWatcher _watcher = new();
     readonly DynamicIsland.Core.Media.TimelineEstimator _timeline = new();
     CancellationTokenSource? _translateCts;
-    readonly Dictionary<int, CancellationTokenSource> _liveTranslateCts = new();
-    readonly Dictionary<int, int> _liveTranslateGen = new();
+    readonly LiveTranslationPump _livePump;
+    readonly HashSet<Task> _clipboardTasks = new();
+    bool _shutdown;
     TrayController? _tray;
     DispatcherTimer? _slow;
     DispatcherTimer? _topmost;
@@ -157,6 +158,26 @@ public partial class IslandWindow : Window
         _media = new MediaService(Dispatcher);
         _camera = new CameraSession(Dispatcher);
         _camera.Frame += (pixels, width, height) => CameraNotice.SetFrame(pixels, width, height);
+        _livePump = new LiveTranslationPump((request, api, token) => _translator.TranslateAsync(request, api, token), action =>
+        {
+            if (_shutdown || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+            try { Dispatcher.BeginInvoke(() => { if (!_shutdown && !Dispatcher.HasShutdownStarted) action(); }); }
+            catch (InvalidOperationException) when (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) { }
+        });
+        _livePump.Completed += (work, result) =>
+        {
+            if (!_director.LiveTranslateOpen || !_liveCaptions.Complete(work.CaptionId, result, work.Recognized)) return;
+            LiveTranslateNotice.ShowCaptions(_liveCaptions.Items);
+            LiveTranslateNotice.ShowStatus(_liveCaptions.HasPending ? LiveTranslateCopy.Translating : LiveTranslateCopy.Listening, true, null, false);
+            Nudge();
+        };
+        _livePump.Failed += work =>
+        {
+            if (!_director.LiveTranslateOpen || !_liveCaptions.FailRevision(work.CaptionId, work.Recognized)) return;
+            LiveTranslateNotice.ShowCaptions(_liveCaptions.Items);
+            LiveTranslateNotice.ShowStatus("翻译暂不可用；原文与已有译文已保留。", true, null, false);
+        };
+        _livePump.Diagnostic += type => Log.Info($"live-translate request type={type}");
         _liveTranslate = new LiveTranslateService(Dispatcher);
         _liveTranslate.Status += OnLiveTranslateStatus;
         _liveTranslate.Transcript += OnLiveTranslateTranscript;
@@ -409,6 +430,14 @@ public partial class IslandWindow : Window
         TranslateNotice.SetDirection(direction);
     }
 
+    internal void SetTranslateProviders(TranslateApiOptions active, IReadOnlyList<TranslateApiOptions> profiles)
+    {
+        foreach (var profile in profiles) TranslateProviderSettings.Save(Settings, profile);
+        TranslateProviderSettings.Save(Settings, active);
+        SettingsStore.Save(Settings);
+        _livePump.ChangeProvider(active);
+    }
+
     public void SetTranslateApi(TranslateApiKind kind, string? url, string? model, string? key)
     {
         Settings.TranslateApi = TranslateApiPolicy.ToSetting(kind);
@@ -648,8 +677,9 @@ public partial class IslandWindow : Window
         _animator.Apply(this, newDpi.DpiScaleX, _anchor, EffectsPolicy.AllowBlur(_director.Expanded && !_director.ShowAsDot, transitioning));
     }
 
-    protected override void OnClosed(EventArgs e)
+    protected override async void OnClosed(EventArgs e)
     {
+        _shutdown = true;
         SaveTimer();
         _renderLive = false;
         CompositionTarget.Rendering -= OnRendering;
@@ -657,15 +687,20 @@ public partial class IslandWindow : Window
         _topmost?.Stop();
         _hideSweep?.Stop();
         _coverConfirm?.Stop();
-        _settingsWindow?.Close();
+        if (_settingsWindow != null) { _settingsWindow.IsEnabled = false; _settingsWindow.Close(); }
+        _tray?.Dispose(); _tray = null;
         SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
         _translateCts?.Cancel();
         CancelLiveTranslations();
         _notifications.Dispose();
         ReleaseCamera(collapseUi: false);
         StopLiveTranslate(collapseUi: false);
-        _liveTranslate.Dispose();
-        _refraction.Dispose();
+        try
+        {
+            await Task.WhenAll(_liveTranslate.DisposeAsync().AsTask(), _livePump.StopAsync(close: true),
+                _refraction.DisposeAsync().AsTask(), Task.WhenAll(_clipboardTasks.ToArray()));
+        }
+        catch (Exception ex) { Log.Info($"shutdown drain fault type={ex.GetType().Name}"); }
         _watcher.Dispose();
         _translator.Dispose();
         if (_clipboardHooked)
@@ -789,6 +824,7 @@ public partial class IslandWindow : Window
 
     void Nudge()
     {
+        if (_shutdown) return;
         if (_renderLive || _inPulse)
             return;
         Pulse(1.0 / 60.0);
@@ -827,6 +863,7 @@ public partial class IslandWindow : Window
 
     void Pulse(double dt)
     {
+        if (_shutdown) return;
         if (_inPulse)
             return;
         _inPulse = true;
@@ -1004,10 +1041,11 @@ public partial class IslandWindow : Window
         _lastCaptureUtc = DateTime.UtcNow;
         _refraction.TryBeginCapture(pillLeft, pillTop, pillWidth, pillHeight, visualLeft, visualTop, visualW, visualH, radius * dpi, dpi, ok =>
         {
-            if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+            if (_shutdown || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
                 return;
             Dispatcher.BeginInvoke(() =>
             {
+                if (_shutdown) return;
                 if (ok)
                     _refraction.CompleteCapture();
                 else
@@ -1069,6 +1107,7 @@ public partial class IslandWindow : Window
 
     void SyncLoops()
     {
+        if (_shutdown) return;
         bool waveform = _director.Mode == IslandMode.Media && _media.Current.IsPlaying;
         bool clock = _director.Mode == IslandMode.Idle && _director.Expanded;
         bool transitioning = !_animator.IsSettled;
@@ -1381,23 +1420,31 @@ public partial class IslandWindow : Window
             return;
         }
 
-        _ = RunTranslationAsync(request.Value);
+        var task = RunTranslationAsync(request.Value);
+        _clipboardTasks.Add(task);
+        _ = ObserveClipboardAsync(task);
+    }
+
+    async Task ObserveClipboardAsync(Task task)
+    {
+        try { await task; }
+        finally { _clipboardTasks.Remove(task); }
     }
 
     async Task RunTranslationAsync(TranslateRequest request)
     {
         _translateCts?.Cancel();
-        CancelLiveTranslations();
-        _translateCts = new CancellationTokenSource();
-        var token = _translateCts.Token;
+        using var cts = new CancellationTokenSource();
+        _translateCts = cts;
+        var token = cts.Token;
         TranslateNotice.ShowBusy(request.Clipped);
         _director.PushNotice(IslandMode.Translate, DateTime.UtcNow);
         Nudge();
         try
         {
             Log.Info($"translate send {request.Text.Length} {request.Source}->{request.Target}");
-            var result = await _translator.TranslateAsync(request, token);
-            if (token.IsCancellationRequested)
+            var result = await _translator.TranslateAsync(request, TranslateProviderSettings.Read(Settings), token);
+            if (token.IsCancellationRequested || _shutdown)
                 return;
             _translate.RememberResult(result);
             _director.ShowTranslationResult(result, DateTime.UtcNow);
@@ -1410,13 +1457,14 @@ public partial class IslandWindow : Window
         catch (Exception ex)
         {
             Log.Info("translate failed " + ex.GetType().Name);
-            if (!token.IsCancellationRequested)
+            if (!token.IsCancellationRequested && !_shutdown)
             {
                 TranslateNotice.ShowError(ex is InvalidOperationException ? ex.Message : "翻译没有完成。");
                 _director.PushNotice(IslandMode.Translate, DateTime.UtcNow);
                 Nudge();
             }
         }
+        finally { if (ReferenceEquals(_translateCts, cts)) _translateCts = null; }
     }
 
     void PaintTranslationRecall()
@@ -1566,6 +1614,7 @@ public partial class IslandWindow : Window
 
     public void ToggleLiveTranslate()
     {
+        if (_shutdown) return;
         if (LiveTranslateIsOpen)
         {
             StopLiveTranslate(collapseUi: true);
@@ -1587,6 +1636,7 @@ public partial class IslandWindow : Window
         LiveTranslateNotice.ClearSubtitle();
         LiveTranslateNotice.ShowStatus(LiveTranslateCopy.LoadingModel, working: true, progress: null, canCancel: false);
         Log.Info("live-translate start");
+        _livePump.Start();
         _liveTranslate.Start();
         Nudge();
         await Task.CompletedTask;
@@ -1596,6 +1646,7 @@ public partial class IslandWindow : Window
     {
         CancelLiveTranslations();
         _liveTranslate.Stop();
+        if (_shutdown) return;
         _liveCaptions.Reset();
         LiveTranslateNotice.ClearSubtitle();
         if (collapseUi && (_director.LiveTranslateOpen || _director.Mode == IslandMode.LiveTranslate))
@@ -1606,6 +1657,7 @@ public partial class IslandWindow : Window
 
     void OnLiveTranslateStatus(LiveTranslateSnapshot snapshot)
     {
+        if (_shutdown) return;
         if (snapshot.Phase == LiveTranslatePhase.Off && !_director.LiveTranslateOpen)
             return;
         if (snapshot.Phase == LiveTranslatePhase.Listening)
@@ -1621,155 +1673,39 @@ public partial class IslandWindow : Window
         Nudge();
     }
 
-    void OnLiveTranslateTranscript(string text, string? language, bool final)
+    void OnLiveTranslateTranscript(int utteranceId, string text, string? language, bool final)
     {
-        if (!_director.LiveTranslateOpen)
-            return;
-        var plan = LiveTranslatePolicy.Plan(text, language);
-        if (plan.Decision == LiveTranslateDecision.Empty)
-            return;
-
-        var now = DateTime.UtcNow;
+        if (_shutdown || !_director.LiveTranslateOpen) return;
+        var edit = _liveCaptions.AcceptUtterance(utteranceId, text, DateTime.UtcNow, final,
+            alreadyChinese: TranslatePolicy.LooksChinese(text));
+        if (edit.Id == 0) return;
+        LiveTranslateNotice.ShowCaptions(_liveCaptions.Items);
+        if (!LiveTranslatePolicy.IsUsableTranscript(text)) { Nudge(); return; }
+        string recognized = edit.Recognized;
+        var plan = LiveTranslatePolicy.Plan(recognized,
+            LiveTranslatePolicy.IsChineseLanguage(language) && !TranslatePolicy.LooksChinese(recognized) ? null : language);
         if (plan.Decision == LiveTranslateDecision.AlreadyChinese)
         {
-            _liveCaptions.Accept(plan.DisplayText, now, final, alreadyChinese: true);
-            LiveTranslateNotice.ShowCaptions(_liveCaptions.Items);
-            var chineseStatus = final ? LiveTranslateCopy.AlreadyChinese : LiveTranslateCopy.Recording;
-            LiveTranslateNotice.ShowStatus(chineseStatus, working: true, progress: null, canCancel: false);
-            Nudge();
-            return;
+            _livePump.Remove(edit.Id);
+            LiveTranslateNotice.ShowStatus(LiveTranslateCopy.AlreadyChinese, true, null, false); Nudge(); return;
         }
-
-        if (plan.Request is not { } request)
-            return;
-
-        var edit = _liveCaptions.Accept(plan.DisplayText, now, final);
-        int id = edit.Id;
-        var recognized = edit.Recognized;
-        if (edit.Merged)
-        {
-            var again = LiveTranslatePolicy.Plan(recognized, language);
-            if (again.Decision == LiveTranslateDecision.Empty)
-            {
-                AbandonLiveTranslation(id);
-                LiveTranslateNotice.ShowCaptions(_liveCaptions.Items);
-                Nudge();
-                return;
-            }
-            if (again.Decision == LiveTranslateDecision.AlreadyChinese)
-            {
-                AbandonLiveTranslation(id);
-                _liveCaptions.Complete(id, recognized, null);
-                LiveTranslateNotice.ShowCaptions(_liveCaptions.Items);
-                LiveTranslateNotice.ShowStatus(LiveTranslateCopy.AlreadyChinese, working: true, progress: null, canCancel: false);
-                Nudge();
-                return;
-            }
-            if (again.Request is { } rebuilt)
-                request = rebuilt;
-        }
-
-        LiveTranslateNotice.ShowCaptions(_liveCaptions.Items);
-        var api = TranslateApiPolicy.From(Settings.TranslateApi, Settings.TranslateApiUrl, Settings.TranslateApiModel, Settings.TranslateApiKey);
+        if (plan.Request is not { } request) return;
+        if (!_liveCaptions.NeedsTranslation(edit.Id)) { Nudge(); return; }
+        var api = TranslateProviderSettings.Read(Settings);
         if (!TranslateApiPolicy.IsReady(api))
         {
-            _liveCaptions.Fail(id);
-            LiveTranslateNotice.ShowCaptions(_liveCaptions.Items);
-            LiveTranslateNotice.ShowStatus(LiveTranslateCopy.ApiNotConfigured, working: true, progress: null, canCancel: false);
-            Nudge();
-            return;
+            _liveCaptions.Fail(edit.Id);
+            LiveTranslateNotice.ShowStatus(LiveTranslateCopy.ApiNotConfigured, true, null, false);
         }
-
-        LiveTranslateNotice.ShowStatus(LiveTranslateCopy.Translating, working: true, progress: null, canCancel: false);
+        else
+        {
+            _livePump.Enqueue(new(edit.Id, recognized, request with { Text = recognized, Clipped = false }, api));
+            LiveTranslateNotice.ShowStatus(LiveTranslateCopy.Translating, true, null, false);
+        }
         Nudge();
-        _ = TranslateLiveAsync(request, id, recognized, api);
     }
 
-    void CancelLiveTranslations()
-    {
-        foreach (var cts in _liveTranslateCts.Values)
-        {
-            try { cts.Cancel(); }
-            catch { }
-            try { cts.Dispose(); }
-            catch { }
-        }
-
-        _liveTranslateCts.Clear();
-        _liveTranslateGen.Clear();
-    }
-
-    void AbandonLiveTranslation(int captionId)
-    {
-        if (_liveTranslateCts.TryGetValue(captionId, out var cts))
-        {
-            try { cts.Cancel(); }
-            catch { }
-            try { cts.Dispose(); }
-            catch { }
-            _liveTranslateCts.Remove(captionId);
-        }
-
-        _liveTranslateGen[captionId] = _liveTranslateGen.TryGetValue(captionId, out var gen) ? gen + 1 : 1;
-    }
-
-    async Task TranslateLiveAsync(TranslateRequest request, int captionId, string original, TranslateApiOptions api)
-    {
-        int gen = (_liveTranslateGen.TryGetValue(captionId, out var previousGen) ? previousGen : 0) + 1;
-        _liveTranslateGen[captionId] = gen;
-        if (_liveTranslateCts.TryGetValue(captionId, out var previous))
-        {
-            try { previous.Cancel(); }
-            catch { }
-            try { previous.Dispose(); }
-            catch { }
-        }
-
-        var cts = new CancellationTokenSource();
-        _liveTranslateCts[captionId] = cts;
-        try
-        {
-            var result = await _translator.TranslateAsync(request, api, cts.Token).ConfigureAwait(true);
-            if (cts.IsCancellationRequested || !_director.LiveTranslateOpen)
-                return;
-            if (!_liveTranslateGen.TryGetValue(captionId, out var current) || current != gen)
-                return;
-            if (!_liveCaptions.Complete(captionId, LiveTranslatePolicy.ForIsland(result), original))
-                return;
-            LiveTranslateNotice.ShowCaptions(_liveCaptions.Items);
-            var message = _liveCaptions.HasPending ? LiveTranslateCopy.Translating : LiveTranslateCopy.Listening;
-            LiveTranslateNotice.ShowStatus(message, working: true, progress: null, canCancel: false);
-            Nudge();
-        }
-        catch (OperationCanceledException)
-        {
-            // A newer request may still own this caption id after a short-fragment merge.
-            if (_director.LiveTranslateOpen && _liveTranslateGen.TryGetValue(captionId, out var current) && current == gen)
-                _liveCaptions.Fail(captionId);
-        }
-        catch (Exception ex)
-        {
-            Log.Error("live-translate-text", ex);
-            if (!_director.LiveTranslateOpen)
-                return;
-            if (!_liveTranslateGen.TryGetValue(captionId, out var current) || current != gen)
-                return;
-            _liveCaptions.Fail(captionId);
-            LiveTranslateNotice.ShowCaptions(_liveCaptions.Items);
-            var message = ex is InvalidOperationException ? ex.Message : LiveTranslateCopy.TranslateFailed;
-            LiveTranslateNotice.ShowStatus(message, working: true, progress: null, canCancel: false);
-            Nudge();
-        }
-        finally
-        {
-            if (_liveTranslateCts.TryGetValue(captionId, out var owned) && ReferenceEquals(owned, cts))
-            {
-                _liveTranslateCts.Remove(captionId);
-                try { cts.Dispose(); }
-                catch { }
-            }
-        }
-    }
+    void CancelLiveTranslations() => _ = _livePump.StopAsync();
 
     async Task StartCameraAsync()
     {

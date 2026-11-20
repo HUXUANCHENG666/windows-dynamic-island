@@ -10,7 +10,7 @@ using DynamicIsland.Services;
 namespace DynamicIsland.Visuals;
 
 /// <summary>捕获/渲染各一任务、完成槽一个；引用计数 pad 和池化像素不复制整张捕获、不冻结新 WPF 图。</summary>
-sealed class GlassRefractionBuffer : IDisposable
+sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
 {
     public const int Pad = LiquidRefraction.DefaultPad;
     readonly object _gate = new();
@@ -23,6 +23,7 @@ sealed class GlassRefractionBuffer : IDisposable
     WriteableBitmap? _bitmap;
     bool _renderBusy, _captureBusy, _disposed;
     bool _gpuImage;
+    Task _renderTask = Task.CompletedTask, _captureTask = Task.CompletedTask;
     int _epoch;
     DateTime _retry;
     public ImageSource? Image => _gpuImage ? null : _bitmap;
@@ -64,7 +65,7 @@ sealed class GlassRefractionBuffer : IDisposable
                 int epoch = _epoch;
                 var pad = _pad?.Retain();
                 surface?.CopySnapshotTo(_field);
-                _ = Task.Run(() =>
+                _renderTask = Task.Run(() =>
                 {
                     long start = Stopwatch.GetTimestamp();
                     GlassPixels? frame = null;
@@ -131,8 +132,11 @@ sealed class GlassRefractionBuffer : IDisposable
     public bool TryBeginCapture(int left, int top, int w, int h, int visualLeft, int visualTop,
         int visualW, int visualH, double radius, double dpi, Action<bool> completed)
     {
-        lock (_gate) { if (_disposed || _captureBusy) return false; _captureBusy = true; }
-        _ = Task.Run(() =>
+        lock (_gate)
+        {
+        if (_disposed || _captureBusy) return false;
+        _captureBusy = true;
+        _captureTask = Task.Run(() =>
         {
             long start = Stopwatch.GetTimestamp(); CapturedPad? frame = null;
             try { frame = _capture.Capture(left, top, w, h, radius, dpi, visualLeft, visualTop, visualW, visualH); }
@@ -149,6 +153,7 @@ sealed class GlassRefractionBuffer : IDisposable
             try { completed(ok); } catch { AbandonCapture(); }
         });
         return true;
+        }
     }
     public void CompleteCapture()
     {
@@ -157,6 +162,20 @@ sealed class GlassRefractionBuffer : IDisposable
     public void AbandonCapture()
     {
         lock (_gate) { _pending?.Dispose(); _pending = null; _captureBusy = false; }
+    }
+    public async ValueTask DisposeAsync()
+    {
+        Task draining;
+        lock (_gate) { Dispose(); draining = Task.WhenAll(_captureTask, _renderTask); }
+        try { await draining.ConfigureAwait(false); }
+        finally
+        {
+            lock (_gate)
+            {
+                _captureBusy = _renderBusy = false;
+                _capture.Dispose(); _gpu?.Dispose(); _gpu = null;
+            }
+        }
     }
     public void Dispose()
     {

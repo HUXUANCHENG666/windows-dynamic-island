@@ -9,7 +9,7 @@ namespace DynamicIsland.Native;
 /// 不走 NAudio 的设备枚举，避免单文件发布后打开设备时强制转换失败。
 /// 打开、读取、关闭都在同一条套间线程上，避免跨线程使用 COM 对象。
 /// </summary>
-sealed class LoopbackEndpoint : IDisposable
+sealed class LoopbackEndpoint : IDisposable, IAsyncDisposable
 {
     const int ShareModeShared = 0;
     const int DataFlowRender = 0;
@@ -27,6 +27,10 @@ sealed class LoopbackEndpoint : IDisposable
     static readonly Guid IidAudioCaptureClient = new("C8ADBD64-E71E-48A0-A4DE-185C395CD317");
     static readonly int[] DefaultRoles = [1, 0, 2];
 
+    readonly object _lifetime = new();
+    readonly TaskCompletionSource _finished = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    readonly TaskCompletionSource _openReturned = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    Task? _cleanup;
     readonly ManualResetEventSlim _opened = new(false);
     readonly ManualResetEventSlim _pump = new(false);
     EventWaitHandle? _bufferReady;
@@ -50,8 +54,8 @@ sealed class LoopbackEndpoint : IDisposable
 
     public bool Open(out WaveFormatKind.WaveLayout layout, out string deviceLabel, out Exception? error)
     {
-        if (_thread != null)
-            throw new InvalidOperationException("already open");
+        if (_thread != null || _disposed)
+            throw new InvalidOperationException("endpoint is already open or stopped");
 
         _opened.Reset();
         _pump.Reset();
@@ -64,7 +68,8 @@ sealed class LoopbackEndpoint : IDisposable
         };
         _thread.SetApartmentState(ApartmentState.STA);
         _thread.Start();
-        _opened.Wait();
+        try { _opened.Wait(); }
+        finally { _openReturned.TrySetResult(); }
         error = _openError;
         layout = _layout;
         deviceLabel = _deviceLabel;
@@ -73,23 +78,39 @@ sealed class LoopbackEndpoint : IDisposable
 
     public void BeginPump() => _pump.Set();
 
-    public void Dispose()
+    public void Dispose() => _ = DisposeAsync();
+    public ValueTask DisposeAsync()
     {
-        if (_disposed)
-            return;
-        _disposed = true;
-        _running = false;
-        try { _bufferReady?.Set(); } catch { }
-        _pump.Set();
-        var thread = _thread;
-        if (thread != null && thread != Thread.CurrentThread)
-            thread.Join(2000);
-        _opened.Dispose();
-        _pump.Dispose();
-        try { _bufferReady?.Dispose(); } catch { }
+        lock (_lifetime)
+        {
+            if (_cleanup != null) return new ValueTask(_cleanup);
+            _disposed = true;
+            _running = false;
+            // Do not close any handle while its STA owner can still Set/Wait/ReleaseBuffer.
+            _bufferReady?.Set();
+            _pump.Set();
+            if (_thread == null) { _finished.TrySetResult(); _openReturned.TrySetResult(); }
+            _cleanup = CleanupAsync();
+            return new ValueTask(_cleanup);
+        }
+    }
+    async Task CleanupAsync()
+    {
+        await _finished.Task.ConfigureAwait(false);
+        await _openReturned.Task.ConfigureAwait(false);
+        _opened.Dispose(); _pump.Dispose(); _bufferReady?.Dispose();
     }
 
     void Run()
+    {
+        try { RunOwned(); }
+        finally
+        {
+            try { CloseLocked(); }
+            finally { _finished.TrySetResult(); }
+        }
+    }
+    void RunOwned()
     {
         try
         {
@@ -122,8 +143,6 @@ sealed class LoopbackEndpoint : IDisposable
             }
         }
 
-        CloseLocked();
-        _thread = null;
     }
 
     void OpenLocked()

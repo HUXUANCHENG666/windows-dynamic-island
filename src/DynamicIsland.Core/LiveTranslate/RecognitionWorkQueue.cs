@@ -8,6 +8,8 @@ public sealed class RecognitionWorkQueue
 {
     readonly List<SpeechChunk> _items = new();
 
+    public const int Capacity = 8;
+    public int Dropped { get; private set; }
     public int Count => _items.Count;
 
     public void Enqueue(SpeechChunk chunk)
@@ -23,6 +25,8 @@ public sealed class RecognitionWorkQueue
             _items.RemoveAll(item => !item.Final && item.UtteranceId == chunk.UtteranceId);
         }
 
+        _items.RemoveAll(item => item.Final && chunk.Final && item.UtteranceId == chunk.UtteranceId);
+        if (_items.Count >= Capacity) { _items.RemoveAt(0); Dropped++; }
         _items.Add(chunk);
     }
 

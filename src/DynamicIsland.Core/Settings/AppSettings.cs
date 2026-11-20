@@ -39,6 +39,8 @@ public sealed class AppSettings
 
     public string? TranslateApiKey { get; set; }
 
+    public Dictionary<string, TranslateProviderProfile> TranslateProviders { get; set; } = new();
+
     /// <summary>整个岛的缩放，1 为设计尺寸。会记住。</summary>
     public double IslandScale { get; set; } = AppearancePolicy.DefaultScale;
 
@@ -77,4 +79,11 @@ public static class SettingsJson
             return new AppSettings();
         }
     }
+}
+
+public sealed class TranslateProviderProfile
+{
+    public string? Url { get; set; }
+    public string? Key { get; set; }
+    public string? Region { get; set; }
 }

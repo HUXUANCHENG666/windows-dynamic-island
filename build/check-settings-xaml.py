@@ -31,7 +31,7 @@ for target in re.findall(r'\{Binding ElementName=(\w+)\}', xaml.read_text()):
     assert target in names, 'Missing binding target: ' + target
 required = '''Navigation AppearancePage TranslationPage NotificationsPage AppsPage ToolsPage BodyScroll
 ScaleSlider ScaleReset SkinDefault SkinGlass MonitorOptions DockOptions LiveToggle DirAuto DirZhEn DirEnZh
-ApiDefault ApiCustom ApiUrl ApiModel ApiKey ApiSave ApiRevert NoticeToggle StealthToggle HideName HideAdd
+ApiDefault ApiCustom ApiLibre ApiAzure ApiDeepL ApiRegion ProviderHint ApiUrl ApiModel ApiKey ApiSave ApiRevert NoticeToggle StealthToggle HideName HideAdd
 HideBrowse HideCurrent HideRefresh HideList RunningApps ActTranslate ActRecall ActCamera ActLiveTranslate
 ActStopwatch ActFocus ActLog UnsavedPrompt SaveAndClose DiscardAndClose ContinueEditing'''.split()
 assert set(required) <= set(names), 'Lost setting or action'

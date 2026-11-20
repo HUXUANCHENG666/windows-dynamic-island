@@ -15,6 +15,8 @@ public partial class SettingsWindow : Window
 {
     readonly ISettingsController _host;
     readonly string _suggested;
+    readonly Dictionary<TranslateApiKind, TranslateApiOptions> _apiDrafts = new();
+    TranslateApiKind _draftKind;
     bool _loading = true;
     bool _apiDirty;
     bool _allowClose;
@@ -133,14 +135,12 @@ public partial class SettingsWindow : Window
         _loading = true;
         try
         {
-            var s = _host.Settings;
-            ApiCustom.IsChecked = TranslateApiPolicy.Parse(s.TranslateApi) == TranslateApiKind.Custom;
-            ApiDefault.IsChecked = ApiCustom.IsChecked != true;
-            ApiUrl.Text = s.TranslateApiUrl ?? "";
-            ApiModel.Text = s.TranslateApiModel ?? "";
-            ApiKey.Password = s.TranslateApiKey ?? "";
+            foreach (var provider in Enum.GetValues<TranslateApiKind>()) _apiDrafts[provider] = TranslateProviderSettings.Read(_host.Settings, provider);
+            _draftKind = TranslateApiPolicy.Parse(_host.Settings.TranslateApi);
+            foreach (var button in new[] { ApiDefault, ApiCustom, ApiLibre, ApiAzure, ApiDeepL })
+                button.IsChecked = (string)button.Tag == _draftKind.ToString();
+            FillApiDraft();
             _apiDirty = false;
-            ApiFields.Visibility = ApiCustom.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
             ApiStatus.Text = "接口配置已保存。切换或编辑后请点击保存。";
             UpdateDirtyStatus();
         }
@@ -199,11 +199,27 @@ public partial class SettingsWindow : Window
         if (sender is Button { Tag: string action }) { _host.Tool(action); RefreshFromIsland(); }
     }
 
+    void CacheApiDraft() => _apiDrafts[_draftKind] = new(_draftKind, ApiUrl.Text, ApiModel.Text, ApiKey.Password, ApiRegion.Text);
+    void FillApiDraft()
+    {
+        var previous = _loading; _loading = true;
+        try
+        {
+            var api = _apiDrafts[_draftKind];
+            ApiUrl.Text = api.BaseUrl ?? ""; ApiModel.Text = api.Model ?? ""; ApiKey.Password = api.ApiKey ?? ""; ApiRegion.Text = api.Region ?? "";
+            ProviderHint.Text = TranslateProviderSettings.Description(_draftKind);
+            ApiFields.Visibility = _draftKind == TranslateApiKind.Default ? Visibility.Collapsed : Visibility.Visible;
+            ApiUrl.Visibility = ApiUrlLabel.Visibility = ApiUrlHelp.Visibility = _draftKind is TranslateApiKind.Custom or TranslateApiKind.Libre ? Visibility.Visible : Visibility.Collapsed;
+            ApiModel.Visibility = ApiModelLabel.Visibility = _draftKind == TranslateApiKind.Custom ? Visibility.Visible : Visibility.Collapsed;
+            ApiRegion.Visibility = ApiRegionLabel.Visibility = _draftKind == TranslateApiKind.Azure ? Visibility.Visible : Visibility.Collapsed;
+            ApiKeyLabel.Content = _draftKind == TranslateApiKind.Libre ? "API 密钥（实例未启用密钥时可空）" : "API 密钥";
+        }
+        finally { _loading = previous; }
+    }
     void Api_Changed(object sender, RoutedEventArgs e)
     {
-        if (_loading) return;
-        ApiFields.Visibility = ApiCustom.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
-        MarkApiDirty();
+        if (_loading || sender is not RadioButton { Tag: string tag } || !Enum.TryParse<TranslateApiKind>(tag, out var kind)) return;
+        CacheApiDraft(); _draftKind = kind; FillApiDraft(); MarkApiDirty();
     }
     void ApiText_Changed(object sender, TextChangedEventArgs e) { if (!_loading) MarkApiDirty(); }
     void ApiKey_Changed(object sender, RoutedEventArgs e) { if (!_loading) MarkApiDirty(); }
@@ -220,8 +236,9 @@ public partial class SettingsWindow : Window
     }
     bool SaveApi()
     {
-        var kind = ApiCustom.IsChecked == true ? TranslateApiKind.Custom : TranslateApiKind.Default;
-        string error = SettingsPagePolicy.ValidateApi(kind, ApiUrl.Text, ApiModel.Text, ApiKey.Password);
+        CacheApiDraft();
+        var api = _apiDrafts[_draftKind];
+        string error = SettingsPagePolicy.ValidateApi(api.Kind, api.BaseUrl, api.Model, api.ApiKey);
         if (error.Length > 0)
         {
             ApiStatus.Text = error;
@@ -229,7 +246,7 @@ public partial class SettingsWindow : Window
             BodyScroll.ScrollToBottom();
             return false;
         }
-        _host.Api(kind, ApiUrl.Text, ApiModel.Text, ApiKey.Password);
+        _host.Api(api, _apiDrafts.Values.ToArray());
         _apiDirty = false;
         ReadApi();
         return true;

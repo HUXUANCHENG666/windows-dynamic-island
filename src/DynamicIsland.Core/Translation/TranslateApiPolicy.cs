@@ -7,14 +7,18 @@ namespace DynamicIsland.Core.Translation;
 public enum TranslateApiKind
 {
     Default,
-    Custom
+    Custom,
+    Libre,
+    Azure,
+    DeepL
 }
 
 public readonly record struct TranslateApiOptions(
     TranslateApiKind Kind,
     string? BaseUrl,
     string? Model,
-    string? ApiKey);
+    string? ApiKey,
+    string? Region = null);
 
 /// <summary>
 /// 实时翻译默认走 MyMemory，不需要密钥。
@@ -33,24 +37,19 @@ public static class TranslateApiPolicy
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
-    public static TranslateApiKind Parse(string? value) =>
-        string.Equals(value, CustomSetting, StringComparison.OrdinalIgnoreCase)
-            ? TranslateApiKind.Custom
-            : TranslateApiKind.Default;
-
-    public static string ToSetting(TranslateApiKind kind) =>
-        kind == TranslateApiKind.Custom ? CustomSetting : DefaultSetting;
+    public static TranslateApiKind Parse(string? value) => value?.ToLowerInvariant() switch
+    {
+        "custom" => TranslateApiKind.Custom, "libre" => TranslateApiKind.Libre,
+        "azure" => TranslateApiKind.Azure, "deepl" => TranslateApiKind.DeepL, _ => TranslateApiKind.Default
+    };
+    public static string ToSetting(TranslateApiKind kind) => kind.ToString().ToLowerInvariant();
 
     public static TranslateApiOptions From(string? kind, string? url, string? model, string? key) =>
         new(Parse(kind), EmptyToNull(url), EmptyToNull(model), EmptyToNull(key));
 
     public static bool IsReady(TranslateApiOptions options)
     {
-        if (options.Kind != TranslateApiKind.Custom)
-            return true;
-        return TryNormalizeEndpoint(options.BaseUrl, out _, out _)
-            && !string.IsNullOrWhiteSpace(options.Model)
-            && !string.IsNullOrWhiteSpace(options.ApiKey);
+        return Settings.SettingsPagePolicy.ValidateApi(options.Kind, options.BaseUrl, options.Model, options.ApiKey).Length == 0;
     }
 
     public static bool TryNormalizeEndpoint(string? url, out string endpoint, out string error)
@@ -101,14 +100,14 @@ public static class TranslateApiPolicy
         return true;
     }
 
-    public static string ChatCompletionsBody(string model, string text)
+    public static string ChatCompletionsBody(string model, string text, string? target = null)
     {
         var payload = new ChatRequest(
             model.Trim(),
             0,
             new[]
             {
-                new ChatMessage("system", SystemPrompt),
+                new ChatMessage("system", target?.StartsWith("en", StringComparison.OrdinalIgnoreCase) == true ? "Translate the user text into English. Return only the translation, without explanation or quotation marks." : SystemPrompt),
                 new ChatMessage("user", text)
             });
         return JsonSerializer.Serialize(payload, JsonOptions);

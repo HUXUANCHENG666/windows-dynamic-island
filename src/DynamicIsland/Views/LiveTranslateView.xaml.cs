@@ -149,6 +149,16 @@ public partial class LiveTranslateView : UserControl
         }
 
         double keep = CaptionScroll.VerticalOffset;
+        int? anchor = null; double within = 0;
+        if (!_stickToEnd)
+        {
+            foreach (FrameworkElement row in CaptionList.Children)
+            {
+                double y = row.TranslatePoint(new Point(0, 0), CaptionList).Y;
+                if (y + row.ActualHeight <= keep) continue;
+                anchor = row.Tag as int?; within = keep - y; break;
+            }
+        }
         _programmaticScroll = true;
         CaptionList.Children.Clear();
         for (int i = 0; i < items.Count; i++)
@@ -158,7 +168,10 @@ public partial class LiveTranslateView : UserControl
         if (_stickToEnd)
             QueueStickToEnd();
         else
-            RestoreOffset(keep);
+        {
+            var row = CaptionList.Children.OfType<FrameworkElement>().FirstOrDefault(child => Equals(child.Tag, anchor));
+            RestoreOffset(row == null ? 0 : row.TranslatePoint(new Point(0, 0), CaptionList).Y + within);
+        }
     }
 
     public void ClearSubtitle()
@@ -176,7 +189,10 @@ public partial class LiveTranslateView : UserControl
             return;
         double step = delta / 120.0 * ScrollLine;
         double max = Math.Max(0, CaptionScroll.ExtentHeight - CaptionScroll.ViewportHeight);
-        CaptionScroll.ScrollToVerticalOffset(Math.Clamp(CaptionScroll.VerticalOffset - step, 0, max));
+        double target = Math.Clamp(CaptionScroll.VerticalOffset - step, 0, max);
+        ++_stickGeneration; _pendingStick = false;
+        _stickToEnd = CaptionScrollPolicy.IsAtEnd(target, CaptionScroll.ViewportHeight, CaptionScroll.ExtentHeight);
+        CaptionScroll.ScrollToVerticalOffset(target);
     }
 
     void OnCaptionScrollChanged(object sender, ScrollChangedEventArgs e)
@@ -198,6 +214,7 @@ public partial class LiveTranslateView : UserControl
         StickToEnd();
         _pendingStick = true;
         int generation = ++_stickGeneration;
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) { _pendingStick = false; return; }
         Dispatcher.BeginInvoke(() =>
         {
             if (generation != _stickGeneration)
@@ -220,6 +237,7 @@ public partial class LiveTranslateView : UserControl
 
     void RestoreOffset(double offset)
     {
+        ++_stickGeneration;
         _pendingStick = false;
         _programmaticScroll = true;
         CaptionScroll.UpdateLayout();
@@ -230,7 +248,7 @@ public partial class LiveTranslateView : UserControl
 
     FrameworkElement BuildRow(LiveTranslateCaption caption, bool newest)
     {
-        var block = new StackPanel { Margin = new Thickness(0, 0, 0, newest ? 0 : 8) };
+        var block = new StackPanel { Tag = caption.Id, Margin = new Thickness(0, 0, 0, newest ? 0 : 8) };
         var time = new TextBlock
         {
             FontFamily = TitleText.FontFamily,

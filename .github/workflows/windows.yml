@@ -25,6 +25,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
+      - name: Run managed caption and shutdown stress regressions on Windows
+        run: dotnet test tests/DynamicIsland.Core.Tests/DynamicIsland.Core.Tests.csproj -c Release
       - name: Compile embedded glass GPU shaders
         shell: pwsh
         run: ./build/check-glass-shader.ps1

@@ -177,16 +177,19 @@
                                     <TextBlock Text="翻译方向" Style="{StaticResource SectionTitle}"/>
                                     <WrapPanel><RadioButton x:Name="DirAuto" GroupName="Direction" Content="自动" Tag="Auto" Checked="Direction_Changed"/><RadioButton x:Name="DirZhEn" GroupName="Direction" Content="中 → 英" Tag="ChineseToEnglish" Checked="Direction_Changed"/><RadioButton x:Name="DirEnZh" GroupName="Direction" Content="英 → 中" Tag="EnglishToChinese" Checked="Direction_Changed"/></WrapPanel>
                                     <TextBlock Text="翻译接口" Style="{StaticResource SectionTitle}"/>
-                                    <WrapPanel><RadioButton x:Name="ApiDefault" GroupName="Api" Content="默认 · 无需密钥" Checked="Api_Changed"/><RadioButton x:Name="ApiCustom" GroupName="Api" Content="OpenAI 兼容接口" Checked="Api_Changed"/></WrapPanel>
-                                    <TextBlock Text="接口配置单独保存；此处只做本地格式校验，不发起测试请求。" Style="{StaticResource Hint}"/>
+                                    <WrapPanel><RadioButton x:Name="ApiDefault" GroupName="Api" Tag="Default" Content="MyMemory · 免密钥" Checked="Api_Changed"/><RadioButton x:Name="ApiCustom" GroupName="Api" Tag="Custom" Content="OpenAI 兼容" Checked="Api_Changed"/><RadioButton x:Name="ApiLibre" GroupName="Api" Tag="Libre" Content="Libre · 自建" Checked="Api_Changed"/><RadioButton x:Name="ApiAzure" GroupName="Api" Tag="Azure" Content="Azure · F0" Checked="Api_Changed"/><RadioButton x:Name="ApiDeepL" GroupName="Api" Tag="DeepL" Content="DeepL · 额度" Checked="Api_Changed"/></WrapPanel>
+                                    <TextBlock x:Name="ProviderHint" Style="{StaticResource Hint}"/>
+                                    <TextBlock Text="仅发送到明确选择的源，不自动切源。接口配置单独保存，只做本地校验。有密钥不代表免费，请确认账户计划与剩余额度。" Style="{StaticResource Hint}"/>
                                     <StackPanel x:Name="ApiFields" Margin="0,16,0,0" Visibility="Collapsed">
-                                        <Label Target="{Binding ElementName=ApiUrl}" Foreground="#C3CCD7" Content="接口地址" Padding="0,0,0,7"/>
+                                        <Label x:Name="ApiUrlLabel" Target="{Binding ElementName=ApiUrl}" Foreground="#C3CCD7" Content="接口地址" Padding="0,0,0,7"/>
                                         <TextBox x:Name="ApiUrl" TextChanged="ApiText_Changed" AutomationProperties.Name="接口地址"/>
-                                        <TextBlock Text="HTTPS；本机服务允许 HTTP。自动补全 /v1/chat/completions。" Style="{StaticResource Hint}"/>
-                                        <Label Target="{Binding ElementName=ApiModel}" Foreground="#C3CCD7" Content="模型名称" Padding="0,16,0,7"/>
+                                        <TextBlock x:Name="ApiUrlHelp" Text="HTTPS；本机服务允许 HTTP。OpenAI 自动补全 /v1/chat/completions。" Style="{StaticResource Hint}"/>
+                                        <Label x:Name="ApiModelLabel" Target="{Binding ElementName=ApiModel}" Foreground="#C3CCD7" Content="模型名称" Padding="0,16,0,7"/>
                                         <TextBox x:Name="ApiModel" TextChanged="ApiText_Changed" AutomationProperties.Name="模型名称"/>
-                                        <Label Target="{Binding ElementName=ApiKey}" Foreground="#C3CCD7" Content="API 密钥" Padding="0,16,0,7"/>
+                                        <Label x:Name="ApiKeyLabel" Target="{Binding ElementName=ApiKey}" Foreground="#C3CCD7" Content="API 密钥" Padding="0,16,0,7"/>
                                         <PasswordBox x:Name="ApiKey" PasswordChanged="ApiKey_Changed" AutomationProperties.Name="API 密钥"/>
+                                        <Label x:Name="ApiRegionLabel" Target="{Binding ElementName=ApiRegion}" Foreground="#C3CCD7" Content="Azure 资源区域（global 可留空）" Padding="0,16,0,7"/>
+                                        <TextBox x:Name="ApiRegion" TextChanged="ApiText_Changed" AutomationProperties.Name="Azure 资源区域"/>
                                         <TextBlock Text="保留现有本地存储方式；密钥不写入日志。" Style="{StaticResource Hint}"/>
                                     </StackPanel>
                                     <TextBlock x:Name="ApiStatus" Foreground="#D5BA89" Margin="0,14,0,10" AutomationProperties.LiveSetting="Polite"/>

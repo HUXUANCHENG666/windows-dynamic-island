@@ -21,7 +21,7 @@ internal interface ISettingsController
     void Scale(double value);
     void Skin(IslandSkin skin);
     void Direction(TranslateDirection direction);
-    void Api(TranslateApiKind kind, string? url, string? model, string? key);
+    void Api(TranslateApiOptions active, IReadOnlyList<TranslateApiOptions> profiles);
     void Notifications();
     void Stealth();
     void Live();
@@ -42,7 +42,7 @@ internal sealed class IslandSettingsController(IslandWindow island) : ISettingsC
     public void Scale(double value) => island.SetIslandScale(value);
     public void Skin(IslandSkin skin) => island.SetIslandSkin(skin);
     public void Direction(TranslateDirection direction) => island.SetTranslateDirection(direction);
-    public void Api(TranslateApiKind kind, string? url, string? model, string? key) => island.SetTranslateApi(kind, url, model, key);
+    public void Api(TranslateApiOptions active, IReadOnlyList<TranslateApiOptions> profiles) => island.SetTranslateProviders(active, profiles);
     public void Notifications() => island.ToggleNotificationCenter();
     public void Stealth() => island.ToggleStealth();
     public void Live() => island.ToggleLiveTranslate();

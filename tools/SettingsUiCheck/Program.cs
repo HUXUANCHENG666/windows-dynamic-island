@@ -4,6 +4,9 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Threading;
 using DynamicIsland.Core.Island;
+using DynamicIsland.Core.LiveTranslate;
+using DynamicIsland.Views;
+using DynamicIsland.Native;
 using DynamicIsland.Core.Settings;
 using DynamicIsland.Core.Translation;
 using DynamicIsland.Shell;
@@ -77,6 +80,32 @@ internal static class Program
             Get<RadioButton>(w, "ApiCustom").IsChecked = true;
             Click(w, "ApiRevert");
             Check(Get<RadioButton>(w, "ApiDefault").IsChecked == true, "revert restores saved mode");
+            Get<RadioButton>(w, "ApiCustom").IsChecked = true;
+            url.Text = "https://custom-draft.invalid";
+            Get<RadioButton>(w, "ApiLibre").IsChecked = true;
+            Check(Get<PasswordBox>(w, "ApiKey").Password.Length == 0, "Libre never inherits custom key");
+            url.Text = "http://localhost:5000";
+            Get<RadioButton>(w, "ApiAzure").IsChecked = true;
+            Get<PasswordBox>(w, "ApiKey").Password = "FAKE-AZURE";
+            Get<TextBox>(w, "ApiRegion").Text = "eastasia";
+            Check(Get<TextBox>(w, "ApiRegion").Visibility == Visibility.Visible && url.Visibility == Visibility.Collapsed, "Azure shows region/key only");
+            Get<RadioButton>(w, "ApiDeepL").IsChecked = true;
+            Check(Get<TextBox>(w, "ApiRegion").Visibility == Visibility.Collapsed && Get<TextBox>(w, "ApiModel").Visibility == Visibility.Collapsed, "DeepL shows key without model or region");
+            Get<RadioButton>(w, "ApiLibre").IsChecked = true;
+            Check(url.Text == "http://localhost:5000", "provider-specific unsaved URL retained");
+            Click(w, "ApiSave");
+            Check(host.Settings.TranslateApi == "libre" && host.Settings.TranslateApiUrl == "https://custom-draft.invalid", "save preserves inactive custom draft and active provider");
+            Check(TranslateProviderSettings.Read(host.Settings, TranslateApiKind.Azure).ApiKey == "FAKE-AZURE", "save preserves inactive Azure profile");
+            Get<RadioButton>(w, "ApiCustom").IsChecked = true;
+            Click(w, "ApiSave");
+            foreach (var provider in new[] { "ApiLibre", "ApiAzure", "ApiDeepL", "ApiCustom" })
+            {
+                Get<RadioButton>(w, provider).IsChecked = true;
+                Layout(w, 640, 440);
+                var scroll = Get<ScrollViewer>(w, "BodyScroll");
+                Check(scroll.ExtentWidth <= scroll.ViewportWidth + 1, "provider form no horizontal clipping: " + provider);
+            }
+            Click(w, "ApiRevert");
             Get<Slider>(w, "ScaleSlider").Value = 125;
             Get<RadioButton>(w, "SkinGlass").IsChecked = true;
             Get<RadioButton>(w, "DirZhEn").IsChecked = true;
@@ -99,6 +128,7 @@ internal static class Program
             foreach (string name in new[] { "ActTranslate", "ActRecall", "ActCamera", "ActLiveTranslate", "ActStopwatch", "ActFocus", "ActLog" }) Click(w, name);
             Check(host.Actions.SequenceEqual(new[] { "clipboard", "recall", "camera", "live", "stopwatch", "focus", "log" }), "all seven tool actions retained");
             Check(Get<Button>(w, "ActLog").Focusable && Get<Slider>(w, "ScaleSlider").Focusable && Get<ToggleButton>(w, "LiveToggle").Focusable, "native controls keyboard-focusable");
+            Get<RadioButton>(w, "ApiCustom").IsChecked = true;
             url.Text = "https://unsaved.invalid";
             w.Close();
             Check(Get<FrameworkElement>(w, "UnsavedPrompt").Visibility == Visibility.Visible, "dirty close requires explicit decision");
@@ -110,8 +140,40 @@ internal static class Program
             Get<TextBox>(discard, "ApiUrl").Text = "https://discard.invalid";
             discard.Close(); Click(discard, "DiscardAndClose");
             Check(discardHost.ApiWrites == 0, "explicit discard never writes API");
+            var captions = new LiveTranslateView();
+            var chain = new LiveTranslateCaptionChain();
+            var origin = DateTime.UtcNow;
+            for (int i = 1; i <= 40; i++) chain.AcceptUtterance(i, $"Sentence {i} with enough words to test a stable history row.", origin.AddSeconds(i), true);
+            void CaptionLayout()
+            {
+                captions.Measure(new Size(440, 180)); captions.Arrange(new Rect(0, 0, 440, 180)); captions.UpdateLayout();
+                Dispatcher.CurrentDispatcher.Invoke(DispatcherPriority.ContextIdle, new Action(() => { })); captions.UpdateLayout();
+            }
+            captions.ShowCaptions(chain.Items); CaptionLayout();
+            var captionScroll = (ScrollViewer)captions.FindName("CaptionScroll");
+            var captionRows = (StackPanel)captions.FindName("CaptionList");
+            captionScroll.ScrollToVerticalOffset(550); CaptionLayout();
+            FrameworkElement VisibleRow() => captionRows.Children.OfType<FrameworkElement>().First(row => row.TranslatePoint(new Point(), captionRows).Y + row.ActualHeight > captionScroll.VerticalOffset);
+            int anchorId = (int)VisibleRow().Tag;
+            Check(captionScroll.VerticalOffset > 0 && anchorId > 1, "actual caption history scroll moved away from end");
+            chain.Complete(chain.Items[0].Id, string.Join(" ", Enumerable.Repeat("expanded translated history", 30)), chain.Items[0].Primary);
+            captions.ShowCaptions(chain.Items); CaptionLayout();
+            Check((int)VisibleRow().Tag == anchorId, "translation height change above viewport preserves visible caption identity");
+            chain.AcceptUtterance(41, "A new sentence arrives while reviewing history.", origin.AddMinutes(2), false);
+            captions.ShowCaptions(chain.Items); CaptionLayout();
+            Check((int)VisibleRow().Tag == anchorId && captionRows.Children.Count == 40, "forty-row eviction preserves surviving history anchor");
+            chain.AcceptUtterance(41, "", origin.AddMinutes(2), true);
+            chain.AcceptUtterance(42, "Next sentence", origin.AddMinutes(2), false);
+            captions.ShowCaptions(chain.Items); CaptionLayout();
+            Check(captionRows.Children.OfType<FrameworkElement>().Any(row => (int)row.Tag == chain.Items[^2].Id), "empty final and next utterance retain previous real WPF caption row");
+            captions.ClearSubtitle();
+            for (int i = 0; i < 25; i++)
+            {
+                var endpoint = new LoopbackEndpoint(); endpoint.Dispose(); endpoint.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
+            Check(true, "unopened actual native endpoint handles tolerate repeated async disposal; no audio device opened");
             app.Shutdown();
-            Console.WriteLine($"Settings actual WPF BAML/layout/behavior PASS: {_checks} checks; 100/125/150% equivalent logical workareas. No window shown, no real DPI/input/desktop preview, no network/permissions/services/disk writes.");
+            Console.WriteLine($"Settings/captions actual WPF BAML/layout/behavior PASS: {_checks} checks; 100/125/150% equivalent logical workareas. No window shown or real DPI/input/desktop preview; no audio device/model/network/permissions/user-setting writes.");
             return 0;
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
@@ -138,10 +200,10 @@ internal sealed class MemorySettings : ISettingsController
     public void Scale(double value) { Settings.IslandScale = value; Writes++; }
     public void Skin(IslandSkin skin) { Settings.IslandSkin = AppearancePolicy.ToSetting(skin); Writes++; }
     public void Direction(TranslateDirection value) { Settings.TranslateDirection = TranslatePolicy.ToSetting(value); Writes++; }
-    public void Api(TranslateApiKind kind, string? url, string? model, string? key)
+    public void Api(TranslateApiOptions active, IReadOnlyList<TranslateApiOptions> profiles)
     {
-        Settings.TranslateApi = TranslateApiPolicy.ToSetting(kind); Settings.TranslateApiUrl = url;
-        Settings.TranslateApiModel = model; Settings.TranslateApiKey = key; Writes++; ApiWrites++;
+        foreach (var profile in profiles) TranslateProviderSettings.Save(Settings, profile);
+        TranslateProviderSettings.Save(Settings, active); Writes++; ApiWrites++;
     }
     public void Notifications() { Settings.NotificationCenter = !Settings.NotificationCenter; Writes++; }
     public void Stealth() { Settings.Stealth = !Settings.Stealth; Writes++; }

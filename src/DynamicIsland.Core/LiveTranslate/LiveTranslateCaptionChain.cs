@@ -19,7 +19,7 @@ public readonly record struct CaptionUpdate(int Id, string Recognized, bool Merg
 /// 时间戳从开始听系统声音起算；还没进入收听就出了第一条时，从这条起算。
 /// 格式为 m:ss，满 10 分钟为 mm:ss，满 1 小时为 h:mm:ss。
 /// 说话过程中同一句话会持续更新同一条字幕（Open），像会议记录一样先出字；
-/// 这句话结束后再去翻译，译文到达后替换该条的中文，失败则保留识别文字。
+/// 说话过程中持续翻译，译文到达后更新该条，失败则保留识别文字和已有译文。
 /// 若上一句已经收束但没有句末标点，很短的后续碎片仍会接到上一句。
 /// </summary>
 public sealed class LiveTranslateCaptionChain
@@ -32,6 +32,8 @@ public sealed class LiveTranslateCaptionChain
     readonly List<LiveTranslateCaption> _items = new();
     DateTime? _origin;
     int _nextId = 1;
+    int _latestUtterance;
+    readonly Dictionary<int, int> _utterances = new();
 
     public IReadOnlyList<LiveTranslateCaption> Items => _items;
 
@@ -52,6 +54,8 @@ public sealed class LiveTranslateCaptionChain
     public void Reset()
     {
         _items.Clear();
+        _utterances.Clear();
+        _latestUtterance = 0;
         _origin = null;
         // Keep _nextId moving so an in-flight Complete/Fail cannot touch a new session.
     }
@@ -98,6 +102,37 @@ public sealed class LiveTranslateCaptionChain
         return new CaptionUpdate(caption.Id, caption.Primary, false);
     }
 
+    /// <summary>真实识别路径保留utterance身份；空终稿仍收束，下一句绝不能覆盖上一句。</summary>
+    public CaptionUpdate AcceptUtterance(int utteranceId, string? text, DateTime utcNow, bool final, bool alreadyChinese = false)
+    {
+        string display = LiveTranslatePolicy.Collapse(text ?? "");
+        bool usable = LiveTranslatePolicy.IsUsableTranscript(display);
+        if (_utterances.TryGetValue(utteranceId, out int id))
+        {
+            int index = IndexOf(id);
+            if (index < 0) return new CaptionUpdate(0, "", false); // evicted history stays evicted
+            var last = _items[index];
+            string previous = RecognizedText(id) ?? "";
+            // Wholesale collapse is not a correction. Moderate shortening and substitutions remain permitted.
+            bool collapsed = previous.Length >= 24 && display.Length < previous.Length * .55;
+            if (!usable || collapsed)
+            {
+                if (final) _items[index] = last with { Open = false };
+                return new CaptionUpdate(id, previous, true);
+            }
+            Write(index, last, display, final, alreadyChinese);
+            return new CaptionUpdate(id, display, true);
+        }
+        if (!usable || utteranceId <= _latestUtterance) return new CaptionUpdate(0, "", false);
+        _latestUtterance = utteranceId;
+        if (_items.Count > 0) _items[^1] = _items[^1] with { Open = false };
+        var caption = Create(display, null, alreadyChinese, !alreadyChinese, false, !final, utcNow);
+        Append(caption); _utterances[utteranceId] = caption.Id;
+        // Retain only current history mappings; monotonically increasing utterance IDs reject old callbacks.
+        foreach (int old in _utterances.Where(pair => IndexOf(pair.Value) < 0).Select(pair => pair.Key).ToArray()) _utterances.Remove(old);
+        return new CaptionUpdate(caption.Id, display, false);
+    }
+
     void Write(int index, LiveTranslateCaption last, string combined, bool final, bool alreadyChinese)
     {
         if (alreadyChinese)
@@ -115,6 +150,8 @@ public sealed class LiveTranslateCaptionChain
         }
 
         bool hadTranslation = !string.IsNullOrWhiteSpace(last.Original);
+        bool needsTranslation = last.TranslationPending || last.TranslationFailed ||
+            combined != (hadTranslation ? last.Original : last.Primary);
         if (!final)
         {
             _items[index] = last with
@@ -122,7 +159,7 @@ public sealed class LiveTranslateCaptionChain
                 Primary = hadTranslation ? last.Primary : combined,
                 Original = hadTranslation ? combined : null,
                 AlreadyChinese = false,
-                TranslationPending = true,
+                TranslationPending = needsTranslation,
                 TranslationFailed = false,
                 Open = true
             };
@@ -134,7 +171,7 @@ public sealed class LiveTranslateCaptionChain
             Primary = hadTranslation ? last.Primary : combined,
             Original = hadTranslation ? combined : null,
             AlreadyChinese = false,
-            TranslationPending = true,
+            TranslationPending = needsTranslation,
             TranslationFailed = false,
             Open = false
         };
@@ -147,8 +184,11 @@ public sealed class LiveTranslateCaptionChain
             return false;
 
         var current = _items[index];
-        string? shown = null;
-        if (!string.IsNullOrWhiteSpace(original)
+        if (string.IsNullOrWhiteSpace(primary) || current.AlreadyChinese) return false;
+        string recognized = RecognizedText(id) ?? "";
+        bool newer = !string.IsNullOrWhiteSpace(original) && original != recognized;
+        string? shown = newer ? recognized : null;
+        if (!newer && !string.IsNullOrWhiteSpace(original)
             && !string.Equals(original, primary, StringComparison.Ordinal))
             shown = original;
 
@@ -156,11 +196,22 @@ public sealed class LiveTranslateCaptionChain
         {
             Primary = primary,
             Original = shown,
-            TranslationPending = false,
+            TranslationPending = newer,
             TranslationFailed = false,
             AlreadyChinese = false
         };
         return true;
+    }
+
+    public bool NeedsTranslation(int id)
+    {
+        int index = IndexOf(id);
+        return index >= 0 && _items[index].TranslationPending && !_items[index].AlreadyChinese;
+    }
+    public bool FailRevision(int id, string recognized)
+    {
+        int index = IndexOf(id);
+        return index >= 0 && !_items[index].AlreadyChinese && RecognizedText(id) == recognized && Fail(id);
     }
 
     public bool Fail(int id)
