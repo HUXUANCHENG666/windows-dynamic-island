@@ -127,7 +127,13 @@ public class WaterLensTests
         Assert.False(shown.Matches(dragged));
         Assert.True(shown.MatchesSize(dragged));
         Assert.True(GlassFrameGeometry.ShouldKeepDisplayedBitmap(shown, dragged, 1));
+        // 尚无已显示帧时，尺寸匹配的第一张图仍要提交，避免玻璃消失。
         Assert.True(GlassFrameGeometry.ShouldPresent(shown, dragged, 1));
+        // 已显示更贴近当前位的光栅时，拒绝把更旧位置的结果画上去（那是拖动中间抽动的来源）。
+        Assert.False(GlassFrameGeometry.ShouldPresent(shown, dragged, 1, dragged, true));
+        Assert.True(GlassFrameGeometry.ShouldPresent(dragged, dragged, 1, shown, true));
+        // 拒绝回退时仍保持已显示位图，不能变全透明。
+        Assert.True(GlassFrameGeometry.ShouldKeepDisplayedBitmap(dragged, dragged, 1));
 
         var expanded = shown with { Width = 520 };
         Assert.False(GlassFrameGeometry.ShouldKeepDisplayedBitmap(shown, expanded, 1));

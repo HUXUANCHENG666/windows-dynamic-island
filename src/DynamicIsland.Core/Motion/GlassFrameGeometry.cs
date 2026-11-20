@@ -30,9 +30,30 @@ public readonly record struct GlassFrameGeometry(int Width, int Height, int Left
     public static bool ShouldKeepDisplayedBitmap(GlassFrameGeometry shown, GlassFrameGeometry view, double dpi) =>
         shown.MatchesSize(view, SizeTolerancePx * Math.Max(0.5, dpi));
 
-    /// <summary>提交已按某几何光栅的结果：尺寸必须对上；位置差用下一帧重采样修正，不能因此丢弃。</summary>
+    public static double PositionError(GlassFrameGeometry a, GlassFrameGeometry b)
+    {
+        double dx = a.Left - b.Left, dy = a.Top - b.Top;
+        return Math.Sqrt(dx * dx + dy * dy);
+    }
+
+    /// <summary>
+    /// 提交光栅结果：尺寸必须对上。位置比当前已显示帧更旧（回退）的结果丢弃，但不能因此把玻璃关成全透明。
+    /// 无已显示帧时，接受第一张尺寸匹配的图，保证可见。
+    /// </summary>
     public static bool ShouldPresent(GlassFrameGeometry ready, GlassFrameGeometry view, double dpi) =>
-        ready.MatchesSize(view, SizeTolerancePx * Math.Max(0.5, dpi));
+        ShouldPresent(ready, view, dpi, shown: default, hasShown: false);
+
+    public static bool ShouldPresent(
+        GlassFrameGeometry ready, GlassFrameGeometry view, double dpi,
+        GlassFrameGeometry shown, bool hasShown)
+    {
+        if (!ready.MatchesSize(view, SizeTolerancePx * Math.Max(0.5, dpi)))
+            return false;
+        if (!hasShown)
+            return true;
+        // 0.5px 余量避免整数位置来回抖动时互踢。
+        return PositionError(ready, view) <= PositionError(shown, view) + 0.5;
+    }
 
     /// <summary>
     /// 捕获矩形（含 pad 边）是否仍盖住当前岛加一圈折射护边。

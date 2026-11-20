@@ -50,7 +50,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
         double dpi = 1, int left = 0, int top = 0, double scaleX = 1, double scaleY = 1,
         LiquidOpticsFrame optics = default)
     {
-        _view = new(w, h, left, top, scaleX, scaleY); _viewDpi = dpi;
+        lock (_gate) { _view = new(w, h, left, top, scaleX, scaleY); _viewDpi = dpi; }
         bool updated = false;
         // 只在输出尺寸会对旧位图明显拉伸时撤下；快拖造成的位移/帧龄绝不能把玻璃关成全透明。
         if (_visible && _bitmap != null && !GlassFrameGeometry.ShouldKeepDisplayedBitmap(_shown, _view, dpi))
@@ -71,6 +71,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
                 {
                     long start = Stopwatch.GetTimestamp();
                     GlassPixels? frame = null;
+                    bool invokeReady = false;
                     try
                     {
                         lock (_gate) { if (!_disposed) pad = _pad?.Retain(); }
@@ -84,13 +85,16 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
                             { pad.Dispose(); pad = null; }
                             // 不完全覆盖也保留：越界样本为 0，总比整段没有玻璃好。
                         }
+                        var submitted = new GlassFrameGeometry(w, h, left, top, scaleX, scaleY);
                         frame = Render(pad, w, h, radius, surface == null ? null : _field, moving, dpi, left, top, start, scaleX, scaleY, optics);
-                        // Bounded nonblocking staging probes; only the worker can wait on its private timer.
+                        // 有界、非阻塞回读。优先留下更接近本次提交几何的帧，避免把上一拍的旧光栅当成当前结果。
                         for (int i = 0; _gpu != null && i < 3; i++)
                         {
                             long poll = Stopwatch.GetTimestamp();
                             var newer = _gpu.PollFrame(); _stats.Time(5, poll);
-                            if (newer != null) { frame?.Dispose(); frame = newer; break; }
+                            frame = PreferCloser(frame, newer, submitted);
+                            if (frame != null && GlassFrameGeometry.PositionError(frame.Geometry, submitted) <= 0.5)
+                                break;
                             if (i == 2 || !_gpu.WaitForReadbackProbe()) break;
                         }
                     }
@@ -104,16 +108,26 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
                         pad?.Dispose(); _stats.Time(1, start);
                         lock (_gate)
                         {
+                            bool published = false;
                             if (frame != null)
                             {
                                 _stats.Completed(frame.Gpu);
                                 if (_disposed || epoch != _epoch) frame.Dispose();
-                                else { frame.ReadyAt = Stopwatch.GetTimestamp(); if (_ready != null) { _ready.Dispose(); _stats.Replaced(); } _ready = frame; }
+                                else if (_ready != null && !GlassFrameGeometry.ShouldPresent(frame.Geometry, _view, _viewDpi, _ready.Geometry, true))
+                                { frame.Dispose(); _stats.Dropped(1); }
+                                else
+                                {
+                                    frame.ReadyAt = Stopwatch.GetTimestamp();
+                                    if (_ready != null) { _ready.Dispose(); _stats.Replaced(); }
+                                    _ready = frame;
+                                    published = true;
+                                }
                             }
                             _renderBusy = false;
                             if (_disposed) { _gpu?.Dispose(); _gpu = null; }
+                            if (published) invokeReady = true;
                         }
-                        if (!_disposed && frame != null) FrameReady?.Invoke();
+                        if (invokeReady) FrameReady?.Invoke();
                     }
                 });
             }
@@ -130,7 +144,8 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
         bool updated = false;
         if (ready != null)
         {
-            if (ready.Started < _minCapture || !GlassFrameGeometry.ShouldPresent(ready.Geometry, _view, _viewDpi))
+            if (ready.Started < _minCapture
+                || !GlassFrameGeometry.ShouldPresent(ready.Geometry, _view, _viewDpi, _shown, _visible && _bitmap != null))
             { ready.Dispose(); _stats.Dropped(1); return false; }
             long start = Stopwatch.GetTimestamp();
             try
@@ -148,6 +163,18 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
         return updated;
     }
 
+
+
+    static GlassPixels? PreferCloser(GlassPixels? current, GlassPixels? candidate, GlassFrameGeometry target)
+    {
+        if (candidate == null) return current;
+        if (current == null) return candidate;
+        if (GlassFrameGeometry.PositionError(candidate.Geometry, target)
+            < GlassFrameGeometry.PositionError(current.Geometry, target) - 0.5)
+        { current.Dispose(); return candidate; }
+        candidate.Dispose();
+        return current;
+    }
 
     static bool UsablePad(CapturedPad pad, int left, int top, int w, int h, double scaleX, double scaleY) =>
         GlassFrameGeometry.CanResample(Stopwatch.GetElapsedTime(pad.Started).TotalMilliseconds);
