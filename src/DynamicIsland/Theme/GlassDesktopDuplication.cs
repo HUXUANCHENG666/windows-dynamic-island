@@ -30,11 +30,13 @@ sealed class GlassDesktopDuplication : IDisposable
         try
         {
             if (!EnsureOutput(destLeft, destTop, destW, destH))
-            {
-                _retry = DateTime.UtcNow.AddSeconds(10);
                 return false;
-            }
             if (_dup == null || _device == null || _context == null)
+                return false;
+            if (!DynamicIsland.Core.Motion.GlassCaptureBounds.TryClipToOutput(
+                    destLeft, destTop, destW, destH,
+                    _outputLeft, _outputTop, _outputRight, _outputBottom,
+                    out int srcX, out int srcY, out int destX, out int destY, out int copyW, out int copyH))
                 return false;
 
             // Zero-timeout latest-desktop acquisition: unchanged desktop is not a failed frame.
@@ -63,20 +65,22 @@ sealed class GlassDesktopDuplication : IDisposable
                     acquired.CheckError(); // device/access loss clears cached desktop in catch
                 if (_desktop == null) return false;
             }
-            int srcX=destLeft-_outputLeft, srcY=destTop-_outputTop;
-            EnsureStaging(destW,destH);
+            if (destX != 0 || destY != 0 || copyW != destW || copyH != destH)
+                Array.Clear(dest, 0, destStride * destH);
+            EnsureStaging(copyW,copyH);
             if (_staging == null || _desktop == null) return false;
-            _context.CopySubresourceRegion(_staging,0,0,0,0,_desktop,0,new Box(srcX,srcY,0,srcX+destW,srcY+destH,1));
+            _context.CopySubresourceRegion(_staging,0,0,0,0,_desktop,0,new Box(srcX,srcY,0,srcX+copyW,srcY+copyH,1));
             MappedSubresource mapped=_context.Map(_staging,0,MapMode.Read,MapFlags.None);
             try
             {
                 unsafe
                 {
                     byte* rows=(byte*)mapped.DataPointer;
-                    for(int y=0;y<destH;y++)
+                    for(int y=0;y<copyH;y++)
                     {
                         int* src=(int*)(rows+y*(int)mapped.RowPitch);
-                        for(int x=0;x<destW;x++) dest[y*destStride+x]=src[x] | unchecked((int)0xFF000000);
+                        int di=(y+destY)*destStride+destX;
+                        for(int x=0;x<copyW;x++) dest[di+x]=src[x] | unchecked((int)0xFF000000);
                     }
                 }
             }
@@ -94,10 +98,10 @@ sealed class GlassDesktopDuplication : IDisposable
 
     bool EnsureOutput(int left, int top, int w, int h)
     {
-        int right = left + w, bottom = top + h;
-        if (_dup != null && left >= _outputLeft && top >= _outputTop && right <= _outputRight && bottom <= _outputBottom)
+        // 部分越界仍保留当前输出会话并在 TryCapture 里裁切，避免快拖贴边就拆掉 DDA、冷却 10 秒改走 GDI。
+        if (_dup != null && DynamicIsland.Core.Motion.GlassCaptureBounds.Intersects(
+                left, top, w, h, _outputLeft, _outputTop, _outputRight, _outputBottom))
             return true;
-        DisposeDup();
         if (_device == null)
         {
             var result = D3D11.D3D11CreateDevice(null, DriverType.Hardware, DeviceCreationFlags.BgraSupport,
@@ -110,6 +114,8 @@ sealed class GlassDesktopDuplication : IDisposable
         }
         using var dxgi = _device.QueryInterface<IDXGIDevice>();
         using var adapter = dxgi.GetAdapter();
+        IDXGIOutput1? best = null;
+        int bestArea = 0, bestL = 0, bestT = 0, bestR = 0, bestB = 0;
         for (int i = 0; ; i++)
         {
             Result ev = adapter.EnumOutputs((uint)i, out IDXGIOutput? output);
@@ -121,30 +127,36 @@ sealed class GlassDesktopDuplication : IDisposable
                 // Rotation needs a separate coordinate transform; prefer correct GDI fallback to rotated pixels.
                 if ((int)output.Description.Rotation != 1 || (long)(rect.Right-rect.Left)*(rect.Bottom-rect.Top)>16_777_216)
                     continue; // owned desktop texture cap 64 MiB (BGRA8)
-                if (left < rect.Left || top < rect.Top || right > rect.Right || bottom > rect.Bottom)
+                int area = DynamicIsland.Core.Motion.GlassCaptureBounds.IntersectionArea(
+                    left, top, w, h, rect.Left, rect.Top, rect.Right, rect.Bottom);
+                if (area <= bestArea)
                     continue;
-                using var output1 = output.QueryInterfaceOrNull<IDXGIOutput1>();
+                var output1 = output.QueryInterfaceOrNull<IDXGIOutput1>();
                 if (output1 == null)
                     continue;
-                try
-                {
-                    _dup = output1.DuplicateOutput(_device);
-                }
-                catch
-                {
-                    _dup = null;
-                    continue;
-                }
-                if (_dup == null)
-                    continue;
-                _outputLeft = rect.Left;
-                _outputTop = rect.Top;
-                _outputRight = rect.Right;
-                _outputBottom = rect.Bottom;
-                return true;
+                best?.Dispose();
+                best = output1;
+                bestArea = area;
+                bestL = rect.Left; bestT = rect.Top; bestR = rect.Right; bestB = rect.Bottom;
             }
         }
-        return false;
+        if (best == null)
+            return false;
+        try
+        {
+            var next = best.DuplicateOutput(_device);
+            if (next == null)
+                return false;
+            DisposeDup();
+            _dup = next;
+            _outputLeft = bestL; _outputTop = bestT; _outputRight = bestR; _outputBottom = bestB;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+        finally { best.Dispose(); }
     }
 
     void EnsureStaging(int w, int h)

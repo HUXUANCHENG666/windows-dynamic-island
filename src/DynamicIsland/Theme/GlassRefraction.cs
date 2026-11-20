@@ -23,10 +23,11 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
     CapturedPad? _pad;
     GlassPixels? _ready;
     WriteableBitmap? _bitmap;
-    bool _renderBusy, _captureBusy, _disposed;
+    bool _renderBusy, _captureBusy, _disposed, _renderQueued, _useField, _moving;
     bool _gpuImage, _visible;
     GlassFrameGeometry _view;
-    double _viewDpi = 1;
+    double _viewDpi = 1, _radius;
+    LiquidOpticsFrame _optics;
     GlassFrameGeometry _shown;
     long _shownCapture, _minCapture;
     public Action? FrameReady;
@@ -50,7 +51,13 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
         double dpi = 1, int left = 0, int top = 0, double scaleX = 1, double scaleY = 1,
         LiquidOpticsFrame optics = default)
     {
-        lock (_gate) { _view = new(w, h, left, top, scaleX, scaleY); _viewDpi = dpi; }
+        lock (_gate)
+        {
+            _view = new(w, h, left, top, scaleX, scaleY); _viewDpi = dpi;
+            _radius = radius; _moving = moving; _optics = optics;
+            _useField = surface != null;
+            surface?.CopySnapshotTo(_field);
+        }
         bool updated = false;
         // 只在输出尺寸会对旧位图明显拉伸时撤下；快拖造成的位移/帧龄绝不能把玻璃关成全透明。
         if (_visible && _bitmap != null && !GlassFrameGeometry.ShouldKeepDisplayedBitmap(_shown, _view, dpi))
@@ -59,81 +66,94 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
         lock (_gate)
         {
             if (_disposed) return false;
-            if (_renderBusy) _stats.Busy();
-            else if (w >= 8 && h >= 8)
-            {
-                _renderBusy = true;
-                int epoch = _epoch;
-                var capture = _captureTask;
-                CapturedPad? pad = null;
-                surface?.CopySnapshotTo(_field);
-                _renderTask = Task.Run(async () =>
-                {
-                    long start = Stopwatch.GetTimestamp();
-                    GlassPixels? frame = null;
-                    bool invokeReady = false;
-                    try
-                    {
-                        lock (_gate) { if (!_disposed) pad = _pad?.Retain(); }
-                        // 已有可重采样的垫边时不要等捕获：位置按当前几何立即扭曲，捕获在旁路更新。
-                        if (pad == null || !UsablePad(pad, left, top, w, h, scaleX, scaleY))
-                        {
-                            pad?.Dispose(); pad = null;
-                            await capture.ConfigureAwait(false);
-                            lock (_gate) { if (!_disposed) pad = _pad?.Retain(); }
-                            if (pad != null && !GlassFrameGeometry.CanResample(Stopwatch.GetElapsedTime(pad.Started).TotalMilliseconds))
-                            { pad.Dispose(); pad = null; }
-                            // 不完全覆盖也保留：越界样本为 0，总比整段没有玻璃好。
-                        }
-                        var submitted = new GlassFrameGeometry(w, h, left, top, scaleX, scaleY);
-                        frame = Render(pad, w, h, radius, surface == null ? null : _field, moving, dpi, left, top, start, scaleX, scaleY, optics);
-                        // 有界、非阻塞回读。优先留下更接近本次提交几何的帧，避免把上一拍的旧光栅当成当前结果。
-                        for (int i = 0; _gpu != null && i < 3; i++)
-                        {
-                            long poll = Stopwatch.GetTimestamp();
-                            var newer = _gpu.PollFrame(); _stats.Time(5, poll);
-                            frame = PreferCloser(frame, newer, submitted);
-                            if (frame != null && GlassFrameGeometry.PositionError(frame.Geometry, submitted) <= 0.5)
-                                break;
-                            if (i == 2 || !_gpu.WaitForReadbackProbe()) break;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"Glass skipped: {ex.GetType().Name}");
-                        _gpu?.Dispose(); _gpu = null; _retry = DateTime.UtcNow.AddSeconds(10);
-                    }
-                    finally
-                    {
-                        pad?.Dispose(); _stats.Time(1, start);
-                        lock (_gate)
-                        {
-                            bool published = false;
-                            if (frame != null)
-                            {
-                                _stats.Completed(frame.Gpu);
-                                if (_disposed || epoch != _epoch) frame.Dispose();
-                                else if (_ready != null && !GlassFrameGeometry.ShouldPresent(frame.Geometry, _view, _viewDpi, _ready.Geometry, true))
-                                { frame.Dispose(); _stats.Dropped(1); }
-                                else
-                                {
-                                    frame.ReadyAt = Stopwatch.GetTimestamp();
-                                    if (_ready != null) { _ready.Dispose(); _stats.Replaced(); }
-                                    _ready = frame;
-                                    published = true;
-                                }
-                            }
-                            _renderBusy = false;
-                            if (_disposed) { _gpu?.Dispose(); _gpu = null; }
-                            if (published) invokeReady = true;
-                        }
-                        if (invokeReady) FrameReady?.Invoke();
-                    }
-                });
-            }
+            if (_renderBusy) { _renderQueued = true; _stats.Busy(); }
+            else if (w >= 8 && h >= 8) QueueRender_NoLock();
         }
         if (_stats.Report() is { } report) { Log.Info(report); Diagnostics?.Invoke(report); }
         return updated;
+    }
+
+    // 容量为 1 的最新几何邮箱：忙时记住当前位，工人一空就立刻按最新位置重采样，不排队积压。
+    void QueueRender_NoLock()
+    {
+        _renderBusy = true;
+        _renderQueued = false;
+        int epoch = _epoch;
+        var capture = _captureTask;
+        var view = _view;
+        double dpi = _viewDpi, radius = _radius, scaleX = view.ScaleX, scaleY = view.ScaleY;
+        bool moving = _moving, useField = _useField;
+        var optics = _optics;
+        int w = view.Width, h = view.Height, left = view.Left, top = view.Top;
+        _renderTask = Task.Run(async () =>
+        {
+            long start = Stopwatch.GetTimestamp();
+            GlassPixels? frame = null;
+            CapturedPad? pad = null;
+            bool invokeReady = false;
+            try
+            {
+                lock (_gate) { if (!_disposed) pad = _pad?.Retain(); }
+                // 已有可重采样的垫边时不要等捕获：位置按当前几何立即扭曲，捕获在旁路更新。
+                if (pad == null || !UsablePad(pad, left, top, w, h, scaleX, scaleY))
+                {
+                    pad?.Dispose(); pad = null;
+                    await capture.ConfigureAwait(false);
+                    lock (_gate) { if (!_disposed) pad = _pad?.Retain(); }
+                    if (pad != null && !GlassFrameGeometry.CanResample(Stopwatch.GetElapsedTime(pad.Started).TotalMilliseconds))
+                    { pad.Dispose(); pad = null; }
+                    // 不完全覆盖也保留：越界样本为 0，总比整段没有玻璃好。
+                }
+                var submitted = new GlassFrameGeometry(w, h, left, top, scaleX, scaleY);
+                frame = Render(pad, w, h, radius, useField ? _field : null, moving, dpi, left, top, start, scaleX, scaleY, optics);
+                // 有界、非阻塞回读。优先留下更接近本次提交几何的帧，避免把上一拍的旧光栅当成当前结果。
+                for (int i = 0; _gpu != null && i < 3; i++)
+                {
+                    long poll = Stopwatch.GetTimestamp();
+                    var newer = _gpu.PollFrame(); _stats.Time(5, poll);
+                    frame = PreferCloser(frame, newer, submitted);
+                    if (frame != null && GlassFrameGeometry.PositionError(frame.Geometry, submitted) <= 0.5)
+                        break;
+                    if (i == 2 || !_gpu.WaitForReadbackProbe()) break;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Glass skipped: {ex.GetType().Name}");
+                _gpu?.Dispose(); _gpu = null; _retry = DateTime.UtcNow.AddSeconds(10);
+            }
+            finally
+            {
+                pad?.Dispose(); _stats.Time(1, start);
+                lock (_gate)
+                {
+                    bool published = false;
+                    if (frame != null)
+                    {
+                        _stats.Completed(frame.Gpu);
+                        if (_disposed || epoch != _epoch) frame.Dispose();
+                        else if (_ready != null && !GlassFrameGeometry.ShouldPresent(frame.Geometry, _view, _viewDpi, _ready.Geometry, true))
+                        { frame.Dispose(); _stats.Dropped(1); }
+                        else
+                        {
+                            frame.ReadyAt = Stopwatch.GetTimestamp();
+                            if (_ready != null) { _ready.Dispose(); _stats.Replaced(); }
+                            _ready = frame;
+                            published = true;
+                        }
+                    }
+                    if (published) invokeReady = true;
+                    if (!_disposed && epoch == _epoch && _renderQueued && _view.Width >= 8 && _view.Height >= 8)
+                        QueueRender_NoLock();
+                    else
+                    {
+                        _renderBusy = false;
+                        if (_disposed) { _gpu?.Dispose(); _gpu = null; }
+                    }
+                }
+                if (invokeReady) FrameReady?.Invoke();
+            }
+        });
     }
 
     // UI thread; completion can commit before the next animation tick without launching more work.
@@ -242,16 +262,21 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
     }
     public async ValueTask DisposeAsync()
     {
-        Task draining;
-        lock (_gate) { Dispose(); draining = Task.WhenAll(_captureTask, _renderTask, _captureWorker.Completion); }
-        try { await draining.ConfigureAwait(false); }
-        finally
+        while (true)
         {
+            Task draining;
             lock (_gate)
             {
-                _captureBusy = _renderBusy = false;
-                _gpu?.Dispose(); _gpu = null;
+                Dispose();
+                draining = Task.WhenAll(_captureTask, _renderTask, _captureWorker.Completion);
+                if (!_renderBusy && !_captureBusy)
+                {
+                    _gpu?.Dispose(); _gpu = null;
+                    break;
+                }
             }
+            try { await draining.ConfigureAwait(false); }
+            catch { /* 工人收尾异常不能挡住释放。 */ }
         }
     }
     public void Dispose()

@@ -36,7 +36,12 @@ internal static class Program
             else if (elapsed.Elapsed.TotalSeconds < 8)
             {
                 w = 320;
-                left = 200 + ticks * 48;
+                // 32px/tick 仍远超旧 3px 拒绝阈值；在常见 runner 宽度内往返，避免整段飞出屏幕后被迫走 GDI。
+                const int lo = 64, hi = 960;
+                int span = hi - lo;
+                int trip = ticks * 32;
+                int phase = trip % (span * 2);
+                left = phase <= span ? lo + phase : hi - (phase - span);
                 dragTicks++;
                 if (buffer.HasVisibleGlass) dragVisible++;
             }
