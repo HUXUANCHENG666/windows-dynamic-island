@@ -2,7 +2,7 @@ using DynamicIsland.Core.Geometry;
 
 namespace DynamicIsland.Core.Motion;
 
-/// <summary>实际 CPU 回退单 pass：共用几何、静止时跳过透明中心、合成中性高光、边缘与液态滞后内部折射。</summary>
+/// <summary>实际 CPU 回退单 pass：共用几何、静止时跳过透明中心、合成中性高光、边缘折射，以及用惯性位移场扭曲当前捕获的内部折射。</summary>
 public static class GlassCpuRenderer
 {
     public static void Render(int[] pixels, int ow, int oh, int w, int h, double radius, double dpi,

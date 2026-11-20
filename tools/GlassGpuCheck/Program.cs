@@ -96,7 +96,7 @@ async Task Check(string label, int w, int h, double r, double dpi, int[] source,
     }
 }
 
-int[] Fill(int w, int h, int kind)
+int[] Fill(int w, int h, double r, int kind)
 {
     var source = new int[(w + 2 * pad) * (h + 2 * pad)];
     for (int y = 0; y < h + 2 * pad; y++)
@@ -106,17 +106,19 @@ int[] Fill(int w, int h, int kind)
         int value = kind == 0
             ? (px < w / 2.0 ? 0x10 : 0xE0)
             : (int)Math.Round(127.5 + 127.5 * Math.Sin((px + py) * 0.10));
-        source[y * (w + 2 * pad) + x] = unchecked((int)0xFF000000) | (value << 16) | ((kind == 0 && px >= w / 2.0 ? 0xB0 : value) << 8) | (kind == 0 && px >= w / 2.0 ? 0x30 : value);
+        int color = unchecked((int)0xFF000000) | (value << 16) | ((kind == 0 && px >= w / 2.0 ? 0xB0 : value) << 8) | (kind == 0 && px >= w / 2.0 ? 0x30 : value);
+        // Current capture only: punch the island hole. Interior warp must not treat hole pixels as a stored backdrop.
+        source[y * (w + 2 * pad) + x] = IslandOutline.SignedDistance(px + 0.5, py + 0.5, w, h, r) < 0.5 ? 0 : color;
     }
     return source;
 }
 
-// Isolated lag (no fluid, unit scale) then the fuller atlas case.
+// Isolated lag (no fluid, unit scale) then the live-pad warp cases. Sources are punched, never a historical atlas.
 foreach (double dpi in new[] { 1.0, 1.5, 2.0 })
 {
     int w = (int)(320 * dpi), h = (int)(140 * dpi);
     double r = 35 * dpi;
-    await Check($"lag-simple dpi={dpi}", w, h, r, dpi, Fill(w, h, 0), null, 0, 0, 1, 1, new LiquidOpticsFrame(18 * dpi, 0, 1, 1, 1));
+    await Check($"lag-simple dpi={dpi}", w, h, r, dpi, Fill(w, h, r, 0), null, 0, 0, 1, 1, new LiquidOpticsFrame(18 * dpi, 0, 1, 1, 1));
 }
 var lagOptics = new LiquidOpticsFrame(18, -6, 0.94, 1.0, 0.85);
 foreach (double dpi in new[] { 1.0, 1.5 })
@@ -126,7 +128,7 @@ foreach (int kind in new[] { 0, 3 })
     double r = 35 * dpi;
     var field = new LiquidSurface(); field.EnsureSize(w, h);
     field.InjectForce(0.2, 0.25, 0.18f); field.Step(1.0 / 60, 0, 0, false, false);
-    await Check($"lag-parity dpi={dpi} pattern={kind}", w, h, r, dpi, Fill(w, h, kind == 0 ? 0 : 1), field, 0.3, -0.4, 1.08, 0.96, lagOptics);
+    await Check($"lag-parity dpi={dpi} pattern={kind}", w, h, r, dpi, Fill(w, h, r, kind == 0 ? 0 : 1), field, 0.3, -0.4, 1.08, 0.96, lagOptics);
 }
 
 Console.WriteLine($"WARP {cases} cases passed; worst-channel-error={worst}; software D3D11, no hardware FPS, no WPF-present measurement.");

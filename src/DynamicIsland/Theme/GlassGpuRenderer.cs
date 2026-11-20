@@ -683,8 +683,16 @@ bool TryMapInterior(float2 p, float2 slope, float surface, out float2 u, out flo
     float band = RimBand(IslandW, IslandH);
     if (d >= -band)
         return false;
-    float2 sample = float2(p.x * LagScaleX, p.y * LagScaleY) - float2(LagX, LagY)
+    float2 center = float2(IslandW, IslandH) * 0.5;
+    float2 lagScale = clamp(float2(LagScaleX, LagScaleY), 0.25, 4);
+    float2 strain = (p - center) * (1.0 / lagScale - 1);
+    float maxStrain = 56 * Dpi; // LiquidOptics.MaxSizeLagDip
+    strain = clamp(strain, -maxStrain, maxStrain);
+    float2 sample = p - float2(LagX, LagY) + strain
         + slope / (1 + abs(slope)) * InteriorWarp * Dpi;
+    // Only the current live pad: never sample the punched hole (no under-island desktop, no old pixels).
+    if (SignedDistance(sample, IslandW, IslandH, r) < 0.5)
+        return false;
     u = Pad + sample;
     float near = Smootherstep(-band - 4 * Dpi, -band + 2 * Dpi, d);
     alpha = saturate(InteriorGain * (0.42 + 0.28 * saturate(abs(surface))) * (1 - 0.35 * near));

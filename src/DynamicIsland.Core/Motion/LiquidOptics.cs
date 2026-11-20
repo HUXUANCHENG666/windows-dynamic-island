@@ -3,8 +3,8 @@ using DynamicIsland.Core.Geometry;
 namespace DynamicIsland.Core.Motion;
 
 /// <summary>
-/// 透过玻璃的世界坐标光学滞后：岛的位置仍 1:1 跟手，采样坐标带阻尼并收敛。
-/// 不是冻结旧截图，也不是整块平移玻璃层。
+/// 透过玻璃的光学惯性：岛的位置仍 1:1 跟手，用有阻尼的位移/应变场当场扭曲「此刻」捕获的实况背景。
+/// 不是冻结或拼贴旧截图，也不是整块平移玻璃层。
 /// </summary>
 public readonly record struct LiquidOpticsFrame(double LagX, double LagY, double LagScaleX, double LagScaleY, double Strength)
 {
@@ -21,6 +21,8 @@ public sealed class LiquidOptics
     public const double SettlePosition = 0.35;
     public const double SettleVelocity = 2;
     public const double TeleportPixels = 240;
+    public const double MinLagScale = 0.25;
+    public const double MaxLagScale = 4;
     public static SpringConfig Spring { get; } = new(81, 17);
 
     readonly Spring _x = new(Spring, 0);
@@ -90,6 +92,24 @@ public sealed class LiquidOptics
         return strength <= 0.01 ? LiquidOpticsFrame.Identity : new(lagX, lagY, lagSx, lagSy, strength);
     }
 
+    /// <summary>
+    /// 把当前捕获的采样坐标按惯性位移/应变场偏移。源始终是这一帧的实况垫边，不是历史图集。
+    /// </summary>
+    public static void DisplacedUv(
+        double x, double y, double width, double height, double dpi,
+        LiquidOpticsFrame optics, double slopeX, double slopeY,
+        out double sx, out double sy)
+    {
+        double cx = width * 0.5, cy = height * 0.5;
+        double lagSx = Math.Clamp(optics.LagScaleX, MinLagScale, MaxLagScale);
+        double lagSy = Math.Clamp(optics.LagScaleY, MinLagScale, MaxLagScale);
+        double maxStrain = MaxSizeLagDip * Math.Max(0.5, dpi);
+        double strainX = Math.Clamp((x - cx) * (1 / lagSx - 1), -maxStrain, maxStrain);
+        double strainY = Math.Clamp((y - cy) * (1 / lagSy - 1), -maxStrain, maxStrain);
+        sx = x - optics.LagX + strainX + slopeX / (1 + Math.Abs(slopeX)) * InteriorSlopeWarp * dpi;
+        sy = y - optics.LagY + strainY + slopeY / (1 + Math.Abs(slopeY)) * InteriorSlopeWarp * dpi;
+    }
+
     public static bool TryMapInterior(
         double x, double y, double width, double height, int pad, double radius, double dpi,
         LiquidOpticsFrame optics, double slopeX, double slopeY, double surface,
@@ -106,10 +126,11 @@ public sealed class LiquidOptics
         if (d >= -band)
             return false;
 
-        double sx = x * optics.LagScaleX - optics.LagX
-            + slopeX / (1 + Math.Abs(slopeX)) * InteriorSlopeWarp * dpi;
-        double sy = y * optics.LagScaleY - optics.LagY
-            + slopeY / (1 + Math.Abs(slopeY)) * InteriorSlopeWarp * dpi;
+        DisplacedUv(x, y, width, height, dpi, optics, slopeX, slopeY, out double sx, out double sy);
+        // 岛洞里没有可靠的正下方桌面：扭曲落到洞内就放弃，让真透明透出实况，绝不取洞内旧像素。
+        if (IslandOutline.SignedDistance(sx, sy, width, height, radius) < 0.5)
+            return false;
+
         u = pad + sx;
         v = pad + sy;
         double near = IslandOutline.Smootherstep(-band - 4 * dpi, -band + 2 * dpi, d);

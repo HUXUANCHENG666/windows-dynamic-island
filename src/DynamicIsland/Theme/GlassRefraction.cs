@@ -18,7 +18,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
     readonly GlassDiagnostics _stats = new();
     readonly LiquidSurface _field = new();
     GlassGpuRenderer? _gpu;
-    CapturedPad? _pad, _pending, _atlas;
+    CapturedPad? _pad, _pending;
     GlassPixels? _ready;
     WriteableBitmap? _bitmap;
     bool _renderBusy, _captureBusy, _disposed;
@@ -32,7 +32,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
     public bool CaptureInFlight { get { lock (_gate) return _captureBusy; } }
     public void Clear()
     {
-        lock (_gate) { _epoch++; _ready?.Dispose(); _ready = null; _atlas?.Dispose(); _atlas = null; }
+        lock (_gate) { _epoch++; _ready?.Dispose(); _ready = null; }
         _bitmap = null;
     }
 
@@ -162,9 +162,9 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
         {
             if (_pending != null)
             {
-                var merged = MergeBackdrop(_pending, _atlas);
-                _atlas?.Dispose(); _pad?.Dispose(); _pending.Dispose();
-                _atlas = merged; _pad = merged?.Retain(); _pending = null;
+                _pad?.Dispose();
+                _pad = _pending;
+                _pending = null;
             }
             _captureBusy = false;
         }
@@ -172,24 +172,6 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
     public void AbandonCapture()
     {
         lock (_gate) { _pending?.Dispose(); _pending = null; _captureBusy = false; }
-    }
-    static CapturedPad? MergeBackdrop(CapturedPad capture, CapturedPad? previous)
-    {
-        const int pad = Pad;
-        int count = (capture.Width + 2 * pad) * (capture.Height + 2 * pad);
-        int[] dest = System.Buffers.ArrayPool<int>.Shared.Rent(count);
-        try
-        {
-            LiquidBackdrop.Composite(dest, capture.Left, capture.Top, capture.Width, capture.Height,
-                previous?.Pixels, previous?.Left ?? 0, previous?.Top ?? 0, previous?.Width ?? 0, previous?.Height ?? 0,
-                capture.Pixels, capture.Left, capture.Top, capture.Width, capture.Height, pad);
-            return new CapturedPad(dest, capture.Width, capture.Height, capture.Left, capture.Top, capture.Radius, capture.Dpi);
-        }
-        catch
-        {
-            System.Buffers.ArrayPool<int>.Shared.Return(dest);
-            throw;
-        }
     }
 
     public async ValueTask DisposeAsync()
@@ -211,7 +193,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
         lock (_gate)
         {
             _disposed = true; _ready?.Dispose(); _ready = null;
-            _pad?.Dispose(); _pad = null; _pending?.Dispose(); _pending = null; _atlas?.Dispose(); _atlas = null;
+            _pad?.Dispose(); _pad = null; _pending?.Dispose(); _pending = null;
             if (!_captureBusy) _capture.Dispose();
             if (!_renderBusy) { _gpu?.Dispose(); _gpu = null; }
         }

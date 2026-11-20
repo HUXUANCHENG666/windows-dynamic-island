@@ -31,13 +31,22 @@ for (int kind = 0; kind < 4; kind++)
     WritePpm(Path.Combine(directory, $"pattern-{kind}.ppm"), pixels, background);
 }
 
-// 合成对比：同一网格背景，静止直透 vs 28px 世界坐标滞后（内部使用完整历史像素，不是冻结整张岛截图）。
+// 合成对比：条纹实况垫边（挖洞），静止直透 vs 用惯性位移场扭曲「此刻」捕获。
+// 条纹让垫边被弯进内沿时可见；中心仍是真透明叠在同一实况背景上，不是历史像素或冻结截图。
 {
+    for (int y = 0; y < h + 2 * pad; y++)
+    for (int x = 0; x < w + 2 * pad; x++)
+    {
+        double px = x - pad, py = y - pad;
+        int value = ((int)px % 22 < 8) ? 230 : 36;
+        int c = unchecked((int)0xFF000000) | (value << 16) | (value << 8) | value;
+        background[y * (w + 2 * pad) + x] = c;
+        source[y * (w + 2 * pad) + x] = IslandOutline.SignedDistance(px + .5, py + .5, w, h, r) <= 1 ? 0 : c;
+    }
     var before = new int[w * h];
     var after = new int[w * h];
-    int[] history = (int[])background.Clone();
     GlassCpuRenderer.Render(before, w, h, w, h, r, 1, field, source, w, h, r);
-    GlassCpuRenderer.Render(after, w, h, w, h, r, 1, field, history, w, h, r, 0, 0, 1, 1, new LiquidOpticsFrame(28, 0, 1, 1, 1));
+    GlassCpuRenderer.Render(after, w, h, w, h, r, 1, field, source, w, h, r, 0, 0, 1, 1, new LiquidOpticsFrame(28, 0, 1, 1, 1));
     WritePpm(Path.Combine(directory, "lag-before.ppm"), before, background);
     WritePpm(Path.Combine(directory, "lag-after.ppm"), after, background);
 }
@@ -57,18 +66,17 @@ Console.WriteLine($"SYNTHETIC actual Core CPU fallback only {w}x{h}, {samples.Le
 Console.WriteLine("Excludes capture, worker scheduling, snapshots, pooling, UI WritePixels, GPU and actual presentation. NOT Windows/GPU FPS.");
 var lagSamples = new double[60];
 var lagOptics = new LiquidOpticsFrame(28, 0, 1, 1, 1);
-int[] historyPixels = (int[])background.Clone();
-for (int i = 0; i < 8; i++) GlassCpuRenderer.Render(pixels, w, h, w, h, r, 1, field, historyPixels, w, h, r, 0, 0, 1, 1, lagOptics);
+for (int i = 0; i < 8; i++) GlassCpuRenderer.Render(pixels, w, h, w, h, r, 1, field, source, w, h, r, 0, 0, 1, 1, lagOptics);
 allocation = GC.GetAllocatedBytesForCurrentThread();
 for (int i = 0; i < lagSamples.Length; i++)
 {
     long start = Stopwatch.GetTimestamp();
-    GlassCpuRenderer.Render(pixels, w, h, w, h, r, 1, field, historyPixels, w, h, r, 0, 0, 1, 1, lagOptics);
+    GlassCpuRenderer.Render(pixels, w, h, w, h, r, 1, field, source, w, h, r, 0, 0, 1, 1, lagOptics);
     lagSamples[i] = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
 }
 long lagBytes = GC.GetAllocatedBytesForCurrentThread() - allocation;
 Array.Sort(lagSamples);
-Console.WriteLine($"SYNTHETIC interior-lag CPU fallback {w}x{h}, {lagSamples.Length} runs: mean={lagSamples.Average():F3}ms p95={lagSamples[(int)(lagSamples.Length * .95)]:F3}ms; measured-loop allocated={lagBytes} bytes. Still not Windows/GPU FPS.");
+Console.WriteLine($"SYNTHETIC live-warp CPU fallback {w}x{h}, {lagSamples.Length} runs: mean={lagSamples.Average():F3}ms p95={lagSamples[(int)(lagSamples.Length * .95)]:F3}ms; measured-loop allocated={lagBytes} bytes. Still not Windows/GPU FPS.");
 Console.WriteLine($"Synthetic algorithm PPM images: {directory} (合成算法验证，非实际Windows截图)");
 
 static void WritePpm(string path, int[] pixels, int[] background)

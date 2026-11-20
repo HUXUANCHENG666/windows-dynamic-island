@@ -7,6 +7,10 @@ public class LiquidOpticsTests
 {
     const int Pad = LiquidRefraction.DefaultPad;
     const int W = 320, H = 140, R = 35;
+    const int Poison = unchecked((int)0xFFFF00FF);
+    const int Dark = unchecked((int)0xFF202020);
+    const int Yellow = unchecked((int)0xFFE0C040);
+    const int LiveGreen = unchecked((int)0xFF20C060);
 
     [Fact]
     public void OpticalLagTrailsAMoveThenConvergesWithoutOscillating()
@@ -56,76 +60,73 @@ public class LiquidOpticsTests
     }
 
     [Fact]
-    public void InteriorMappingShiftsWithLagAndKeepsRgbTogether()
+    public void InteriorMappingWarpsCurrentPadAndKeepsRgbTogether()
     {
-        var optics = new LiquidOpticsFrame(24, 0, 1, 1, 1);
-        Assert.True(LiquidOptics.TryMapInterior(160, 70, W, H, Pad, R, 1, optics, 0, 0, 0, out var u, out var v, out var alpha));
-        Assert.InRange(u, Pad + 160 - 24 - 0.01, Pad + 160 - 24 + 0.01);
-        Assert.InRange(v, Pad + 70 - 0.01, Pad + 70 + 0.01);
+        var optics = new LiquidOpticsFrame(28, 0, 1, 1, 1);
+        // A fringe point whose displacement lands in the current live pad.
+        Assert.True(LiquidOptics.TryMapInterior(22, 70, W, H, Pad, R, 1, optics, 0, 0, 0, out var u, out var v, out var alpha));
+        LiquidOptics.DisplacedUv(22, 70, W, H, 1, optics, 0, 0, out var sx, out var sy);
+        Assert.InRange(u, Pad + sx - 0.01, Pad + sx + 0.01);
+        Assert.InRange(v, Pad + sy - 0.01, Pad + sy + 0.01);
+        Assert.True(sx < 0); // pulled into the left pad of this frame
         Assert.InRange(alpha, 0.2, LiquidOptics.InteriorAlpha);
-        Assert.False(LiquidOptics.TryMapInterior(160, 70, W, H, Pad, R, 1, LiquidOpticsFrame.Identity, 0, 0, 0, out _, out _, out _));
+        // Center warp still sits in the punched hole: no invented under-island sample.
+        Assert.False(LiquidOptics.TryMapInterior(160, 70, W, H, Pad, R, 1, optics, 0, 0, 0, out _, out _, out _));
+        Assert.False(LiquidOptics.TryMapInterior(22, 70, W, H, Pad, R, 1, LiquidOpticsFrame.Identity, 0, 0, 0, out _, out _, out _));
         Assert.False(LiquidOptics.TryMapInterior(2, 70, W, H, Pad, R, 1, optics, 0, 0, 0, out _, out _, out _)); // rim stays on the rim path
+        // Size lag is a radial strain of the current frame, still RGB-shared.
+        var strain = new LiquidOpticsFrame(0, 0, 0.8, 1, 1);
+        Assert.True(LiquidOptics.TryMapInterior(22, 70, W, H, Pad, R, 1, strain, 0, 0, 0, out var su, out var sv, out _));
+        Assert.True(su < Pad);
+        Assert.InRange(sv, Pad + 70 - 0.01, Pad + 70 + 0.01);
     }
 
     [Fact]
-    public void BackdropKeepsPreviouslyVisiblePixelsInsideAGrownIslandAndIgnoresTheCurrentHole()
+    public void CpuWarpSamplesOnlyTheLivePadAndIgnoresPoisonInTheHole()
     {
-        const int pad = Pad, smallW = 120, smallH = 40, largeW = 320, largeH = 140;
-        int smallStride = smallW + 2 * pad, largeStride = largeW + 2 * pad;
-        var previous = new int[smallStride * (smallH + 2 * pad)];
-        for (int i = 0; i < previous.Length; i++) previous[i] = unchecked((int)0xFF00AA55);
-        // Current small-island capture: only the pad is valid.
-        for (int y = 0; y < smallH + 2 * pad; y++)
-        for (int x = 0; x < smallStride; x++)
-            if (!LiquidRefraction.InPad(x, y, smallW, smallH, pad)) previous[y * smallStride + x] = 0;
-        var capture = new int[largeStride * (largeH + 2 * pad)];
-        for (int y = 0; y < largeH + 2 * pad; y++)
-        for (int x = 0; x < largeStride; x++)
-            capture[y * largeStride + x] = LiquidRefraction.InPad(x, y, largeW, largeH, pad) ? unchecked((int)0xFF112233) : 0;
-        var dest = new int[largeStride * (largeH + 2 * pad)];
-        LiquidBackdrop.Composite(dest, 0, 0, largeW, largeH, previous, (largeW - smallW) / 2, (largeH - smallH) / 2,
-            smallW, smallH, capture, 0, 0, largeW, largeH, pad);
-        // Old island sits at (100,50). A point 4px above its top, x=160, is old pad and new interior.
-        int destX = pad + 160, destY = pad + 46;
-        Assert.Equal(unchecked((int)0xFF00AA55), dest[destY * largeStride + destX]);
-        Assert.Equal(0, dest[(pad + largeH / 2) * largeStride + pad + largeW / 2]); // old hole stays empty
-        Assert.Equal(unchecked((int)0xFF112233), dest[2 * largeStride + 2]); // new outer pad stamped
-    }
-
-    [Fact]
-    public void CpuInteriorUsesLaggedLocalColorAndSettledFramesStayClear()
-    {
-        int stride = W + 2 * Pad;
-        var source = new int[stride * (H + 2 * Pad)];
-        for (int y = 0; y < H + 2 * Pad; y++)
-        for (int x = 0; x < stride; x++)
-        {
-            int px = x - Pad;
-            int color = px < W / 2 ? unchecked((int)0xFF202020) : unchecked((int)0xFFE0C040);
-            source[y * stride + x] = color; // atlas already holds historical interior pixels
-        }
+        int[] source = Punched(Dark, Yellow, Poison);
         var settled = new int[W * H];
         GlassCpuRenderer.Render(settled, W, H, W, H, R, 1, null, source, W, H, R);
         Assert.Equal(0, settled[(H / 2) * W + W / 2]);
+
         var lagged = new int[W * H];
         var optics = new LiquidOpticsFrame(28, 0, 1, 1, 1);
         GlassCpuRenderer.Render(lagged, W, H, W, H, R, 1, null, source, W, H, R, 0, 0, 1, 1, optics);
-        int before = lagged[(H / 2) * W + 160]; // samples x-28=132, still the dark half
-        int after = lagged[(H / 2) * W + 210]; // samples x-28=182, clearly the yellow half
-        Assert.NotEqual(0, before);
-        Assert.NotEqual(0, after);
+        int fringe = lagged[(H / 2) * W + 22]; // displacement lands in the current left pad
+        int center = lagged[(H / 2) * W + 160];
+        int wouldHaveBeenHistorical = lagged[(H / 2) * W + 210]; // old path sampled x-28 inside the hole
+        Assert.NotEqual(0, fringe);
+        Assert.Equal(0, center);
+        Assert.Equal(0, wouldHaveBeenHistorical);
         static int UnpremultiplyRed(int c)
         {
             int a = (int)((uint)c >> 24);
             return a == 0 ? 0 : ((c >> 16) & 255) * 255 / a;
         }
-        Assert.InRange(UnpremultiplyRed(before), 0, 80);
-        Assert.InRange(UnpremultiplyRed(after), 180, 255);
-        // Neutral rim still has no RGB split on a settled punched render of gray.
-        var gray = Enumerable.Repeat(unchecked((int)0xFF909090), stride * (H + 2 * Pad)).ToArray();
-        for (int y = 0; y < H + 2 * Pad; y++)
-        for (int x = 0; x < stride; x++)
-            if (!LiquidRefraction.InPad(x, y, W, H, Pad)) gray[y * stride + x] = 0;
+        static int UnpremultiplyBlue(int c)
+        {
+            int a = (int)((uint)c >> 24);
+            return a == 0 ? 0 : (c & 255) * 255 / a;
+        }
+        Assert.InRange(UnpremultiplyRed(fringe), 0, 80);
+        Assert.InRange(UnpremultiplyBlue(fringe), 0, 80); // not the magenta poison
+
+        // The same warp immediately follows a new live pad color: no stale atlas.
+        int[] updated = Punched(LiveGreen, LiveGreen, Poison);
+        var again = new int[W * H];
+        GlassCpuRenderer.Render(again, W, H, W, H, R, 1, null, updated, W, H, R, 0, 0, 1, 1, optics);
+        int live = again[(H / 2) * W + 22];
+        Assert.NotEqual(0, live);
+        Assert.InRange(UnpremultiplyRed(live), 0, 80);
+        static int UnpremultiplyGreen(int c)
+        {
+            int a = (int)((uint)c >> 24);
+            return a == 0 ? 0 : ((c >> 8) & 255) * 255 / a;
+        }
+        Assert.InRange(UnpremultiplyGreen(live), 140, 255);
+        Assert.Equal(0, again[(H / 2) * W + W / 2]);
+
+        var gray = Punched(unchecked((int)0xFF909090), unchecked((int)0xFF909090), 0);
         var rim = new int[W * H];
         GlassCpuRenderer.Render(rim, W, H, W, H, R, 1, null, gray, W, H, R);
         foreach (int c in rim)
@@ -143,12 +144,29 @@ public class LiquidOpticsTests
         foreach (double dpi in new[] { 1.0, 1.25, 1.5, 2.0 })
         {
             int w = (int)(W * dpi), h = (int)(H * dpi);
-            var optics = new LiquidOpticsFrame(16 * dpi, 4 * dpi, 0.85, 0.9, 0.8);
-            Assert.True(LiquidOptics.TryMapInterior(w * 0.5, h * 0.5, w, h, Pad, 35 * dpi, dpi, optics, 0.2, -0.1, 0.15,
+            var optics = new LiquidOpticsFrame(28 * dpi, 4 * dpi, 0.85, 0.9, 0.8);
+            double x = 20 * dpi, y = h * 0.5;
+            Assert.True(LiquidOptics.TryMapInterior(x, y, w, h, Pad, 35 * dpi, dpi, optics, 0.2, -0.1, 0.15,
                 out var u, out var v, out var alpha));
             Assert.InRange(u, 1, w + 2 * Pad - 1);
             Assert.InRange(v, 1, h + 2 * Pad - 1);
             Assert.InRange(alpha, 0.05, LiquidOptics.InteriorAlpha);
+            Assert.False(LiquidOptics.TryMapInterior(w * 0.5, h * 0.5, w, h, Pad, 35 * dpi, dpi, optics, 0, 0, 0,
+                out _, out _, out _));
         }
+    }
+
+    static int[] Punched(int leftPad, int rightPad, int hole)
+    {
+        int stride = W + 2 * Pad;
+        var source = new int[stride * (H + 2 * Pad)];
+        for (int y = 0; y < H + 2 * Pad; y++)
+        for (int x = 0; x < stride; x++)
+        {
+            double px = x - Pad, py = y - Pad;
+            bool inside = IslandOutline.SignedDistance(px + 0.5, py + 0.5, W, H, R) < 0.5;
+            source[y * stride + x] = inside ? hole : (px < W / 2.0 ? leftPad : rightPad);
+        }
+        return source;
     }
 }
