@@ -6,7 +6,7 @@ using DynamicIsland.Visuals;
 // Headless software D3D11 WARP. This checks shader/readback math, NOT hardware FPS or a WPF window.
 using var gpu = GlassGpuRenderer.TryCreateWarpForVerification()
     ?? throw new InvalidOperationException("WARP initialization/runtime HLSL compilation failed.");
-const int pad = 72;
+const int pad = LiquidRefraction.DefaultPad;
 int cases = 0, worst = 0;
 foreach (double dpi in new[] { 1.0, 1.25, 2.0 })
 foreach (int kind in new[] { 0, 1, 2, 3 })

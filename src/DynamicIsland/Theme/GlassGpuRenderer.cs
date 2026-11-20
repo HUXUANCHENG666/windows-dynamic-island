@@ -250,7 +250,10 @@ sealed class GlassGpuRenderer : IDisposable
                 LagScaleY = optics.IsActive ? (float)optics.LagScaleY : 1,
                 InteriorGain = optics.IsActive ? (float)optics.Strength : 0,
                 InteriorWarp = (float)LiquidOptics.InteriorSlopeWarp,
-                InteriorLive = liveInterior ? 1 : 0
+                InteriorLive = liveInterior ? 1 : 0,
+                LensMagnification = (float)WaterLens.Magnification,
+                LensBlendStart = (float)WaterLens.BlendStartBands,
+                LensBlendEnd = (float)WaterLens.BlendEndBands
             };
             WriteConstants(data);
 
@@ -520,7 +523,7 @@ sealed class GlassGpuRenderer : IDisposable
         public float Dpi, SrcRadius, ShiftX, ShiftY;
         public float ScaleX, ScaleY, LagX, LagY;
         public float LagScaleX, LagScaleY, InteriorGain, InteriorWarp;
-        public float InteriorLive, Pad0, Pad1, Pad2;
+        public float InteriorLive, LensMagnification, LensBlendStart, LensBlendEnd;
     }
 
     const string ShaderSource = """
@@ -555,9 +558,9 @@ cbuffer Params : register(b0)
     float InteriorGain;
     float InteriorWarp;
     float InteriorLive;
-    float _p0;
-    float _p1;
-    float _p2;
+    float LensMagnification;
+    float LensBlendStart;
+    float LensBlendEnd;
 };
 
 Texture2D PadTex : register(t0);
@@ -742,12 +745,12 @@ float4 WaterColor(float2 p, float distance, float2 slope, float surface)
     float2 center=float2(IslandW,IslandH)*0.5;
     float2 n=(p-center)/center;
     float dome=max(0,(1-n.x*n.x)*(1-n.y*n.y));
-    float contraction=(1-1/1.08)*dome*dome;
+    float contraction=(1-1/max(LensMagnification,1.01))*dome*dome;
     float2 lagScale=clamp(float2(LagScaleX,LagScaleY),0.25,4);
     float2 strain=clamp((p-center)*(1/lagScale-1),-56*Dpi,56*Dpi);
     float2 displacement=-float2(LagX,LagY)+strain+slope/(1+abs(slope))*InteriorWarp*Dpi;
     float band=RimBand(IslandW,IslandH);
-    float blend=Smootherstep(-3*band,-0.25*band,distance);
+    float blend=Smootherstep(-LensBlendStart*band,-LensBlendEnd*band,distance);
     float2 b=p-(p-center)*contraction+displacement*0.18*(1-blend);
     float along=Smootherstep(0,1,1+distance/band);
     float depth=(4+3.5*along+clamp(surface,-1,1)*HeightWarp)*Dpi;

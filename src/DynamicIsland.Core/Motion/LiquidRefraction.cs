@@ -8,7 +8,7 @@ namespace DynamicIsland.Core.Motion;
 /// </summary>
 public static class LiquidRefraction
 {
-    public const int DefaultPad = 72;
+    public const int DefaultPad = 144; // 快拖时仍能用上一张实况垫边按当前位移重采样
     public const double InnerRadius = 0.78;
     public const double SampleGain = 0.88;
     public const double Chromatic = 0; // 同一点采完整 RGB，默认无色散。

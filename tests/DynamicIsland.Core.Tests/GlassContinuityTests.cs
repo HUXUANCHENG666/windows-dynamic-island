@@ -5,7 +5,7 @@ namespace DynamicIsland.Core.Tests;
 
 public class GlassContinuityTests
 {
-    const int Pad = 72;
+    const int Pad = LiquidRefraction.DefaultPad;
     static (double U, double V) Map(double x, double y, double w, double h, double r, double dpi)
     {
         Assert.True(LiquidRefraction.TryMap(x, y, w, h, Pad, r, 0, 0, 0,

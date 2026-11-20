@@ -38,6 +38,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
     public ImageSource? Shade => null;
     public ImageSource? GpuImage => _visible && _gpuImage ? _bitmap : null;
     public bool AllowLiveInterior;
+    public bool HasVisibleGlass => _visible && _bitmap != null;
     public bool CaptureInFlight { get { lock (_gate) return _captureBusy; } }
     public void Clear()
     {
@@ -51,7 +52,8 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
     {
         _view = new(w, h, left, top, scaleX, scaleY); _viewDpi = dpi;
         bool updated = false;
-        if (_visible && _bitmap != null && (!_shown.Matches(_view, 3 * dpi) || !GlassFrameGeometry.IsFresh(Stopwatch.GetElapsedTime(_shownCapture).TotalMilliseconds)))
+        // 只在输出尺寸会对旧位图明显拉伸时撤下；快拖造成的位移/帧龄绝不能把玻璃关成全透明。
+        if (_visible && _bitmap != null && !GlassFrameGeometry.ShouldKeepDisplayedBitmap(_shown, _view, dpi))
         { _visible = false; updated = true; }
         updated |= PresentReady();
         lock (_gate)
@@ -71,10 +73,17 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
                     GlassPixels? frame = null;
                     try
                     {
-                        await capture.ConfigureAwait(false);
                         lock (_gate) { if (!_disposed) pad = _pad?.Retain(); }
-                        if (pad != null && !GlassFrameGeometry.IsFresh(Stopwatch.GetElapsedTime(pad.Started).TotalMilliseconds))
-                        { pad.Dispose(); pad = null; }
+                        // 已有可重采样的垫边时不要等捕获：位置按当前几何立即扭曲，捕获在旁路更新。
+                        if (pad == null || !UsablePad(pad, left, top, w, h, scaleX, scaleY))
+                        {
+                            pad?.Dispose(); pad = null;
+                            await capture.ConfigureAwait(false);
+                            lock (_gate) { if (!_disposed) pad = _pad?.Retain(); }
+                            if (pad != null && !GlassFrameGeometry.CanResample(Stopwatch.GetElapsedTime(pad.Started).TotalMilliseconds))
+                            { pad.Dispose(); pad = null; }
+                            // 不完全覆盖也保留：越界样本为 0，总比整段没有玻璃好。
+                        }
                         frame = Render(pad, w, h, radius, surface == null ? null : _field, moving, dpi, left, top, start, scaleX, scaleY, optics);
                         // Bounded nonblocking staging probes; only the worker can wait on its private timer.
                         for (int i = 0; _gpu != null && i < 3; i++)
@@ -121,7 +130,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
         bool updated = false;
         if (ready != null)
         {
-            if (ready.Started < _minCapture || !ready.Geometry.Matches(_view, 3 * _viewDpi) || !GlassFrameGeometry.IsFresh(Stopwatch.GetElapsedTime(ready.Started).TotalMilliseconds))
+            if (ready.Started < _minCapture || !GlassFrameGeometry.ShouldPresent(ready.Geometry, _view, _viewDpi))
             { ready.Dispose(); _stats.Dropped(1); return false; }
             long start = Stopwatch.GetTimestamp();
             try
@@ -138,6 +147,10 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
         }
         return updated;
     }
+
+
+    static bool UsablePad(CapturedPad pad, int left, int top, int w, int h, double scaleX, double scaleY) =>
+        GlassFrameGeometry.CanResample(Stopwatch.GetElapsedTime(pad.Started).TotalMilliseconds);
 
     GlassPixels? Render(CapturedPad? pad, int w, int h, double radius, LiquidSurface? field, bool moving,
         double dpi, int left, int top, long start, double scaleX, double scaleY, LiquidOpticsFrame optics)

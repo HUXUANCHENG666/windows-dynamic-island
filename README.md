@@ -245,3 +245,4 @@ GitHub Actions（`.github/workflows/windows.yml`）会在 `windows-latest` 上�
 官方链接、免费与试用区别、实测边界和退出/长会话验证见 [连续字幕修复](docs/live-translation-reliability.md) 与 [免费源调研](docs/translation-providers.md)。
 
 清水透镜：正下方实况捕获可用时，静止也有适度水滴放大，并连续接到 9 DIP 边缘；捕获完成直接进入同帧几何，过旧/不匹配结果退透明而非拉伸截图。CPU 回退降分辨率以控制耗时；目标 60fps 预算，不代表已在你的硬件实测达到。系统/驱动不支持实况内景时仍退透明。
+拖动较快时会按当前位置重采样最近的实况垫边，不再因为位移就把玻璃关成全透明；中间水滴放大和 9 DIP 边缘带层次更清楚。仍不是历史截图拼贴。

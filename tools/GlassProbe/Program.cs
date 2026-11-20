@@ -3,7 +3,7 @@ using System.Text;
 using DynamicIsland.Core.Geometry;
 using DynamicIsland.Core.Motion;
 
-const int w = 534, h = 230, r = 35, pad = 72;
+const int w = 534, h = 230, r = 35, pad = LiquidRefraction.DefaultPad;
 string directory = args.Length > 0 ? args[0] : Path.Combine(Path.GetTempPath(), "glass-probe");
 Directory.CreateDirectory(directory);
 var field = new LiquidSurface(); field.EnsureSize(w, h);
@@ -81,7 +81,7 @@ Console.WriteLine($"Synthetic algorithm PPM images: {directory} (合成算法验
 
 static void WritePpm(string path, int[] pixels, int[] background)
 {
-    const int w = 534, h = 230, r = 35, pad = 72;
+    const int w = 534, h = 230, r = 35, pad = LiquidRefraction.DefaultPad;
     using var file = File.Create(path);
     file.Write(Encoding.ASCII.GetBytes($"P6\n# 合成算法验证，非实际Windows截图\n{w} {h}\n255\n"));
     for (int y = 0; y < h; y++)
