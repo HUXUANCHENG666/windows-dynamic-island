@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Linq;
 using DynamicIsland.Core.Island;
 using DynamicIsland.Core.LiveTranslate;
+using DynamicIsland.Core.Motion;
 using DynamicIsland.Core.Settings;
 using DynamicIsland.Core.Translation;
 
@@ -446,26 +447,28 @@ public class LiveTranslateTests
         Assert.Equal(IslandMetrics.VLiveTranslateH, vertical.Height);
         Assert.True(horizontal.Radius > 0);
         Assert.True(vertical.Radius > 0);
-        Assert.Equal(520, IslandMetrics.LiveTranslateW);
-        Assert.Equal(328, IslandMetrics.LiveTranslateH);
-        Assert.Equal(260, IslandMetrics.VLiveTranslateW);
-        Assert.Equal(540, IslandMetrics.VLiveTranslateH);
-        Assert.True(horizontal.Width + 40 <= IslandMetrics.WindowWidth);
-        Assert.True(horizontal.Height + IslandMetrics.TopMargin + 40 <= IslandMetrics.WindowHeight);
-        Assert.True(vertical.Width + 40 <= IslandMetrics.VerticalWindowWidth);
-        Assert.True(vertical.Height + IslandMetrics.TopMargin + 40 <= IslandMetrics.VerticalWindowHeight);
+        Assert.Equal(424, IslandMetrics.LiveTranslateW);
+        Assert.Equal(236, IslandMetrics.LiveTranslateH);
+        Assert.Equal(228, IslandMetrics.VLiveTranslateW);
+        Assert.Equal(400, IslandMetrics.VLiveTranslateH);
+        Assert.True(horizontal.Width * LiquidDrag.MaxStretch + 8 <= IslandMetrics.WindowWidth);
+        Assert.True(horizontal.Height * LiquidDrag.MaxStretch + IslandMetrics.TopMargin + 8 <= IslandMetrics.WindowHeight);
+        Assert.True(vertical.Width * LiquidDrag.MaxStretch + 8 <= IslandMetrics.VerticalWindowWidth);
+        Assert.True(vertical.Height * LiquidDrag.MaxStretch + IslandMetrics.TopMargin + 8 <= IslandMetrics.VerticalWindowHeight);
     }
 
     [Fact]
     public void Segmenter_UsesLongerHangoverAndMaxUtterance()
     {
         Assert.Equal(320, SpeechSegmenter.FrameSamples);
-        Assert.Equal(40, SpeechSegmenter.HangoverFrames);
-        Assert.Equal(25, SpeechSegmenter.PartialFrames);
+        Assert.Equal(32, SpeechSegmenter.HangoverFrames);
+        Assert.Equal(13, SpeechSegmenter.PartialFrames);
+        Assert.Equal(12, SpeechSegmenter.MinSpeechFrames);
         Assert.Equal(750, SpeechSegmenter.MaxSpeechFrames);
-        Assert.Equal(800, SpeechSegmenter.HangoverFrames * 20);
-        Assert.Equal(500, SpeechSegmenter.PartialFrames * 20);
+        Assert.Equal(640, SpeechSegmenter.HangoverFrames * 20);
+        Assert.Equal(260, SpeechSegmenter.PartialFrames * 20);
         Assert.Equal(15000, SpeechSegmenter.MaxSpeechFrames * 20);
+        Assert.True(SpeechSegmenter.MinSpeechFrames <= SpeechSegmenter.PartialFrames);
     }
 
     [Fact]

@@ -48,8 +48,8 @@ public static class IslandMetrics
     public const double CameraW = 392;
     public const double CameraH = 248;
 
-    public const double LiveTranslateW = 520;
-    public const double LiveTranslateH = 328;
+    public const double LiveTranslateW = 424;
+    public const double LiveTranslateH = 236;
 
     public const double VerticalWindowWidth = 420;
     public const double VerticalWindowHeight = 600;
@@ -84,8 +84,8 @@ public static class IslandMetrics
     public const double VCameraW = 248;
     public const double VCameraH = 420;
 
-    public const double VLiveTranslateW = 260;
-    public const double VLiveTranslateH = 540;
+    public const double VLiveTranslateW = 228;
+    public const double VLiveTranslateH = 400;
 
     public static readonly IslandFrame StealthDot = new(12, 12, 6, 2);
 

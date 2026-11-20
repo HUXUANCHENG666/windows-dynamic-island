@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="灵动岛设置"
-        Width="440"
+        Width="468"
         SizeToContent="Height"
         WindowStyle="None"
         AllowsTransparency="True"
@@ -15,17 +15,17 @@
         SnapsToDevicePixels="True"
         TextOptions.TextFormattingMode="Display"
         TextOptions.TextRenderingMode="Grayscale">
-    <Border x:Name="Card" CornerRadius="28" Margin="16" Padding="22,20,22,18">
+    <Border x:Name="Card" CornerRadius="26" Margin="16" Padding="20,16,20,16">
         <Border.Effect>
             <DropShadowEffect BlurRadius="28" ShadowDepth="10" Direction="270" Opacity="0.45" Color="Black"/>
         </Border.Effect>
         <DockPanel>
-                <Grid x:Name="DragHeader" DockPanel.Dock="Top" Margin="0,0,0,16" Cursor="SizeAll">
-                    <StackPanel Orientation="Horizontal">
-                        <Viewbox Width="18" Height="18" Margin="0,0,8,0" VerticalAlignment="Center">
+                <Grid x:Name="DragHeader" DockPanel.Dock="Top" Margin="0,0,0,14" Cursor="SizeAll">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Viewbox Width="16" Height="16" Margin="0,0,8,0" VerticalAlignment="Center">
                             <Path x:Name="Gear" StrokeThickness="1.4" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
                         </Viewbox>
-                        <TextBlock x:Name="Heading" Text="设置" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="Heading" Text="设置" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center"/>
                     </StackPanel>
                     <Border x:Name="CloseButton" Width="28" Height="28" CornerRadius="14" HorizontalAlignment="Right" Cursor="Hand">
                         <TextBlock Text="×" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/>
@@ -34,8 +34,8 @@
 
                 <ScrollViewer x:Name="BodyScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" CanContentScroll="False" PanningMode="VerticalOnly">
                 <StackPanel>
-                <TextBlock x:Name="LookLabel" Text="外观" FontSize="12" Margin="2,0,0,8"/>
-                <Border x:Name="LookRow" CornerRadius="16" Padding="14,12" Margin="0,0,0,16">
+                <TextBlock x:Name="LookLabel" Text="外观" FontSize="11" FontWeight="SemiBold" Margin="4,0,0,6"/>
+                <Border x:Name="LookRow" CornerRadius="18" Padding="14,12" Margin="0,0,0,12">
                     <StackPanel>
                         <Grid>
                             <TextBlock x:Name="ScaleTitle" Text="岛的大小" FontSize="14" VerticalAlignment="Center"/>
@@ -46,27 +46,85 @@
                                 </Border>
                             </StackPanel>
                         </Grid>
-                        <Grid x:Name="ScaleTrack" Height="28" Margin="0,10,0,0" Cursor="Hand">
+                        <Grid x:Name="ScaleTrack" Height="26" Margin="0,8,0,0" Cursor="Hand">
                             <Border x:Name="ScaleRail" Height="6" CornerRadius="3" VerticalAlignment="Center" Margin="9,0"/>
                             <Border x:Name="ScaleFill" Height="6" CornerRadius="3" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="9,0,0,0" IsHitTestVisible="False"/>
                             <Border x:Name="ScaleKnob" Width="18" Height="18" CornerRadius="9" HorizontalAlignment="Left" VerticalAlignment="Center" IsHitTestVisible="False"/>
                         </Grid>
-                        <TextBlock x:Name="SkinTitle" Text="皮肤" FontSize="14" Margin="0,14,0,8"/>
+                        <TextBlock x:Name="SkinTitle" Text="皮肤" FontSize="13" FontWeight="SemiBold" Margin="0,14,0,8"/>
                         <StackPanel Orientation="Horizontal">
-                            <Border x:Name="SkinDefault" CornerRadius="14" Padding="12,7" Margin="0,0,8,0" Cursor="Hand">
+                            <Border x:Name="SkinDefault" CornerRadius="12" Padding="12,6" Margin="0,0,8,0" Cursor="Hand">
                                 <TextBlock x:Name="SkinDefaultText" Text="默认" FontSize="13"/>
                             </Border>
-                            <Border x:Name="SkinGlass" CornerRadius="14" Padding="12,7" Cursor="Hand">
+                            <Border x:Name="SkinGlass" CornerRadius="12" Padding="12,6" Cursor="Hand">
                                 <TextBlock x:Name="SkinGlassText" Text="液态玻璃" FontSize="13"/>
                             </Border>
                         </StackPanel>
-                        <TextBlock x:Name="SkinDetail" Text="液态玻璃像一滴水：中间略厚、边缘更透，边缘会折射周围，拖动时会拉长并 Q 弹，文字仍保持清晰。" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                        <TextBlock x:Name="SkinDetail" Text="中间几乎透明，能看清后面的桌面。边缘是一层会计算的薄流体：拖动会搅动水面，折射和高光跟着表面走，松手有 Q 弹。白字靠淡光晕保持清晰。" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap" LineHeight="18"/>
                     </StackPanel>
                 </Border>
-                <TextBlock x:Name="NoticeLabel" Text="通知" FontSize="12" Margin="2,0,0,8"/>
-                <Border x:Name="NoticeRow" CornerRadius="16" Padding="14,12" Margin="0,0,0,16">
+
+                <TextBlock x:Name="LiveLabel" Text="翻译" FontSize="11" FontWeight="SemiBold" Margin="4,2,0,6"/>
+                <Border x:Name="LiveRow" CornerRadius="18" Padding="14,12" Margin="0,0,0,12">
+                    <StackPanel>
+                        <Grid>
+                            <StackPanel Margin="0,0,56,0">
+                                <TextBlock x:Name="LiveTitle" Text="实时翻译" FontSize="14"/>
+                                <TextBlock x:Name="LiveDetail" Text="把系统正在播放的声音译成中文。捕获的是视频或音乐里的人声，不是麦克风。第一次需下载约 181 MB 的识别模型，之后留在本机。" FontSize="12" Margin="0,3,0,0" TextWrapping="Wrap" LineHeight="18"/>
+                            </StackPanel>
+                            <Border x:Name="LiveToggle" Width="44" Height="26" CornerRadius="13" HorizontalAlignment="Right" VerticalAlignment="Center" Cursor="Hand">
+                                <Border x:Name="LiveKnob" Width="20" Height="20" CornerRadius="10" HorizontalAlignment="Left" Margin="3,0,0,0"/>
+                            </Border>
+                        </Grid>
+                        <Border x:Name="TranslateRule" Height="1" Margin="0,12,0,10"/>
+                        <TextBlock x:Name="DirectionLabel" Text="方向" FontSize="12" Margin="0,0,0,8"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                            <Border x:Name="DirAuto" CornerRadius="12" Padding="12,6" Margin="0,0,8,0" Cursor="Hand">
+                                <TextBlock x:Name="DirAutoText" Text="自动" FontSize="13"/>
+                            </Border>
+                            <Border x:Name="DirZhEn" CornerRadius="12" Padding="12,6" Margin="0,0,8,0" Cursor="Hand">
+                                <TextBlock x:Name="DirZhEnText" Text="中→英" FontSize="13"/>
+                            </Border>
+                            <Border x:Name="DirEnZh" CornerRadius="12" Padding="12,6" Cursor="Hand">
+                                <TextBlock x:Name="DirEnZhText" Text="英→中" FontSize="13"/>
+                            </Border>
+                        </StackPanel>
+                        <TextBlock x:Name="ApiLabel" Text="接口" FontSize="12" Margin="0,0,0,8"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,0">
+                            <Border x:Name="ApiDefault" CornerRadius="12" Padding="12,6" Margin="0,0,8,0" Cursor="Hand">
+                                <TextBlock x:Name="ApiDefaultText" Text="默认" FontSize="13"/>
+                            </Border>
+                            <Border x:Name="ApiCustom" CornerRadius="12" Padding="12,6" Cursor="Hand">
+                                <TextBlock x:Name="ApiCustomText" Text="自定义模型" FontSize="13"/>
+                            </Border>
+                        </StackPanel>
+                        <StackPanel x:Name="ApiFields" Visibility="Collapsed" Margin="0,10,0,0">
+                            <TextBlock x:Name="ApiUrlLabel" Text="API 地址" FontSize="12" Margin="0,0,0,6"/>
+                            <Border x:Name="ApiUrlBox" CornerRadius="12" Margin="0,0,0,8">
+                                <Grid>
+                                    <TextBlock x:Name="ApiUrlHint" Text="例如 https://api.example.com/v1" FontSize="13" Margin="12,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                                    <TextBox x:Name="ApiUrl" Height="34" FontSize="13" Padding="12,6,12,6" VerticalContentAlignment="Center" BorderThickness="0" Background="Transparent"/>
+                                </Grid>
+                            </Border>
+                            <TextBlock x:Name="ApiModelLabel" Text="模型名" FontSize="12" Margin="0,0,0,6"/>
+                            <Border x:Name="ApiModelBox" CornerRadius="12" Margin="0,0,0,8">
+                                <Grid>
+                                    <TextBlock x:Name="ApiModelHint" Text="填写模型名称" FontSize="13" Margin="12,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                                    <TextBox x:Name="ApiModel" Height="34" FontSize="13" Padding="12,6,12,6" VerticalContentAlignment="Center" BorderThickness="0" Background="Transparent"/>
+                                </Grid>
+                            </Border>
+                            <TextBlock x:Name="ApiKeyLabel" Text="API 密钥" FontSize="12" Margin="0,0,0,6"/>
+                            <Border x:Name="ApiKeyBox" CornerRadius="12">
+                                <PasswordBox x:Name="ApiKey" Height="34" FontSize="13" Padding="12,6,12,6" VerticalContentAlignment="Center" BorderThickness="0" Background="Transparent"/>
+                            </Border>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <TextBlock x:Name="NoticeLabel" Text="通知" FontSize="11" FontWeight="SemiBold" Margin="4,2,0,6"/>
+                <Border x:Name="NoticeRow" CornerRadius="18" Padding="14,12" Margin="0,0,0,12">
                     <Grid>
-                        <StackPanel>
+                        <StackPanel Margin="0,0,56,0">
                             <TextBlock x:Name="NoticeTitle" Text="在岛上显示通知中心" FontSize="14"/>
                             <TextBlock x:Name="NoticeDetail" Text="只读系统通知，不挂钩聊天软件。" FontSize="12" Margin="0,3,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
@@ -76,122 +134,69 @@
                     </Grid>
                 </Border>
 
-
-                <TextBlock x:Name="LiveLabel" Text="实时翻译" FontSize="12" Margin="2,0,0,8"/>
-                <Border x:Name="LiveRow" CornerRadius="16" Padding="14,12" Margin="0,0,0,16">
-                    <Grid>
-                        <StackPanel Margin="0,0,56,0">
-                            <TextBlock x:Name="LiveTitle" Text="把系统正在播放的声音译成中文" FontSize="14"/>
-                            <TextBlock x:Name="LiveDetail" Text="捕获的是系统正在播放的视频或音乐里的人声，不是麦克风。第一次需要下载约 181 MB 的识别模型，之后保存在本机。关闭后不再听声音。" FontSize="12" Margin="0,3,0,0" TextWrapping="Wrap"/>
-                        </StackPanel>
-                        <Border x:Name="LiveToggle" Width="44" Height="26" CornerRadius="13" HorizontalAlignment="Right" VerticalAlignment="Center" Cursor="Hand">
-                            <Border x:Name="LiveKnob" Width="20" Height="20" CornerRadius="10" HorizontalAlignment="Left" Margin="3,0,0,0"/>
+                <TextBlock x:Name="HideLabel" Text="隐身名单" FontSize="11" FontWeight="SemiBold" Margin="4,2,0,6"/>
+                <Border x:Name="HideRow" CornerRadius="18" Padding="14,12" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock x:Name="HideHint" Text="这些程序在这块屏幕上成为前台时，岛会收成小点。输入任务管理器里的进程名即可，不用带 .exe。也可以点正在运行的程序。" FontSize="12" Margin="0,0,0,8" TextWrapping="Wrap" LineHeight="18"/>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Border x:Name="HideNameBox" CornerRadius="12" Margin="0,0,8,0">
+                                <Grid>
+                                    <TextBlock x:Name="HideNameHint" Text="例如 chrome" FontSize="13" Margin="12,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                                    <TextBox x:Name="HideName" Height="34" FontSize="13" Padding="12,6,12,6" VerticalContentAlignment="Center" BorderThickness="0" Background="Transparent"/>
+                                </Grid>
+                            </Border>
+                            <Border x:Name="HideAdd" Grid.Column="1" CornerRadius="12" Padding="12,7" Margin="0,0,8,0" Cursor="Hand">
+                                <TextBlock x:Name="HideAddText" Text="加入" FontSize="13" VerticalAlignment="Center"/>
+                            </Border>
+                            <Border x:Name="HideBrowse" Grid.Column="2" CornerRadius="12" Padding="12,7" Cursor="Hand">
+                                <TextBlock x:Name="HideBrowseText" Text="选择…" FontSize="13" VerticalAlignment="Center"/>
+                            </Border>
+                        </Grid>
+                        <TextBlock x:Name="HideStatus" FontSize="12" Margin="0,0,0,8" TextWrapping="Wrap"/>
+                        <Border x:Name="HideCurrent" CornerRadius="12" Padding="12,7" HorizontalAlignment="Left" Margin="0,0,0,8" Cursor="Hand" Visibility="Collapsed">
+                            <TextBlock x:Name="HideCurrentText" Text="把刚才的程序加入名单" FontSize="13"/>
                         </Border>
-                    </Grid>
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="RunningLabel" Text="正在运行，点一下就加入" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,8,0"/>
+                            <Border x:Name="HideRefresh" Grid.Column="1" CornerRadius="10" Padding="8,3" Cursor="Hand" VerticalAlignment="Center">
+                                <TextBlock x:Name="HideRefreshText" Text="刷新" FontSize="12"/>
+                            </Border>
+                        </Grid>
+                        <WrapPanel x:Name="RunningApps" Margin="0,0,0,4"/>
+                        <StackPanel x:Name="HideList"/>
+                    </StackPanel>
                 </Border>
 
-                <TextBlock x:Name="ApiLabel" Text="翻译接口" FontSize="12" Margin="2,0,0,8"/>
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                    <Border x:Name="ApiDefault" CornerRadius="14" Padding="12,7" Margin="0,0,8,0" Cursor="Hand">
-                        <TextBlock x:Name="ApiDefaultText" Text="默认" FontSize="13"/>
-                    </Border>
-                    <Border x:Name="ApiCustom" CornerRadius="14" Padding="12,7" Cursor="Hand">
-                        <TextBlock x:Name="ApiCustomText" Text="自定义模型" FontSize="13"/>
-                    </Border>
-                </StackPanel>
-                <StackPanel x:Name="ApiFields" Visibility="Collapsed" Margin="0,0,0,16">
-                    <TextBlock x:Name="ApiUrlLabel" Text="API 地址" FontSize="12" Margin="2,0,0,6"/>
-                    <Border x:Name="ApiUrlBox" CornerRadius="14" Margin="0,0,0,8">
-                        <Grid>
-                            <TextBlock x:Name="ApiUrlHint" Text="例如 https://api.example.com/v1" FontSize="13" Margin="12,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
-                            <TextBox x:Name="ApiUrl" Height="36" FontSize="13" Padding="12,6,12,6" VerticalContentAlignment="Center" BorderThickness="0" Background="Transparent"/>
-                        </Grid>
-                    </Border>
-                    <TextBlock x:Name="ApiModelLabel" Text="模型名" FontSize="12" Margin="2,0,0,6"/>
-                    <Border x:Name="ApiModelBox" CornerRadius="14" Margin="0,0,0,8">
-                        <Grid>
-                            <TextBlock x:Name="ApiModelHint" Text="填写模型名称" FontSize="13" Margin="12,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
-                            <TextBox x:Name="ApiModel" Height="36" FontSize="13" Padding="12,6,12,6" VerticalContentAlignment="Center" BorderThickness="0" Background="Transparent"/>
-                        </Grid>
-                    </Border>
-                    <TextBlock x:Name="ApiKeyLabel" Text="API 密钥" FontSize="12" Margin="2,0,0,6"/>
-                    <Border x:Name="ApiKeyBox" CornerRadius="14">
-                        <PasswordBox x:Name="ApiKey" Height="36" FontSize="13" Padding="12,6,12,6" VerticalContentAlignment="Center" BorderThickness="0" Background="Transparent"/>
-                    </Border>
-                </StackPanel>
-
-                <TextBlock x:Name="DirectionLabel" Text="翻译方向" FontSize="12" Margin="2,0,0,8"/>
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
-                    <Border x:Name="DirAuto" CornerRadius="14" Padding="12,7" Margin="0,0,8,0" Cursor="Hand">
-                        <TextBlock x:Name="DirAutoText" Text="自动" FontSize="13"/>
-                    </Border>
-                    <Border x:Name="DirZhEn" CornerRadius="14" Padding="12,7" Margin="0,0,8,0" Cursor="Hand">
-                        <TextBlock x:Name="DirZhEnText" Text="中→英" FontSize="13"/>
-                    </Border>
-                    <Border x:Name="DirEnZh" CornerRadius="14" Padding="12,7" Cursor="Hand">
-                        <TextBlock x:Name="DirEnZhText" Text="英→中" FontSize="13"/>
-                    </Border>
-                </StackPanel>
-
-                <TextBlock x:Name="HideLabel" Text="隐身名单" FontSize="12" Margin="2,0,0,8"/>
-                <TextBlock x:Name="HideHint" Text="这些程序在这块屏幕上成为前台时，岛会收成小点。在下面输入任务管理器里的进程名即可加入，不用带 .exe，例如 chrome、msedge、WeChat、notepad。也可以点正在运行的程序。" FontSize="12" Margin="2,0,0,8" TextWrapping="Wrap"/>
-                <Grid Margin="0,0,0,8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition/>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <Border x:Name="HideNameBox" CornerRadius="14" Margin="0,0,8,0">
-                        <Grid>
-                            <TextBlock x:Name="HideNameHint" Text="例如 chrome" FontSize="13" Margin="12,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
-                            <TextBox x:Name="HideName" Height="36" FontSize="13" Padding="12,6,12,6" VerticalContentAlignment="Center" BorderThickness="0" Background="Transparent"/>
-                        </Grid>
-                    </Border>
-                    <Border x:Name="HideAdd" Grid.Column="1" CornerRadius="14" Padding="14,8" Margin="0,0,8,0" Cursor="Hand">
-                        <TextBlock x:Name="HideAddText" Text="加入" FontSize="13" VerticalAlignment="Center"/>
-                    </Border>
-                    <Border x:Name="HideBrowse" Grid.Column="2" CornerRadius="14" Padding="12,8" Cursor="Hand">
-                        <TextBlock x:Name="HideBrowseText" Text="选择…" FontSize="13" VerticalAlignment="Center"/>
-                    </Border>
-                </Grid>
-                <TextBlock x:Name="HideStatus" FontSize="12" Margin="2,0,0,8" TextWrapping="Wrap"/>
-                <Border x:Name="HideCurrent" CornerRadius="14" Padding="12,8" HorizontalAlignment="Left" Margin="0,0,0,8" Cursor="Hand" Visibility="Collapsed">
-                    <TextBlock x:Name="HideCurrentText" Text="把刚才的程序加入名单" FontSize="13"/>
-                </Border>
-                <Grid Margin="2,0,0,8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock x:Name="RunningLabel" Text="正在运行，点一下就加入" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,8,0"/>
-                    <Border x:Name="HideRefresh" Grid.Column="1" CornerRadius="10" Padding="8,3" Cursor="Hand" VerticalAlignment="Center">
-                        <TextBlock x:Name="HideRefreshText" Text="刷新" FontSize="12"/>
-                    </Border>
-                </Grid>
-                <WrapPanel x:Name="RunningApps" Margin="0,0,0,8"/>
-                <StackPanel x:Name="HideList" Margin="0,0,0,16"/>
-
-                <TextBlock x:Name="ToolLabel" Text="工具" FontSize="12" Margin="2,0,0,8"/>
+                <TextBlock x:Name="ToolLabel" Text="工具" FontSize="11" FontWeight="SemiBold" Margin="4,2,0,6"/>
                 <WrapPanel>
-                    <Border x:Name="ActTranslate" Style="{x:Null}" CornerRadius="14" Padding="12,8" Margin="0,0,8,8" Cursor="Hand">
+                    <Border x:Name="ActTranslate" Style="{x:Null}" CornerRadius="12" Padding="11,7" Margin="0,0,8,8" Cursor="Hand">
                         <TextBlock x:Name="ActTranslateText" Text="翻译剪贴板" FontSize="13"/>
                     </Border>
-                    <Border x:Name="ActRecall" CornerRadius="14" Padding="12,8" Margin="0,0,8,8" Cursor="Hand">
+                    <Border x:Name="ActRecall" CornerRadius="12" Padding="11,7" Margin="0,0,8,8" Cursor="Hand">
                         <TextBlock x:Name="ActRecallText" Text="上次译文" FontSize="13"/>
                     </Border>
-                    <Border x:Name="ActCamera" CornerRadius="14" Padding="12,8" Margin="0,0,8,8" Cursor="Hand">
+                    <Border x:Name="ActCamera" CornerRadius="12" Padding="11,7" Margin="0,0,8,8" Cursor="Hand">
                         <TextBlock x:Name="ActCameraText" Text="摄像头" FontSize="13"/>
                     </Border>
-                    <Border x:Name="ActLiveTranslate" CornerRadius="14" Padding="12,8" Margin="0,0,8,8" Cursor="Hand">
+                    <Border x:Name="ActLiveTranslate" CornerRadius="12" Padding="11,7" Margin="0,0,8,8" Cursor="Hand">
                         <TextBlock x:Name="ActLiveTranslateText" Text="实时翻译" FontSize="13"/>
                     </Border>
-                    <Border x:Name="ActStopwatch" CornerRadius="14" Padding="12,8" Margin="0,0,8,8" Cursor="Hand">
+                    <Border x:Name="ActStopwatch" CornerRadius="12" Padding="11,7" Margin="0,0,8,8" Cursor="Hand">
                         <TextBlock x:Name="ActStopwatchText" Text="秒表" FontSize="13"/>
                     </Border>
-                    <Border x:Name="ActFocus" CornerRadius="14" Padding="12,8" Margin="0,0,8,8" Cursor="Hand">
+                    <Border x:Name="ActFocus" CornerRadius="12" Padding="11,7" Margin="0,0,8,8" Cursor="Hand">
                         <TextBlock x:Name="ActFocusText" Text="专注 25 分钟" FontSize="13"/>
                     </Border>
-                    <Border x:Name="ActLog" CornerRadius="14" Padding="12,8" Margin="0,0,8,8" Cursor="Hand">
+                    <Border x:Name="ActLog" CornerRadius="12" Padding="11,7" Margin="0,0,8,8" Cursor="Hand">
                         <TextBlock x:Name="ActLogText" Text="打开日志" FontSize="13"/>
                     </Border>
                 </WrapPanel>

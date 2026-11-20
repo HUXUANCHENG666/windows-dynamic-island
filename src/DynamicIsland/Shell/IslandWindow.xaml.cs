@@ -65,7 +65,9 @@ public partial class IslandWindow : Window
     readonly List<ThrowMath.DragSample> _dragSamples = new();
     readonly Stopwatch _dragClock = Stopwatch.StartNew();
     readonly LiquidBounce _bounce = new();
+    readonly LiquidSurface _liquid = new();
     readonly GlassRefractionBuffer _refraction = new();
+    bool _liquidWasMoving;
     readonly ScaleTransform _pillScale = new(1, 1);
     DropShadowEffect? _pillShadow;
     BitmapCache? _pillCache;
@@ -422,6 +424,8 @@ public partial class IslandWindow : Window
         if (skin != IslandSkin.Glass)
         {
             Pill.Effect = _pillShadow;
+            _liquid.Reset();
+            _liquidWasMoving = false;
             _refraction.Clear();
             GlassSkin.UpdateRefraction(this, null);
         }
@@ -887,15 +891,25 @@ public partial class IslandWindow : Window
 
         bool glass = AppearancePolicy.ParseSkin(Settings.IslandSkin) == IslandSkin.Glass
             && GlassHost.Visibility == Visibility.Visible;
+        bool released = !moving && _liquidWasMoving;
+        _liquidWasMoving = moving;
         if (glass)
         {
-            GlassSkin.SetFlow(this, vx, vy, moving);
+            _liquid.EnsureSize(pillW, pillH);
+            double stretch = Math.Abs(_bounce.ScaleX - 1) + Math.Abs(_bounce.ScaleY - 1);
+            _liquid.Step(dt, vx, vy, moving, released, stretch);
+            GlassSkin.ApplySurface(this, _liquid, pillW, pillH, vx, vy, moving);
             UpdateRefraction(left, top, pillW, pillH, originX, originY);
         }
-        else if (GlassRefraction.Source != null)
+        else
         {
-            _refraction.Clear();
-            GlassSkin.UpdateRefraction(this, null);
+            if (!moving)
+                _liquid.Reset();
+            if (GlassRefraction.Source != null)
+            {
+                _refraction.Clear();
+                GlassSkin.UpdateRefraction(this, null);
+            }
         }
     }
 
@@ -942,7 +956,7 @@ public partial class IslandWindow : Window
         int visualH = Math.Max(1, (int)Math.Round(pillH * scaleY * dpi));
         int visualLeft = pillLeft + (int)Math.Round(originX * pillW * (1 - scaleX) * dpi);
         int visualTop = pillTop + (int)Math.Round(originY * pillH * (1 - scaleY) * dpi);
-        if (_refraction.TryUpdate(pillLeft, pillTop, pillWidth, pillHeight, visualLeft, visualTop, visualW, visualH))
+        if (_refraction.TryUpdate(pillLeft, pillTop, pillWidth, pillHeight, visualLeft, visualTop, visualW, visualH, _liquid))
             GlassSkin.UpdateRefraction(this, _refraction.Image);
         else
             GlassSkin.UpdateRefraction(this, null);
@@ -1005,7 +1019,10 @@ public partial class IslandWindow : Window
         bool transitioning = !_animator.IsSettled;
         bool expanded = _director.Expanded && !_director.ShowAsDot;
         // 拖拽、甩出、归位都要每帧挪窗口，必须走渲染循环，不能靠定时器（会漂帧）。
-        bool motion = _dragging || _throwActive || _gliding || !_bounce.IsSettled;
+        bool glassRipple = AppearancePolicy.ParseSkin(Settings.IslandSkin) == IslandSkin.Glass
+            && GlassHost.Visibility == Visibility.Visible
+            && !_liquid.IsSettled;
+        bool motion = _dragging || _throwActive || _gliding || !_bounce.IsSettled || glassRipple;
         bool animate = motion || EffectsPolicy.UseHighFrameRate(expanded, transitioning, waveform);
         if (animate && !_renderLive)
         {

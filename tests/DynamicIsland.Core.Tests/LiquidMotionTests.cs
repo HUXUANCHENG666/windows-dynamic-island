@@ -146,4 +146,81 @@ public class LiquidMotionTests
         bool right = anchor is DockAnchor.TopRight or DockAnchor.RightCenter or DockAnchor.BottomRight;
         return LiquidDrag.TransformOrigin(top, bottom, left, right);
     }
+
+    [Fact]
+    public void Surface_LongSideStaysInBudget()
+    {
+        var surface = new LiquidSurface();
+        surface.EnsureSize(424, 236);
+        Assert.Equal(LiquidSurface.DefaultLongSide, Math.Max(surface.Columns, surface.Rows));
+        Assert.InRange(Math.Max(surface.Columns, surface.Rows), LiquidSurface.MinLongSide, LiquidSurface.MaxLongSide);
+        Assert.True(Math.Min(surface.Columns, surface.Rows) >= 16);
+        surface.EnsureSize(228, 400);
+        Assert.Equal(LiquidSurface.DefaultLongSide, Math.Max(surface.Columns, surface.Rows));
+        Assert.True(surface.Columns < surface.Rows);
+    }
+
+    [Fact]
+    public void Surface_InjectedForceRaisesTheField()
+    {
+        var surface = new LiquidSurface();
+        surface.EnsureSize(200, 100);
+        Assert.True(surface.IsSettled);
+        Assert.InRange(surface.PrimaryCrest().U, 0.3, 0.5);
+        surface.InjectForce(0.5, 0.5, 0.8f, 0.25f);
+        for (int i = 0; i < 8; i++)
+            surface.Step(1.0 / 60, 0, 0, moving: false, released: false);
+        Assert.False(surface.IsSettled);
+        Assert.True(surface.PeakAbsHeight > 0.02);
+        Assert.InRange(surface.Sample(0.5, 0.5), -LiquidSurface.MaxAbsHeight, LiquidSurface.MaxAbsHeight);
+    }
+
+    [Fact]
+    public void Surface_HeightsDoNotExplode()
+    {
+        var surface = new LiquidSurface();
+        surface.EnsureSize(200, 80);
+        surface.InjectForce(0.3, 0.4, 4f, 0.2f);
+        surface.InjectForce(0.7, 0.6, -4f, 0.2f);
+        for (int i = 0; i < 240; i++)
+            surface.Step(1.0 / 60, vx: 2400, vy: -800, moving: i < 40, released: i == 40, stretch: 0.2);
+
+        Assert.InRange(surface.PeakAbsHeight, 0, LiquidSurface.MaxAbsHeight);
+        for (double u = 0; u <= 1; u += 0.25)
+        for (double v = 0; v <= 1; v += 0.25)
+            Assert.InRange(surface.Sample(u, v), -LiquidSurface.MaxAbsHeight, LiquidSurface.MaxAbsHeight);
+    }
+
+    [Fact]
+    public void Surface_DragThenReleaseMakesAPulse()
+    {
+        var surface = new LiquidSurface();
+        surface.EnsureSize(200, 100);
+        for (int i = 0; i < 12; i++)
+            surface.Step(1.0 / 60, vx: 2000, vy: 0, moving: true, released: false);
+
+        float during = surface.PeakAbsHeight;
+        Assert.True(during > 0.01);
+
+        surface.Step(1.0 / 60, vx: 2000, vy: 0, moving: false, released: true, stretch: 0.16);
+        float after = surface.PeakAbsHeight;
+        Assert.True(after >= during * 0.8);
+        Assert.False(surface.IsSettled);
+
+        for (int i = 0; i < 240; i++)
+            surface.Step(1.0 / 60, 0, 0, moving: false, released: false);
+        Assert.True(surface.IsSettled);
+        Assert.InRange(surface.PeakAbsHeight, 0, LiquidSurface.SettledHeight);
+    }
+
+    [Fact]
+    public void Refraction_SurfaceSlopeBendsTheSample()
+    {
+        Assert.True(LiquidRefraction.TryMap(198, 50, 200, 100, 72,
+            out var u0, out _, out _, out _, out _, out _, out _));
+        Assert.True(LiquidRefraction.TryMap(198, 50, 200, 100, 72, 0.4, 0, 0.3,
+            out var u1, out _, out _, out _, out _, out _, out _));
+        Assert.True(u1 > u0);
+        Assert.True(LiquidRefraction.InPad(u1, 72 + 50, 200, 100, 72));
+    }
 }

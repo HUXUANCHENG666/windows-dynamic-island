@@ -10,6 +10,8 @@ public static class LiquidRefraction
     public const double InnerRadius = 0.78;
     public const double SampleGain = 0.88;
     public const double Chromatic = 0.045;
+    public const double HeightWarp = 0.20;
+    public const double SlopeWarp = 0.55;
 
     public static double Smoothstep(double edge0, double edge1, double x)
     {
@@ -29,6 +31,26 @@ public static class LiquidRefraction
         double width,
         double height,
         int pad,
+        out double u,
+        out double v,
+        out double alpha,
+        out double redU,
+        out double redV,
+        out double blueU,
+        out double blueV) =>
+        TryMap(x, y, width, height, pad, 0, 0, 0,
+            out u, out v, out alpha, out redU, out redV, out blueU, out blueV);
+
+    /// <param name="slopeX">高度场在岛内归一化坐标下的横向斜率，用来把周围多折一点。</param>
+    public static bool TryMap(
+        double x,
+        double y,
+        double width,
+        double height,
+        int pad,
+        double slopeX,
+        double slopeY,
+        double surface,
         out double u,
         out double v,
         out double alpha,
@@ -66,9 +88,10 @@ public static class LiquidRefraction
             return false;
 
         double along = Smoothstep(InnerRadius, 1, r);
-        double offset = 0.6 + along * Math.Max(4, (pad - 1) * SampleGain);
-        double sx = cx + pad + ux * (tRect + offset);
-        double sy = cy + pad + uy * (tRect + offset);
+        double offset = 0.6 + along * Math.Max(4, (pad - 1) * SampleGain)
+            + surface * pad * HeightWarp;
+        double sx = cx + pad + ux * (tRect + offset) + slopeX * pad * SlopeWarp;
+        double sy = cy + pad + uy * (tRect + offset) + slopeY * pad * SlopeWarp;
         double paddedW = width + pad * 2;
         double paddedH = height + pad * 2;
         sx = Math.Clamp(sx, 0, paddedW - 1);

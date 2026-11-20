@@ -60,6 +60,8 @@ public partial class SettingsWindow : Window
         NoticeDetail.FontFamily = _font;
         NoticeKnob.Background = Theme.Title;
         LiveRow.Background = Theme.Chip;
+        HideRow.Background = Theme.Chip;
+        TranslateRule.Background = Theme.Hairline;
         LiveTitle.Foreground = Theme.Title;
         LiveTitle.FontFamily = _font;
         LiveDetail.Foreground = Theme.Artist;
@@ -71,9 +73,9 @@ public partial class SettingsWindow : Window
         ApiKeyLabel.Foreground = Theme.Quiet;
         StyleText(ApiDefaultText);
         StyleText(ApiCustomText);
-        ApiUrlBox.Background = Theme.Chip;
-        ApiModelBox.Background = Theme.Chip;
-        ApiKeyBox.Background = Theme.Chip;
+        ApiUrlBox.Background = Theme.Hover;
+        ApiModelBox.Background = Theme.Hover;
+        ApiKeyBox.Background = Theme.Hover;
         StyleField(ApiUrl, ApiUrlHint);
         StyleField(ApiModel, ApiModelHint);
         ApiKey.FontFamily = _font;
@@ -83,7 +85,7 @@ public partial class SettingsWindow : Window
         ApiKey.BorderThickness = new Thickness(0);
         HideHint.Foreground = Theme.Artist;
         HideHint.FontFamily = _font;
-        HideNameBox.Background = Theme.Chip;
+        HideNameBox.Background = Theme.Hover;
         HideName.FontFamily = _font;
         HideName.Foreground = Theme.Title;
         HideName.CaretBrush = Theme.Title;
@@ -95,7 +97,7 @@ public partial class SettingsWindow : Window
         HideStatus.FontFamily = _font;
         RunningLabel.Foreground = Theme.Quiet;
         RunningLabel.FontFamily = _font;
-        HideCurrent.Background = Theme.Chip;
+        HideCurrent.Background = Theme.Hover;
         HideCurrentText.Foreground = Theme.Title;
         HideCurrentText.FontFamily = _font;
         StyleChip(HideAdd, HideAddText);
@@ -128,7 +130,7 @@ public partial class SettingsWindow : Window
         StyleChip(ActLog, ActLogText);
 
         Ui.Hover(CloseButton, Theme.Chip, Theme.ChipHover);
-        Ui.Hover(HideCurrent, Theme.Chip, Theme.ChipHover);
+        Ui.Hover(HideCurrent, Theme.Hover, Theme.ChipHover);
         DragHeader.Background = Brushes.Transparent;
         Card.MouseLeftButtonDown += (_, e) =>
         {
@@ -303,7 +305,7 @@ public partial class SettingsWindow : Window
         {
             var row = new Border
             {
-                Background = Theme.Chip,
+                Background = Theme.Hover,
                 CornerRadius = new CornerRadius(12),
                 Padding = new Thickness(12, 7, 8, 7),
                 Margin = new Thickness(0, 0, 0, 6)
@@ -484,7 +486,7 @@ public partial class SettingsWindow : Window
         {
             var chip = new Border
             {
-                Background = Theme.Chip,
+                Background = Theme.Hover,
                 CornerRadius = new CornerRadius(12),
                 Padding = new Thickness(10, 6, 10, 6),
                 Margin = new Thickness(0, 0, 6, 6),
@@ -497,7 +499,7 @@ public partial class SettingsWindow : Window
                     FontSize = 12
                 }
             };
-            Ui.Hover(chip, Theme.Chip, Theme.ChipHover);
+            Ui.Hover(chip, Theme.Hover, Theme.ChipHover);
             string captured = name;
             chip.MouseLeftButtonUp += (_, e) =>
             {
@@ -670,12 +672,12 @@ public partial class SettingsWindow : Window
     {
         text.FontFamily = _font;
         text.Foreground = Theme.Title;
-        chip.Background = Theme.Chip;
-        Ui.Hover(chip, Theme.Chip, Theme.ChipHover);
+        chip.Background = Theme.Hover;
+        Ui.Hover(chip, Theme.Hover, Theme.ChipHover);
     }
 
     void PaintDirection(Border chip, bool selected)
     {
-        chip.Background = selected ? Theme.ChipHover : Theme.Chip;
+        chip.Background = selected ? Theme.ChipHover : Theme.Hover;
     }
 }

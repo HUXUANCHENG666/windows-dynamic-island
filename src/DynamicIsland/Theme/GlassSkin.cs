@@ -1,18 +1,18 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
-using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
 using System.Windows.Shapes;
 using DynamicIsland.Core.Island;
+using DynamicIsland.Core.Motion;
 using DynamicIsland.Shell;
 
 namespace DynamicIsland.Visuals;
 
 /// <summary>
-/// 液态玻璃只画在岛的超椭圆上，按水滴来画：清澈的冷色玻璃体、中间略厚边缘更透、
-/// 顶部的水珠高光，以及缓慢流动的折射光斑。不改窗口整体透明度。白字靠淡阴影保持可读，
-/// 不再铺一层近黑遮罩。收起并停稳后停掉动画，避免空转。
+/// 液态玻璃只画在岛的超椭圆上。中间几乎透明，桌面从岛身透出来；
+/// 边缘是一层按高度场计算的薄流体，高光和焦散跟着表面走。
+/// 不改窗口整体透明度，也不铺近黑遮罩。白字靠淡光晕保持可读。
 /// </summary>
 static class GlassSkin
 {
@@ -25,14 +25,9 @@ static class GlassSkin
     static readonly Brush Lip = MakeLip();
     static readonly Brush Bead = MakeBead();
     static readonly Brush Rim = MakeRim();
-    static readonly Brush BlobCool = MakeBlob(0x3A, 0xD4, 0xF2, 0xFF);
-    static readonly Brush BlobCooler = MakeBlob(0x28, 0xB0, 0xE0, 0xF6);
+    static readonly Brush BlobCool = MakeBlob(0x24, 0xD4, 0xF2, 0xFF);
+    static readonly Brush BlobCooler = MakeBlob(0x1A, 0xB0, 0xE0, 0xF6);
     static readonly Brush Streak = MakeStreak();
-
-    static Storyboard? _motion;
-    static bool _running;
-    static double _motionWidth;
-    static double _motionHeight;
 
     public static void Apply(IslandWindow window, IslandSkin skin)
     {
@@ -41,7 +36,7 @@ static class GlassSkin
             window.Pill.Fill = Body;
             window.Pill.Effect = Shadow;
             window.PillStroke.Stroke = Rim;
-            window.PillStroke.StrokeThickness = 1.7;
+            window.PillStroke.StrokeThickness = 1.5;
             window.GlassHost.Visibility = Visibility.Visible;
             window.GlassScrim.Fill = Scrim;
             window.GlassThickness.Fill = Thickness;
@@ -55,7 +50,7 @@ static class GlassSkin
         }
         else
         {
-            StopMotion(window, reset: true);
+            ResetShifts(window);
             window.GlassHost.Visibility = Visibility.Collapsed;
             UpdateRefraction(window, null);
             SetFlow(window, 0, 0, false);
@@ -73,34 +68,37 @@ static class GlassSkin
         window.GlassThickness.Data = geometry;
         window.GlassSpecular.Data = geometry;
         window.GlassLip.Data = geometry;
-        LayoutBlobs(window, width, height);
-        if (window.GlassHost.Visibility != Visibility.Visible)
-        {
-            StopMotion(window, reset: false);
-            return;
-        }
-
-        if (animate)
-            StartMotion(window, width, height);
-        else
-            StopMotion(window, reset: true);
+        LayoutBlobs(window, width, height, null);
+        if (window.GlassHost.Visibility != Visibility.Visible || !animate)
+            ResetShifts(window);
     }
 
-    static void LayoutBlobs(IslandWindow window, double width, double height)
+    public static void ApplySurface(IslandWindow window, LiquidSurface surface, double width, double height, double vx, double vy, bool moving)
+    {
+        LayoutBlobs(window, width, height, surface);
+        SetFlow(window, vx, vy, moving);
+    }
+
+    static void LayoutBlobs(IslandWindow window, double width, double height, LiquidSurface? surface)
     {
         width = Math.Max(12, width);
         height = Math.Max(12, height);
         bool compact = height < 64;
         double pack = compact ? 0.55 : 1;
+        var crest = surface?.PrimaryCrest() ?? (0.38, 0.36, 0);
+        var second = surface?.SecondaryCrest(crest) ?? (0.68, 0.62, 0);
+        var spec = surface?.SpecularPoint() ?? (0.28, 0.22, 0);
+        float energy = surface == null ? 0.35f : Math.Clamp(surface.PeakAbsHeight / 0.45f, 0, 1);
 
-        Place(window.GlassBead, width * 0.22 * pack, height * 0.20 * pack,
-            width * -0.22, height * -0.30, compact ? 0.55 : 0.92);
-        Place(window.GlassBlobA, width * 0.38 * pack, height * 0.40 * pack,
-            width * -0.14, height * -0.16, compact ? 0.28 : 0.48);
-        Place(window.GlassBlobB, width * 0.30 * pack, height * 0.34 * pack,
-            width * 0.20, height * 0.14, compact ? 0.18 : 0.34);
-        Place(window.GlassStreak, width * 0.58 * pack, Math.Max(7, height * 0.08),
-            width * 0.04, height * -0.08, compact ? 0.20 : 0.40);
+        Place(window.GlassBead, width * 0.20 * pack, height * 0.18 * pack,
+            (spec.U - 0.5) * width, (spec.V - 0.5) * height, (compact ? 0.42 : 0.72) + 0.22 * energy);
+        Place(window.GlassBlobA, width * 0.34 * pack, height * 0.36 * pack,
+            (crest.U - 0.5) * width, (crest.V - 0.5) * height, (compact ? 0.16 : 0.28) + 0.22 * energy);
+        Place(window.GlassBlobB, width * 0.26 * pack, height * 0.30 * pack,
+            (second.U - 0.5) * width, (second.V - 0.5) * height, (compact ? 0.10 : 0.20) + 0.16 * energy);
+        Place(window.GlassStreak, width * 0.50 * pack, Math.Max(6, height * 0.07),
+            ((crest.U + second.U) * 0.5 - 0.5) * width, ((crest.V + second.V) * 0.5 - 0.5) * height,
+            (compact ? 0.12 : 0.26) + 0.18 * energy);
     }
 
     static void Place(Ellipse blob, double w, double h, double x, double y, double opacity)
@@ -110,45 +108,11 @@ static class GlassSkin
         blob.HorizontalAlignment = HorizontalAlignment.Center;
         blob.VerticalAlignment = VerticalAlignment.Center;
         blob.Margin = new Thickness(x, y, -x, -y);
-        blob.Opacity = opacity;
+        blob.Opacity = Math.Clamp(opacity, 0.06, 1);
     }
 
-    static void StartMotion(IslandWindow window, double width, double height)
+    static void ResetShifts(IslandWindow window)
     {
-        if (_running && Math.Abs(_motionWidth - width) < 12 && Math.Abs(_motionHeight - height) < 12)
-            return;
-
-        StopMotion(window, reset: false);
-        double ax = Math.Max(6, width * 0.055);
-        double ay = Math.Max(4, height * 0.06);
-        var board = new Storyboard { RepeatBehavior = RepeatBehavior.Forever };
-        board.Children.Add(Drift(window.GlassBeadShift, TranslateTransform.XProperty, -ax * 0.25, ax * 0.30, 14.0));
-        board.Children.Add(Drift(window.GlassBeadShift, TranslateTransform.YProperty, ay * 0.12, -ay * 0.18, 11.5));
-        board.Children.Add(Drift(window.GlassBlobAShift, TranslateTransform.XProperty, -ax, ax, 12.5));
-        board.Children.Add(Drift(window.GlassBlobAShift, TranslateTransform.YProperty, ay * 0.45, -ay, 15.0));
-        board.Children.Add(Drift(window.GlassBlobBShift, TranslateTransform.XProperty, ax * 0.8, -ax * 0.9, 16.5));
-        board.Children.Add(Drift(window.GlassBlobBShift, TranslateTransform.YProperty, -ay * 0.7, ay * 0.55, 13.5));
-        board.Children.Add(Drift(window.GlassStreakShift, TranslateTransform.XProperty, -ax * 1.1, ax * 1.2, 18.0));
-        board.Children.Add(Drift(window.GlassStreakShift, TranslateTransform.YProperty, ay * 0.35, -ay * 0.4, 11.0));
-        _motion = board;
-        board.Begin();
-        _running = true;
-        _motionWidth = width;
-        _motionHeight = height;
-    }
-
-    static void StopMotion(IslandWindow window, bool reset)
-    {
-        if (_motion != null)
-        {
-            _motion.Stop();
-            _motion.Remove();
-            _motion = null;
-        }
-
-        _running = false;
-        if (!reset)
-            return;
         window.GlassBeadShift.X = 0;
         window.GlassBeadShift.Y = 0;
         window.GlassBlobAShift.X = 0;
@@ -168,8 +132,8 @@ static class GlassSkin
 
     public static void SetFlow(IslandWindow window, double vx, double vy, bool moving)
     {
-        double lagX = moving ? Math.Clamp(-vx * 0.035, -28, 28) : 0;
-        double lagY = moving ? Math.Clamp(-vy * 0.035, -28, 28) : 0;
+        double lagX = moving ? Math.Clamp(-vx * 0.028, -22, 22) : 0;
+        double lagY = moving ? Math.Clamp(-vy * 0.028, -22, 22) : 0;
         window.GlassBeadLag.X = lagX * 0.45;
         window.GlassBeadLag.Y = lagY * 0.45;
         window.GlassBlobALag.X = lagX;
@@ -180,31 +144,15 @@ static class GlassSkin
         window.GlassStreakLag.Y = lagY * 1.15;
     }
 
-    static DoubleAnimation Drift(TranslateTransform target, DependencyProperty property, double from, double to, double seconds)
-    {
-        var anim = new DoubleAnimation
-        {
-            From = from,
-            To = to,
-            Duration = TimeSpan.FromSeconds(seconds),
-            AutoReverse = true,
-            RepeatBehavior = RepeatBehavior.Forever,
-            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
-        };
-        Storyboard.SetTarget(anim, target);
-        Storyboard.SetTargetProperty(anim, new PropertyPath(property));
-        return anim;
-    }
-
     static DropShadowEffect MakeShadow()
     {
         var effect = new DropShadowEffect
         {
             Color = Color.FromRgb(0x08, 0x16, 0x22),
-            BlurRadius = 20,
-            ShadowDepth = 6,
+            BlurRadius = 18,
+            ShadowDepth = 5,
             Direction = 270,
-            Opacity = 0.26,
+            Opacity = 0.22,
             RenderingBias = RenderingBias.Performance
         };
         effect.Freeze();
@@ -229,14 +177,15 @@ static class GlassSkin
     {
         var brush = new LinearGradientBrush
         {
-            StartPoint = new Point(0.22, 0),
+            StartPoint = new Point(0.28, 0),
             EndPoint = new Point(0.55, 1)
         };
-        brush.GradientStops.Add(Stop(0x3A, 0xF4, 0xFB, 0xFF, 0));
-        brush.GradientStops.Add(Stop(0x2C, 0xC6, 0xE4, 0xF2, 0.16));
-        brush.GradientStops.Add(Stop(0x3C, 0x7A, 0xA4, 0xB8, 0.48));
-        brush.GradientStops.Add(Stop(0x4A, 0x4A, 0x6E, 0x86, 0.78));
-        brush.GradientStops.Add(Stop(0x36, 0x36, 0x56, 0x6A, 1));
+        // 中间几乎透明，只留一层很淡的冷色，避免再铺成半透色块。
+        brush.GradientStops.Add(Stop(0x18, 0xF4, 0xFB, 0xFF, 0));
+        brush.GradientStops.Add(Stop(0x0C, 0xD0, 0xE8, 0xF4, 0.20));
+        brush.GradientStops.Add(Stop(0x06, 0xA8, 0xC8, 0xDC, 0.50));
+        brush.GradientStops.Add(Stop(0x0E, 0x78, 0x9C, 0xB4, 0.82));
+        brush.GradientStops.Add(Stop(0x16, 0x5A, 0x80, 0x9A, 1));
         brush.Freeze();
         return brush;
     }
@@ -245,30 +194,33 @@ static class GlassSkin
     {
         var brush = new RadialGradientBrush
         {
-            GradientOrigin = new Point(0.50, 0.40),
-            Center = new Point(0.50, 0.46),
-            RadiusX = 0.78,
-            RadiusY = 0.88
+            GradientOrigin = new Point(0.50, 0.46),
+            Center = new Point(0.50, 0.50),
+            RadiusX = 0.96,
+            RadiusY = 0.98
         };
-        brush.GradientStops.Add(Stop(0x3A, 0x12, 0x28, 0x38, 0));
-        brush.GradientStops.Add(Stop(0x26, 0x14, 0x2A, 0x3C, 0.52));
-        brush.GradientStops.Add(Stop(0x10, 0x1A, 0x34, 0x48, 0.80));
-        brush.GradientStops.Add(Stop(0x00, 0x1A, 0x34, 0x48, 1));
+        // 中心完全透出桌面，只在外沿留一圈很淡的冷色月牙。
+        brush.GradientStops.Add(Stop(0x00, 0xE8, 0xF4, 0xFF, 0));
+        brush.GradientStops.Add(Stop(0x00, 0xD0, 0xE8, 0xF8, 0.58));
+        brush.GradientStops.Add(Stop(0x10, 0xC0, 0xDC, 0xF0, 0.84));
+        brush.GradientStops.Add(Stop(0x24, 0xB0, 0xD0, 0xE8, 1));
         brush.Freeze();
         return brush;
     }
 
     static Brush MakeThickness()
     {
-        var brush = new LinearGradientBrush
+        var brush = new RadialGradientBrush
         {
-            StartPoint = new Point(0.5, 0.42),
-            EndPoint = new Point(0.5, 1)
+            GradientOrigin = new Point(0.50, 0.46),
+            Center = new Point(0.50, 0.50),
+            RadiusX = 0.98,
+            RadiusY = 1.00
         };
-        brush.GradientStops.Add(Stop(0x00, 0x20, 0x3A, 0x52, 0));
-        brush.GradientStops.Add(Stop(0x10, 0x20, 0x3A, 0x52, 0.48));
-        brush.GradientStops.Add(Stop(0x28, 0x1A, 0x36, 0x4C, 0.78));
-        brush.GradientStops.Add(Stop(0x3A, 0x14, 0x2C, 0x40, 1));
+        brush.GradientStops.Add(Stop(0x00, 0xF4, 0xFB, 0xFF, 0));
+        brush.GradientStops.Add(Stop(0x00, 0xE8, 0xF4, 0xFF, 0.64));
+        brush.GradientStops.Add(Stop(0x16, 0xD8, 0xEE, 0xFF, 0.86));
+        brush.GradientStops.Add(Stop(0x2C, 0xEC, 0xF8, 0xFF, 1));
         brush.Freeze();
         return brush;
     }
@@ -278,11 +230,11 @@ static class GlassSkin
         var brush = new LinearGradientBrush
         {
             StartPoint = new Point(0.06, 0.00),
-            EndPoint = new Point(0.62, 0.52)
+            EndPoint = new Point(0.62, 0.48)
         };
-        brush.GradientStops.Add(Stop(0x8A, 0xFF, 0xFF, 0xFF, 0));
-        brush.GradientStops.Add(Stop(0x3A, 0xE0, 0xF2, 0xFF, 0.18));
-        brush.GradientStops.Add(Stop(0x00, 0xFF, 0xFF, 0xFF, 0.46));
+        brush.GradientStops.Add(Stop(0x68, 0xFF, 0xFF, 0xFF, 0));
+        brush.GradientStops.Add(Stop(0x28, 0xE0, 0xF2, 0xFF, 0.18));
+        brush.GradientStops.Add(Stop(0x00, 0xFF, 0xFF, 0xFF, 0.44));
         brush.Freeze();
         return brush;
     }
@@ -294,8 +246,8 @@ static class GlassSkin
             StartPoint = new Point(0.5, 0),
             EndPoint = new Point(0.5, 0.16)
         };
-        brush.GradientStops.Add(Stop(0x96, 0xFF, 0xFF, 0xFF, 0));
-        brush.GradientStops.Add(Stop(0x3C, 0xF0, 0xF8, 0xFF, 0.34));
+        brush.GradientStops.Add(Stop(0x7A, 0xFF, 0xFF, 0xFF, 0));
+        brush.GradientStops.Add(Stop(0x2E, 0xF0, 0xF8, 0xFF, 0.34));
         brush.GradientStops.Add(Stop(0x00, 0xFF, 0xFF, 0xFF, 1));
         brush.Freeze();
         return brush;
@@ -310,8 +262,8 @@ static class GlassSkin
             RadiusX = 0.62,
             RadiusY = 0.62
         };
-        brush.GradientStops.Add(Stop(0xC8, 0xFF, 0xFF, 0xFF, 0));
-        brush.GradientStops.Add(Stop(0x6A, 0xF4, 0xFB, 0xFF, 0.28));
+        brush.GradientStops.Add(Stop(0xC0, 0xFF, 0xFF, 0xFF, 0));
+        brush.GradientStops.Add(Stop(0x5A, 0xF4, 0xFB, 0xFF, 0.28));
         brush.GradientStops.Add(Stop(0x00, 0xFF, 0xFF, 0xFF, 1));
         brush.Freeze();
         return brush;
@@ -325,8 +277,8 @@ static class GlassSkin
             EndPoint = new Point(0.95, 1)
         };
         brush.GradientStops.Add(Stop(0xA8, 0xF4, 0xFB, 0xFF, 0));
-        brush.GradientStops.Add(Stop(0x78, 0xFF, 0xFF, 0xFF, 0.38));
-        brush.GradientStops.Add(Stop(0x5A, 0xC8, 0xE4, 0xF4, 1));
+        brush.GradientStops.Add(Stop(0x6A, 0xFF, 0xFF, 0xFF, 0.38));
+        brush.GradientStops.Add(Stop(0x52, 0xC8, 0xE4, 0xF4, 1));
         brush.Freeze();
         return brush;
     }
@@ -355,8 +307,8 @@ static class GlassSkin
             EndPoint = new Point(1, 0.5)
         };
         brush.GradientStops.Add(Stop(0x00, 0xFF, 0xFF, 0xFF, 0));
-        brush.GradientStops.Add(Stop(0x4A, 0xF4, 0xFB, 0xFF, 0.46));
-        brush.GradientStops.Add(Stop(0x28, 0xD8, 0xEE, 0xFF, 0.62));
+        brush.GradientStops.Add(Stop(0x3A, 0xF4, 0xFB, 0xFF, 0.46));
+        brush.GradientStops.Add(Stop(0x20, 0xD8, 0xEE, 0xFF, 0.62));
         brush.GradientStops.Add(Stop(0x00, 0xFF, 0xFF, 0xFF, 1));
         brush.Freeze();
         return brush;

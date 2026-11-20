@@ -24,7 +24,7 @@ sealed class GlassRefractionBuffer : IDisposable
 
     public void Clear() => _bitmap = null;
 
-    public bool TryUpdate(int pillLeft, int pillTop, int pillW, int pillH, int visualLeft, int visualTop, int visualW, int visualH)
+    public bool TryUpdate(int pillLeft, int pillTop, int pillW, int pillH, int visualLeft, int visualTop, int visualW, int visualH, LiquidSurface? surface = null)
     {
         if (pillW < 8 || pillH < 8 || !Capture(pillLeft, pillTop, pillW, pillH, visualLeft, visualTop, visualW, visualH))
         {
@@ -32,7 +32,7 @@ sealed class GlassRefractionBuffer : IDisposable
             return false;
         }
 
-        return Warp(pillW, pillH);
+        return Warp(pillW, pillH, surface);
     }
 
     bool Capture(int left, int top, int width, int height, int visualLeft, int visualTop, int visualW, int visualH)
@@ -119,7 +119,7 @@ sealed class GlassRefractionBuffer : IDisposable
         }
     }
 
-    bool Warp(int width, int height)
+    bool Warp(int width, int height, LiquidSurface? surface)
     {
         double scale = Math.Min(1, 280.0 / Math.Max(width, height));
         int outW = Math.Max(8, (int)Math.Round(width * scale));
@@ -137,7 +137,10 @@ sealed class GlassRefractionBuffer : IDisposable
             for (int x = 0; x < outW; x++)
             {
                 double px = (x + 0.5) * width / outW;
-                if (!LiquidRefraction.TryMap(px, py, width, height, pad,
+                float slopeX = 0, slopeY = 0, surfaceH = 0;
+                if (surface != null)
+                    surface.SampleSlope(px / width, py / height, out surfaceH, out slopeX, out slopeY);
+                if (!LiquidRefraction.TryMap(px, py, width, height, pad, slopeX, slopeY, surfaceH,
                         out var u, out var v, out var alpha,
                         out var ru, out var rv, out var bu, out var bv))
                     continue;

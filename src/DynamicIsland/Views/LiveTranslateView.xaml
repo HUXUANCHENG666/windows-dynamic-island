@@ -60,7 +60,7 @@
             </Setter>
         </Style>
     </UserControl.Resources>
-    <Grid Margin="16,12">
+    <Grid Margin="12,8">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -81,10 +81,10 @@
                 </Border>
             </StackPanel>
         </Grid>
-        <TextBlock x:Name="Status" Grid.Row="1" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap" TextTrimming="CharacterEllipsis"/>
+        <TextBlock x:Name="Status" Grid.Row="1" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" TextTrimming="CharacterEllipsis"/>
         <ScrollViewer x:Name="CaptionScroll"
                       Grid.Row="2"
-                      Margin="0,8,0,0"
+                      Margin="0,6,0,0"
                       Padding="0,0,4,0"
                       HorizontalScrollBarVisibility="Disabled"
                       VerticalScrollBarVisibility="Auto"
@@ -98,7 +98,7 @@
             </ScrollViewer.Resources>
             <StackPanel x:Name="CaptionList"/>
         </ScrollViewer>
-        <Border x:Name="ProgressHost" Grid.Row="3" Height="4" CornerRadius="2" Margin="0,10,0,0" Visibility="Collapsed" ClipToBounds="True">
+        <Border x:Name="ProgressHost" Grid.Row="3" Height="4" CornerRadius="2" Margin="0,8,0,0" Visibility="Collapsed" ClipToBounds="True">
             <Grid>
                 <Border x:Name="ProgressBar" Height="4" CornerRadius="2" HorizontalAlignment="Left" Width="0"/>
                 <Border x:Name="IndeterminateBar" Height="4" Width="48" CornerRadius="2" HorizontalAlignment="Left" Visibility="Collapsed">

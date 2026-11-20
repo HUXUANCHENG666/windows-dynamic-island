@@ -11,9 +11,9 @@ public sealed class SpeechSegmenter
     public const int SampleRate = StreamResampler.TargetRate;
     public const int FrameSamples = 320;
     public const float SpeechRms = 0.015f;
-    public const int HangoverFrames = 40; // 20 ms/frame ≈ 800 ms of trailing silence
-    public const int MinSpeechFrames = 20;
-    public const int PartialFrames = 25; // 20 ms/frame ≈ 0.5 s between live captions
+    public const int HangoverFrames = 32; // 20 ms/frame ≈ 640 ms of trailing silence
+    public const int MinSpeechFrames = 12;
+    public const int PartialFrames = 13; // 20 ms/frame ≈ 0.26 s between live captions
     public const int MaxSpeechFrames = 750; // 20 ms/frame ≈ 15 s, a longer thought can finish
     public const int PrerollFrames = 10;
 

@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Threading;
 using DynamicIsland.Core.LiveTranslate;
 using DynamicIsland.Visuals;
 
@@ -14,13 +15,14 @@ public partial class LiveTranslateView : UserControl
     public event EventHandler? CancelRequested;
 
     const double ScrollLine = 48;
-    const double StickSlack = 8;
 
     double? _progress;
     Storyboard? _indeterminate;
     bool _vertical;
     bool _stickToEnd = true;
     bool _programmaticScroll;
+    bool _pendingStick;
+    int _stickGeneration;
     IReadOnlyList<LiveTranslateCaption>? _items;
 
     public LiveTranslateView()
@@ -40,6 +42,11 @@ public partial class LiveTranslateView : UserControl
         IndeterminateBar.Background = Theme.Live;
         ProgressHost.SizeChanged += (_, _) => ApplyProgress(restartIndeterminate: true);
         CaptionScroll.Background = Brushes.Transparent;
+        CaptionList.SizeChanged += (_, _) =>
+        {
+            if (_stickToEnd)
+                QueueStickToEnd();
+        };
         Ui.Hover(CloseTranslate, Theme.Chip, Theme.ChipHover);
         Ui.Hover(CancelDownload, Theme.Chip, Theme.ChipHover);
         CloseTranslate.MouseLeftButtonUp += (_, e) =>
@@ -142,13 +149,14 @@ public partial class LiveTranslateView : UserControl
         }
 
         double keep = CaptionScroll.VerticalOffset;
+        _programmaticScroll = true;
         CaptionList.Children.Clear();
         for (int i = 0; i < items.Count; i++)
             CaptionList.Children.Add(BuildRow(items[i], newest: i == items.Count - 1));
 
         CaptionScroll.UpdateLayout();
         if (_stickToEnd)
-            StickToEnd();
+            QueueStickToEnd();
         else
             RestoreOffset(keep);
     }
@@ -156,9 +164,10 @@ public partial class LiveTranslateView : UserControl
     public void ClearSubtitle()
     {
         _items = null;
+        _programmaticScroll = true;
         CaptionList.Children.Clear();
         _stickToEnd = true;
-        RestoreOffset(0);
+        QueueStickToEnd();
     }
 
     public void TryWheel(int delta)
@@ -172,9 +181,10 @@ public partial class LiveTranslateView : UserControl
 
     void OnCaptionScrollChanged(object sender, ScrollChangedEventArgs e)
     {
-        if (_programmaticScroll)
+        if (_programmaticScroll || _pendingStick)
             return;
-        _stickToEnd = CaptionScroll.VerticalOffset + CaptionScroll.ViewportHeight >= CaptionScroll.ExtentHeight - StickSlack;
+        _stickToEnd = CaptionScrollPolicy.IsAtEnd(
+            CaptionScroll.VerticalOffset, CaptionScroll.ViewportHeight, CaptionScroll.ExtentHeight);
     }
 
     void OnCaptionMouseWheel(object sender, MouseWheelEventArgs e)
@@ -183,28 +193,44 @@ public partial class LiveTranslateView : UserControl
         e.Handled = true;
     }
 
+    void QueueStickToEnd()
+    {
+        StickToEnd();
+        _pendingStick = true;
+        int generation = ++_stickGeneration;
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (generation != _stickGeneration)
+                return;
+            if (_stickToEnd)
+                StickToEnd();
+            _pendingStick = false;
+        }, DispatcherPriority.Loaded);
+    }
+
     void StickToEnd()
     {
         _programmaticScroll = true;
         CaptionScroll.UpdateLayout();
-        double max = Math.Max(0, CaptionScroll.ExtentHeight - CaptionScroll.ViewportHeight);
-        CaptionScroll.ScrollToVerticalOffset(max);
+        CaptionScroll.ScrollToVerticalOffset(
+            CaptionScrollPolicy.EndOffset(CaptionScroll.ViewportHeight, CaptionScroll.ExtentHeight));
         _programmaticScroll = false;
         _stickToEnd = true;
     }
 
     void RestoreOffset(double offset)
     {
+        _pendingStick = false;
         _programmaticScroll = true;
         CaptionScroll.UpdateLayout();
-        double max = Math.Max(0, CaptionScroll.ExtentHeight - CaptionScroll.ViewportHeight);
+        double max = CaptionScrollPolicy.EndOffset(CaptionScroll.ViewportHeight, CaptionScroll.ExtentHeight);
         CaptionScroll.ScrollToVerticalOffset(Math.Clamp(offset, 0, max));
         _programmaticScroll = false;
     }
 
     FrameworkElement BuildRow(LiveTranslateCaption caption, bool newest)
     {
-        var block = new StackPanel { Margin = new Thickness(0, 0, 0, newest ? 0 : 10) };
+        var block = new StackPanel { Margin = new Thickness(0, 0, 0, newest ? 0 : 8) };
         var time = new TextBlock
         {
             FontFamily = TitleText.FontFamily,
