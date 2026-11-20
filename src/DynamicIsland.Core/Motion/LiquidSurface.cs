@@ -32,6 +32,13 @@ public sealed class LiquidSurface
     public int Columns => _cols;
     public int Rows => _rows;
     public float PeakAbsHeight => _maxAbs;
+
+    public void CopyHeights(float[] dest)
+    {
+        if (dest == null || dest.Length == 0 || _height.Length == 0)
+            return;
+        Array.Copy(_height, dest, Math.Min(dest.Length, _height.Length));
+    }
     public bool IsSettled => _maxAbs <= SettledHeight && _maxVel <= SettledVelocity;
 
     public void EnsureSize(double width, double height)

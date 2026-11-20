@@ -277,7 +277,39 @@ public class LiquidMotionTests
         Assert.False(GlassWork.ShouldCapture(moving: true, secondsSinceCapture: 0.01, captureInFlight: false));
         Assert.True(GlassWork.ShouldCapture(moving: true, secondsSinceCapture: 0.05, captureInFlight: false));
         Assert.True(GlassWork.ShouldCapture(moving: false, secondsSinceCapture: 0.02, captureInFlight: false));
+        Assert.True(GlassWork.ShouldRefreshVisuals(moving: false, resizing: true));
+        Assert.True(GlassWork.ShouldCapture(moving: false, resizing: true, secondsSinceCapture: 0, captureInFlight: false));
+        Assert.False(GlassWork.ShouldCapture(moving: false, resizing: true, secondsSinceCapture: 0, captureInFlight: true));
+        Assert.False(GlassWork.PositionDependsOnGpu);
+        Assert.True(GlassWork.PreferGpu);
+        Assert.Equal(GlassRenderPath.Gpu, GlassWork.ChoosePath(gpuAvailable: true));
+        Assert.Equal(GlassRenderPath.Cpu, GlassWork.ChoosePath(gpuAvailable: false));
         Assert.True(GlassWork.OutputLongSide(moving: true) < GlassWork.OutputLongSide(moving: false));
+        Assert.True(GlassWork.GpuOutputLongSide >= GlassWork.IdleOutputLongSide);
+    }
+
+    [Fact]
+    public void GlassSample_ColorEdgeIsAGradientNotAStep()
+    {
+        int red = unchecked((int)0xFFFF0000);
+        int blue = unchecked((int)0xFF0000FF);
+        int[] pixels =
+        {
+            red, red, blue, blue,
+            red, red, blue, blue
+        };
+        int left = GlassSample.Bilinear(pixels, 4, 2, 1.0, 0.5);
+        int quarter = GlassSample.Bilinear(pixels, 4, 2, 1.25, 0.5);
+        int mid = GlassSample.Bilinear(pixels, 4, 2, 1.5, 0.5);
+        int three = GlassSample.Bilinear(pixels, 4, 2, 1.75, 0.5);
+        int right = GlassSample.Bilinear(pixels, 4, 2, 2.0, 0.5);
+        static int R(int c) => (c >> 16) & 0xFF;
+        static int B(int c) => c & 0xFF;
+        Assert.True(R(left) > R(quarter) && R(quarter) > R(mid) && R(mid) > R(three) && R(three) > R(right));
+        Assert.True(B(left) < B(quarter) && B(quarter) < B(mid) && B(mid) < B(three) && B(three) < B(right));
+        Assert.True(R(mid) > 40 && B(mid) > 40);
+        Assert.NotEqual(left, mid);
+        Assert.NotEqual(mid, right);
     }
 
     [Fact]

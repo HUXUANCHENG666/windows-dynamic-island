@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Threading;
 using DynamicIsland.Core.Ipc;
 using DynamicIsland.Core.Island;
@@ -17,6 +19,8 @@ public partial class App : Application
 
     public App()
     {
+        // 必须在创建窗口之前请求硬件渲染，否则透明岛容易掉进软件光栅。
+        RenderOptions.ProcessRenderMode = RenderMode.Default;
         try
         {
             SetProcessDpiAwarenessContext(new IntPtr(-4));

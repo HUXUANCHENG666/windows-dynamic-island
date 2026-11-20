@@ -70,6 +70,8 @@ public partial class IslandWindow : Window
     readonly GlassRefractionBuffer _refraction = new();
     DateTime _lastCaptureUtc;
     bool _liquidWasMoving;
+    double _glassPillW;
+    double _glassPillH;
     readonly ScaleTransform _pillScale = new(1, 1);
     DropShadowEffect? _pillShadow;
     BitmapCache? _pillCache;
@@ -903,10 +905,16 @@ public partial class IslandWindow : Window
         {
             _liquid.EnsureSize(pillW, pillH);
             double stretch = Math.Abs(_bounce.ScaleX - 1) + Math.Abs(_bounce.ScaleY - 1);
+            double sizePulse = Math.Abs(pillW - _glassPillW) + Math.Abs(pillH - _glassPillH);
+            if (_glassPillW > 0 && sizePulse > 1)
+                _liquid.InjectForce(0.5, 0.5, (float)Math.Min(0.28, sizePulse * 0.004), 0.42f);
+            _glassPillW = pillW;
+            _glassPillH = pillH;
             _liquid.Step(dt, vx, vy, moving, released, stretch);
             GlassSkin.ApplySurface(this, _liquid, pillW, pillH, vx, vy, moving);
-            // 位置和 Q 弹已经跟上；捕获放到后台，拖动时每帧用上一帧周围图按当前形状再扭曲。
-            PresentGlass(left, top, pillW, pillH, originX, originY, moving);
+            // 位置、展开弹簧先走完；捕获放后台。展开过程也按当前形状每帧重算玻璃。
+            bool resizing = !_animator.IsSettled;
+            PresentGlass(left, top, pillW, pillH, originX, originY, moving, resizing);
         }
         else
         {
@@ -943,9 +951,9 @@ public partial class IslandWindow : Window
         return (0, 0);
     }
 
-    void PresentGlass(double left, double top, double pillW, double pillH, double originX, double originY, bool moving)
+    void PresentGlass(double left, double top, double pillW, double pillH, double originX, double originY, bool moving, bool resizing)
     {
-        if (!GlassWork.ShouldRefreshVisuals(moving))
+        if (!GlassWork.ShouldRefreshVisuals(moving, resizing))
             return;
 
         var hwnd = new WindowInteropHelper(this).Handle;
@@ -970,12 +978,12 @@ public partial class IslandWindow : Window
 
         // 先用当前流体和上一帧周围图出画面，不等待 BitBlt。
         if (_refraction.TryPresent(pillWidth, pillHeight, radius, _liquid, moving))
-            GlassSkin.UpdateRefraction(this, _refraction.Image, _refraction.Shade);
+            GlassSkin.UpdateRefraction(this, _refraction.Image, _refraction.Shade, _refraction.GpuImage);
 
         double age = _lastCaptureUtc == default
             ? double.MaxValue
             : (DateTime.UtcNow - _lastCaptureUtc).TotalSeconds;
-        if (!GlassWork.ShouldCapture(moving, age, _refraction.CaptureInFlight))
+        if (!GlassWork.ShouldCapture(moving, resizing, age, _refraction.CaptureInFlight))
             return;
 
         _lastCaptureUtc = DateTime.UtcNow;
@@ -986,15 +994,10 @@ public partial class IslandWindow : Window
             Dispatcher.BeginInvoke(() =>
             {
                 if (ok)
-                {
                     _refraction.CompleteCapture();
-                    if (_refraction.TryPresent(pillWidth, pillHeight, radius, _liquid, moving))
-                        GlassSkin.UpdateRefraction(this, _refraction.Image, _refraction.Shade);
-                }
                 else
-                {
                     _refraction.AbandonCapture();
-                }
+                // 用当前形状再画一帧，不要沿用开始捕获时的旧尺寸（展开动画中会变）。
             }, DispatcherPriority.Background);
         });
     }
@@ -2060,7 +2063,8 @@ public partial class IslandWindow : Window
         if (moving)
         {
             Pill.Effect = null;
-            Pill.CacheMode = _pillCache;
+            bool glass = AppearancePolicy.ParseSkin(Settings.IslandSkin) == IslandSkin.Glass;
+            Pill.CacheMode = glass ? null : _pillCache;
         }
         else
         {

@@ -22,14 +22,19 @@
             <Path x:Name="Pill"/>
             <Grid x:Name="GlassHost" IsHitTestVisible="False" Visibility="Collapsed" ClipToBounds="True">
                 <Path x:Name="GlassScrim"/>
-                <Image x:Name="GlassShade" Stretch="Fill" IsHitTestVisible="False" SnapsToDevicePixels="True">
+                <Image x:Name="GlassShade" Stretch="Fill" IsHitTestVisible="False" SnapsToDevicePixels="False">
                     <Image.RenderTransform>
                         <TranslateTransform x:Name="GlassShadeLag"/>
                     </Image.RenderTransform>
                 </Image>
-                <Image x:Name="GlassRefraction" Stretch="Fill" IsHitTestVisible="False" SnapsToDevicePixels="True">
+                <Image x:Name="GlassRefraction" Stretch="Fill" IsHitTestVisible="False" SnapsToDevicePixels="False">
                     <Image.RenderTransform>
                         <TranslateTransform x:Name="GlassRefractionLag"/>
+                    </Image.RenderTransform>
+                </Image>
+                <Image x:Name="GlassGpu" Stretch="Fill" IsHitTestVisible="False" SnapsToDevicePixels="False">
+                    <Image.RenderTransform>
+                        <TranslateTransform x:Name="GlassGpuLag"/>
                     </Image.RenderTransform>
                 </Image>
                 <Path x:Name="GlassThickness"/>

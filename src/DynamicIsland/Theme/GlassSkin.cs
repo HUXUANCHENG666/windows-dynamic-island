@@ -1,6 +1,5 @@
 using System.Windows;
 using System.Windows.Media;
-using System.Windows.Media.Effects;
 using DynamicIsland.Core.Island;
 using DynamicIsland.Core.Motion;
 using DynamicIsland.Shell;
@@ -10,12 +9,10 @@ namespace DynamicIsland.Visuals;
 /// <summary>
 /// 液态玻璃只画在岛的超椭圆上。中间几乎透明，桌面从岛身透出来；
 /// 边缘月牙、高光和折射都按跑道形 / 圆角矩形的距离场来算，不再在中间单独画一块椭圆反光。
-/// 不改窗口整体透明度，也不铺近黑遮罩。白字靠淡光晕保持可读。
+/// 不改窗口整体透明度，也不铺近黑遮罩。不用 DropShadow，以免透明窗口掉进软件渲染。
 /// </summary>
 static class GlassSkin
 {
-    static readonly DropShadowEffect Shadow = MakeShadow();
-    static readonly DropShadowEffect TextHalo = MakeTextHalo();
     static readonly Brush Body = MakeBody();
     static readonly Brush Rim = MakeRim();
 
@@ -24,7 +21,8 @@ static class GlassSkin
         if (skin == IslandSkin.Glass)
         {
             window.Pill.Fill = Body;
-            window.Pill.Effect = Shadow;
+            window.Pill.Effect = null;
+            window.Pill.CacheMode = null;
             window.PillStroke.Stroke = Rim;
             window.PillStroke.StrokeThickness = 1.5;
             window.GlassHost.Visibility = Visibility.Visible;
@@ -33,7 +31,11 @@ static class GlassSkin
             window.GlassSpecular.Fill = Brushes.Transparent;
             window.GlassLip.Fill = Brushes.Transparent;
             HideBlobs(window);
-            window.ContentHost.Effect = TextHalo;
+            // DropShadow 会把透明窗口整棵子树打回软件渲染，改由高光和淡描边保可读。
+            window.ContentHost.Effect = null;
+            RenderOptions.SetBitmapScalingMode(window.GlassShade, BitmapScalingMode.Fant);
+            RenderOptions.SetBitmapScalingMode(window.GlassRefraction, BitmapScalingMode.Fant);
+            RenderOptions.SetBitmapScalingMode(window.GlassGpu, BitmapScalingMode.Fant);
         }
         else
         {
@@ -88,12 +90,15 @@ static class GlassSkin
         SetFlow(window, 0, 0, false);
     }
 
-    public static void UpdateRefraction(IslandWindow window, ImageSource? image, ImageSource? shade)
+    public static void UpdateRefraction(IslandWindow window, ImageSource? image, ImageSource? shade, ImageSource? gpu = null)
     {
-        window.GlassRefraction.Source = image;
-        window.GlassRefraction.Visibility = image == null ? Visibility.Collapsed : Visibility.Visible;
-        window.GlassShade.Source = shade;
-        window.GlassShade.Visibility = shade == null ? Visibility.Collapsed : Visibility.Visible;
+        bool useGpu = gpu != null;
+        window.GlassGpu.Source = gpu;
+        window.GlassGpu.Visibility = useGpu ? Visibility.Visible : Visibility.Collapsed;
+        window.GlassRefraction.Source = useGpu ? null : image;
+        window.GlassRefraction.Visibility = !useGpu && image != null ? Visibility.Visible : Visibility.Collapsed;
+        window.GlassShade.Source = useGpu ? null : shade;
+        window.GlassShade.Visibility = !useGpu && shade != null ? Visibility.Visible : Visibility.Collapsed;
     }
 
     public static void SetFlow(IslandWindow window, double vx, double vy, bool moving)
@@ -112,35 +117,8 @@ static class GlassSkin
         window.GlassShadeLag.Y = lagY * 0.7;
         window.GlassRefractionLag.X = lagX * 0.5;
         window.GlassRefractionLag.Y = lagY * 0.5;
-    }
-
-    static DropShadowEffect MakeShadow()
-    {
-        var effect = new DropShadowEffect
-        {
-            Color = Color.FromRgb(0x08, 0x16, 0x22),
-            BlurRadius = 18,
-            ShadowDepth = 5,
-            Direction = 270,
-            Opacity = 0.22,
-            RenderingBias = RenderingBias.Performance
-        };
-        effect.Freeze();
-        return effect;
-    }
-
-    static DropShadowEffect MakeTextHalo()
-    {
-        var effect = new DropShadowEffect
-        {
-            Color = Color.FromRgb(0x04, 0x0A, 0x14),
-            BlurRadius = 7,
-            ShadowDepth = 0,
-            Opacity = 0.82,
-            RenderingBias = RenderingBias.Performance
-        };
-        effect.Freeze();
-        return effect;
+        window.GlassGpuLag.X = lagX * 0.55;
+        window.GlassGpuLag.Y = lagY * 0.55;
     }
 
     static Brush MakeBody()

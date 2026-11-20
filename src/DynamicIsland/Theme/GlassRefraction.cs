@@ -27,11 +27,19 @@ sealed class GlassRefractionBuffer : IDisposable
     int _padH;
     int _backW;
     int _backH;
+    int _padIslandW;
+    int _padIslandH;
+    int _pendingIslandW;
+    int _pendingIslandH;
     volatile bool _captureBusy;
     volatile bool _disposed;
+    GlassGpuRenderer? _gpu;
+    DateTime _gpuRetryUtc;
+    bool _gpuRejected;
 
     public ImageSource? Image => _bitmap;
     public ImageSource? Shade => _shade;
+    public ImageSource? GpuImage { get; private set; }
     public bool CaptureInFlight => _captureBusy;
     public bool HasCachedPad => _padW >= 2 && _pad.Length == _padW * _padH;
 
@@ -39,10 +47,11 @@ sealed class GlassRefractionBuffer : IDisposable
     {
         _bitmap = null;
         _shade = null;
+        GpuImage = null;
     }
 
     public bool CanReusePad(int width, int height) =>
-        GlassWork.ShouldReuseCapture(HasCachedPad) && _padW == width + Pad * 2 && _padH == height + Pad * 2;
+        GlassWork.ShouldReuseCapture(HasCachedPad);
 
     public bool TryUpdate(int pillLeft, int pillTop, int pillW, int pillH, int visualLeft, int visualTop, int visualW, int visualH, double radius, LiquidSurface? surface = null)
     {
@@ -51,6 +60,9 @@ sealed class GlassRefractionBuffer : IDisposable
             _bitmap = null;
             return false;
         }
+
+        _padIslandW = pillW;
+        _padIslandH = pillH;
 
         WriteShade(pillW, pillH, radius, surface, moving: false);
         return Warp(pillW, pillH, radius, surface, moving: false);
@@ -61,13 +73,57 @@ sealed class GlassRefractionBuffer : IDisposable
         if (pillW < 8 || pillH < 8)
             return false;
 
+        int srcW = _padIslandW > 0 ? _padIslandW : pillW;
+        int srcH = _padIslandH > 0 ? _padIslandH : pillH;
+        if (GlassWork.ChoosePath(EnsureGpu()) == GlassRenderPath.Gpu)
+        {
+            int[]? pad = HasCachedPad ? _pad : null;
+            if (_gpu!.TryPresent(pad, _padW, _padH, pillW, pillH, srcW, srcH, radius, surface, moving))
+            {
+                GpuImage = _gpu.Image;
+                _bitmap = null;
+                _shade = null;
+                return true;
+            }
+
+            _gpu.Dispose();
+            _gpu = null;
+            GpuImage = null;
+            _gpuRejected = true;
+            _gpuRetryUtc = DateTime.UtcNow;
+        }
+        else
+        {
+            GpuImage = null;
+        }
+
         bool shade = WriteShade(pillW, pillH, radius, surface, moving);
         if (CanReusePad(pillW, pillH))
             return Warp(pillW, pillH, radius, surface, moving) || shade;
 
-        // 尺寸对不上时不要把上一帧错误拉伸上去，高光仍可跟着当前形状走。
         _bitmap = null;
         return shade;
+    }
+
+    bool EnsureGpu()
+    {
+        if (_disposed || !GlassWork.PreferGpu)
+            return false;
+        if (_gpu is { IsAvailable: true })
+            return true;
+        if (_gpuRejected && (DateTime.UtcNow - _gpuRetryUtc).TotalSeconds < 10)
+            return false;
+        _gpu?.Dispose();
+        _gpu = GlassGpuRenderer.TryCreate();
+        if (_gpu == null)
+        {
+            _gpuRejected = true;
+            _gpuRetryUtc = DateTime.UtcNow;
+            return false;
+        }
+
+        _gpuRejected = false;
+        return true;
     }
 
     public bool TryUpdateShade(int pillW, int pillH, double radius, LiquidSurface? surface)
@@ -96,6 +152,8 @@ sealed class GlassRefractionBuffer : IDisposable
             return false;
 
         _captureBusy = true;
+        _pendingIslandW = pillW;
+        _pendingIslandH = pillH;
         ThreadPool.QueueUserWorkItem(_ =>
         {
             bool ok = false;
@@ -128,6 +186,8 @@ sealed class GlassRefractionBuffer : IDisposable
         _backPad = swap;
         _padW = _backW;
         _padH = _backH;
+        _padIslandW = _pendingIslandW;
+        _padIslandH = _pendingIslandH;
         _captureBusy = false;
     }
 
@@ -295,11 +355,11 @@ sealed class GlassRefractionBuffer : IDisposable
                         out var u, out var v, out var alpha,
                         out var ru, out var rv, out var bu, out var bv))
                     continue;
-                int green = Sample(u, v);
+                int green = Sample(u, v, width, height);
                 if (green == 0)
                     continue;
-                int red = Sample(ru, rv);
-                int blue = Sample(bu, bv);
+                int red = Sample(ru, rv, width, height);
+                int blue = Sample(bu, bv, width, height);
                 if (red == 0)
                     red = green;
                 if (blue == 0)
@@ -327,46 +387,23 @@ sealed class GlassRefractionBuffer : IDisposable
         return true;
     }
 
-    int Sample(double u, double v)
+    int Sample(double u, double v, int islandW, int islandH)
     {
         if (_padW < 2 || _padH < 2)
             return 0;
-        u = Math.Clamp(u, 0, _padW - 1.001);
-        v = Math.Clamp(v, 0, _padH - 1.001);
-        int x0 = (int)Math.Floor(u);
-        int y0 = (int)Math.Floor(v);
-        int x1 = Math.Min(x0 + 1, _padW - 1);
-        int y1 = Math.Min(y0 + 1, _padH - 1);
-        double fx = u - x0;
-        double fy = v - y0;
-        return Mix(Mix(_pad[y0 * _padW + x0], _pad[y0 * _padW + x1], fx),
-            Mix(_pad[y1 * _padW + x0], _pad[y1 * _padW + x1], fx), fy);
-    }
-
-    static int Mix(int a, int b, double t)
-    {
-        if (a == 0)
-            return t >= 0.5 ? b : 0;
-        if (b == 0)
-            return t >= 0.5 ? 0 : a;
-        int aa = (a >> 24) & 0xFF;
-        int ba = (b >> 24) & 0xFF;
-        int ar = (a >> 16) & 0xFF;
-        int br = (b >> 16) & 0xFF;
-        int ag = (a >> 8) & 0xFF;
-        int bg = (b >> 8) & 0xFF;
-        int ab = a & 0xFF;
-        int bb = b & 0xFF;
-        return (((int)Math.Round(aa + (ba - aa) * t)) << 24)
-            | (((int)Math.Round(ar + (br - ar) * t)) << 16)
-            | (((int)Math.Round(ag + (bg - ag) * t)) << 8)
-            | (int)Math.Round(ab + (bb - ab) * t);
+        int srcW = _padIslandW > 0 ? _padIslandW : islandW;
+        int srcH = _padIslandH > 0 ? _padIslandH : islandH;
+        (u, v) = GlassSample.MapPad(u, v, srcW, srcH, islandW, islandH, Pad);
+        return GlassSample.Bilinear(_pad, _padW, _padH, u, v);
     }
 
     public void Dispose()
     {
         _disposed = true;
         _captureBusy = false;
+        _gpu?.Dispose();
+        _gpu = null;
+        GpuImage = null;
         _bitmap = null;
         _shade = null;
         _pad = Array.Empty<int>();
@@ -374,5 +411,6 @@ sealed class GlassRefractionBuffer : IDisposable
         _output = Array.Empty<int>();
         _shadePixels = Array.Empty<int>();
         _padW = _padH = _backW = _backH = 0;
+        _padIslandW = _padIslandH = 0;
     }
 }
