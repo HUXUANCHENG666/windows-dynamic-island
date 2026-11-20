@@ -40,6 +40,7 @@ sealed class GlassGpuRenderer : IDisposable
     GlassPixels? _frame;
     long _lastPadVersion;
     float[] _heights = Array.Empty<float>();
+    int[] _padUpload = Array.Empty<int>();
     public bool Skipped { get; private set; }
     public int Dropped { get; private set; }
     int _padW, _padH, _fieldW, _fieldH, _outW, _outH;
@@ -343,11 +344,17 @@ sealed class GlassGpuRenderer : IDisposable
             _padView = _device.CreateShaderResourceView(_padTex);
         }
 
+        // Upload through a tightly pitched bucket-sized buffer so WARP/drivers
+        // never see a source pitch narrower than the texture width.
+        if (_padUpload.Length < _padW * _padH) _padUpload = new int[_padW * _padH];
+        Array.Clear(_padUpload, 0, _padW * _padH);
+        for (int y = 0; y < height; y++)
+            Array.Copy(pad, y * width, _padUpload, y * _padW, width);
         unsafe
         {
-            fixed (int* src = pad)
+            fixed (int* src = _padUpload)
             {
-                _context!.UpdateSubresource(_padTex, 0, new Box(0, 0, 0, width, height, 1), (IntPtr)src, (uint)(width * 4), 0);
+                _context!.UpdateSubresource(_padTex, 0, new Box(0, 0, 0, _padW, _padH, 1), (IntPtr)src, (uint)(_padW * 4), 0);
             }
         }
     }
