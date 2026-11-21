@@ -11,6 +11,9 @@ public readonly record struct GlassFrameGeometry(int Width, int Height, int Left
     public const double MaxResampleAgeMs = 350;
     public const double RimGuardPx = 12;
 
+    /// <summary>拖动时水滴形变会让缩放每帧变动，尺寸判定跟着放宽，不然位图会被反复撤下。</summary>
+    public const double MovingSizeTolerancePx = 16;
+
     public bool Matches(GlassFrameGeometry other, double tolerance = SizeTolerancePx) =>
         MatchesSize(other, tolerance)
         && Math.Abs(Left - other.Left) <= tolerance && Math.Abs(Top - other.Top) <= tolerance;
@@ -26,9 +29,17 @@ public readonly record struct GlassFrameGeometry(int Width, int Height, int Left
     public static bool CanResample(double ageMilliseconds) =>
         ageMilliseconds >= 0 && ageMilliseconds <= MaxResampleAgeMs;
 
-    /// <summary>显示中的位图：仅当输出尺寸/缩放会明显拉伸时才撤下；位置与帧龄不能让玻璃变全透明。</summary>
-    public static bool ShouldKeepDisplayedBitmap(GlassFrameGeometry shown, GlassFrameGeometry view, double dpi) =>
-        shown.MatchesSize(view, SizeTolerancePx * Math.Max(0.5, dpi));
+    /// <summary>
+    /// 显示中的位图：只有逻辑宽高变了（展开、收起）才撤下。
+    /// 拖动时水滴缩放的细微变化交给 Image 的 Stretch 吸收——把渲染分辨率差当作"该换帧"，
+    /// 会让玻璃在拖动中反复消失再出现，那正是抽动和闪烁的来源。
+    /// </summary>
+    public static bool ShouldKeepDisplayedBitmap(GlassFrameGeometry shown, GlassFrameGeometry view, double dpi)
+    {
+        double tolerance = SizeTolerancePx * Math.Max(0.5, dpi);
+        return Math.Abs(shown.Width - view.Width) <= tolerance
+            && Math.Abs(shown.Height - view.Height) <= tolerance;
+    }
 
     public static double PositionError(GlassFrameGeometry a, GlassFrameGeometry b)
     {
@@ -46,9 +57,11 @@ public readonly record struct GlassFrameGeometry(int Width, int Height, int Left
     public static bool ShouldPresent(
         GlassFrameGeometry ready, GlassFrameGeometry view, double dpi,
         GlassFrameGeometry shown, bool hasShown,
-        bool readyHasLiveInterior = true, bool shownHasLiveInterior = true)
+        bool readyHasLiveInterior = true, bool shownHasLiveInterior = true,
+        bool moving = false)
     {
-        if (!ready.MatchesSize(view, SizeTolerancePx * Math.Max(0.5, dpi)))
+        double tolerance = (moving ? MovingSizeTolerancePx : SizeTolerancePx) * Math.Max(0.5, dpi);
+        if (!ready.MatchesSize(view, tolerance))
             return false;
         if (!hasShown)
             return true;

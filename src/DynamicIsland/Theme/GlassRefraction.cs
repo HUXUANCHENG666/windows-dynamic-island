@@ -133,7 +133,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
                     {
                         _stats.Completed(frame.Gpu);
                         if (_disposed || epoch != _epoch) frame.Dispose();
-                        else if (_ready != null && !GlassFrameGeometry.ShouldPresent(frame.Geometry, _view, _viewDpi, _ready.Geometry, true, frame.HasLiveInterior, _ready.HasLiveInterior))
+                        else if (_ready != null && !GlassFrameGeometry.ShouldPresent(frame.Geometry, _view, _viewDpi, _ready.Geometry, true, frame.HasLiveInterior, _ready.HasLiveInterior, _moving))
                         { frame.Dispose(); _stats.Dropped(1); }
                         else
                         {
@@ -166,7 +166,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
         if (ready != null)
         {
             if (ready.Started < _minCapture
-                || !GlassFrameGeometry.ShouldPresent(ready.Geometry, _view, _viewDpi, _shown, _visible && _bitmap != null, ready.HasLiveInterior, _shownLive))
+                || !GlassFrameGeometry.ShouldPresent(ready.Geometry, _view, _viewDpi, _shown, _visible && _bitmap != null, ready.HasLiveInterior, _shownLive, _moving))
             { ready.Dispose(); _stats.Dropped(1); return false; }
             long start = Stopwatch.GetTimestamp();
             try
