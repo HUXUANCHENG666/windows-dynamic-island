@@ -29,6 +29,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
     double _viewDpi = 1, _radius;
     LiquidOpticsFrame _optics;
     GlassFrameGeometry _shown;
+    bool _shownLive;
     long _shownCapture, _minCapture;
     public Action? FrameReady;
     public Action<string>? Diagnostics;
@@ -44,7 +45,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
     public void Clear()
     {
         lock (_gate) { _epoch++; _minCapture = Stopwatch.GetTimestamp(); _ready?.Dispose(); _ready = null; _pad?.Dispose(); _pad = null; }
-        _bitmap = null; _visible = false;
+        _bitmap = null; _visible = false; _shownLive = false;
     }
 
     public bool TryPresent(int w, int h, double radius, LiquidSurface? surface, bool moving,
@@ -132,7 +133,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
                     {
                         _stats.Completed(frame.Gpu);
                         if (_disposed || epoch != _epoch) frame.Dispose();
-                        else if (_ready != null && !GlassFrameGeometry.ShouldPresent(frame.Geometry, _view, _viewDpi, _ready.Geometry, true))
+                        else if (_ready != null && !GlassFrameGeometry.ShouldPresent(frame.Geometry, _view, _viewDpi, _ready.Geometry, true, frame.HasLiveInterior, _ready.HasLiveInterior))
                         { frame.Dispose(); _stats.Dropped(1); }
                         else
                         {
@@ -165,7 +166,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
         if (ready != null)
         {
             if (ready.Started < _minCapture
-                || !GlassFrameGeometry.ShouldPresent(ready.Geometry, _view, _viewDpi, _shown, _visible && _bitmap != null))
+                || !GlassFrameGeometry.ShouldPresent(ready.Geometry, _view, _viewDpi, _shown, _visible && _bitmap != null, ready.HasLiveInterior, _shownLive))
             { ready.Dispose(); _stats.Dropped(1); return false; }
             long start = Stopwatch.GetTimestamp();
             try
@@ -173,7 +174,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
                 if (_bitmap == null || _bitmap.PixelWidth != ready.Width || _bitmap.PixelHeight != ready.Height)
                     _bitmap = new WriteableBitmap(ready.Width, ready.Height, 96, 96, PixelFormats.Pbgra32, null);
                 _bitmap.WritePixels(new Int32Rect(0, 0, ready.Width, ready.Height), ready.Pixels, ready.Width * 4, 0);
-                _shown = ready.Geometry; _shownCapture = ready.Started;
+                _shown = ready.Geometry; _shownLive = ready.HasLiveInterior; _shownCapture = ready.Started;
                 _gpuImage = ready.Gpu; _visible = true; updated = true; _stats.Ui();
                 _stats.Time(4, ready.Started);
                 _stats.Time(6, ready.ReadyAt);
@@ -227,9 +228,11 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
         double scale = Math.Min(1, Math.Min(GlassWork.OutputLongSide(moving), pad?.HasLiveInterior == true ? GlassWork.CpuLiveOutputLongSide : GlassWork.IdleOutputLongSide) / (double)Math.Max(w, h));
         int ow = Math.Max(8, (int)Math.Round(w * scale)), oh = Math.Max(8, (int)Math.Round(h * scale));
         var result = new GlassPixels(ow, oh, false, captured) { Geometry = geometry };
+        bool live = pad?.HasLiveInterior ?? false;
         GlassCpuRenderer.Render(result.Pixels, ow, oh, w, h, radius, dpi, field,
             pad?.Pixels, pad?.Width ?? w, pad?.Height ?? h, pad?.Radius ?? radius,
-            left - (pad?.Left ?? left), top - (pad?.Top ?? top), scaleX, scaleY, optics, pad?.HasLiveInterior ?? false);
+            left - (pad?.Left ?? left), top - (pad?.Top ?? top), scaleX, scaleY, optics, live);
+        result.HasLiveInterior = live && GlassUnderlay.OutputHasOpaqueCenter(result.Pixels, ow, oh);
         return result;
     }
 

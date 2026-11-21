@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using DynamicIsland.Core.Geometry;
+using DynamicIsland.Core.Motion;
 using DynamicIsland.Native;
 
 namespace DynamicIsland.Visuals;
@@ -34,21 +35,37 @@ sealed class GlassCapture : IDisposable
         const int pad = GlassRefractionBuffer.Pad;
         int pw = visualW + pad * 2, ph = visualH + pad * 2;
         int[]? rented = null;
+        int[]? ddaHold = null;
+        GlassUnderlayStats ddaStats = default;
         try
         {
             if (allowLiveInterior)
             {
                 rented=ArrayPool<int>.Shared.Rent(pw*ph);
-                if (_duplication.TryCapture(visualLeft-pad,visualTop-pad,pw,ph,rented,pw) &&
-                    DynamicIsland.Core.Motion.GlassUnderlay.ShouldKeepInterior(DynamicIsland.Core.Motion.GlassUnderlay.Classify(rented,pw,ph,visualW,visualH,pad,radius)))
+                if (_duplication.TryCapture(visualLeft-pad,visualTop-pad,pw,ph,rented,pw))
                 {
-                    var livePad=new CapturedPad(rented,visualW,visualH,visualLeft,visualTop,radius,dpi,true,started,true);
-                    rented=null; return livePad;
+                    var dda = GlassUnderlay.Inspect(rented,pw,ph,visualW,visualH,pad,radius);
+                    if (GlassUnderlay.ShouldKeepInterior(dda.Kind) && !dda.InteriorMostlyNearBlack)
+                    {
+                        var livePad=new CapturedPad(rented,visualW,visualH,visualLeft,visualTop,radius,dpi,true,started,true);
+                        rented=null; return livePad;
+                    }
+                    // 内部几乎全黑：可能是真黑壁纸，也可能是 DDA 黑块被误留。先对比 GDI，不要直接把中间填黑。
+                    if (GlassUnderlay.ShouldKeepInterior(dda.Kind))
+                    { ddaHold = rented; rented = null; ddaStats = dda; }
                 }
             }
             if (_screen == IntPtr.Zero) _screen = NativeMethods.CreateDC("DISPLAY", null, null, IntPtr.Zero);
             IntPtr screen = _screen;
-            if (screen == IntPtr.Zero) return null;
+            if (screen == IntPtr.Zero)
+            {
+                if (ddaHold != null)
+                {
+                    var kept=new CapturedPad(ddaHold,visualW,visualH,visualLeft,visualTop,radius,dpi,true,started,true);
+                    ddaHold=null; return kept;
+                }
+                return null;
+            }
             if (_dc == IntPtr.Zero || _width < pw || _height < ph)
             {
                 DisposeGdi();
@@ -68,7 +85,15 @@ sealed class GlassCapture : IDisposable
             unsafe { for (int y=0;y<ph;y++) new Span<int>((void*)(_bits+y*_width*4),pw).Clear(); }
             // 圆角外、矩形内的真实桌面也要捕获；随后仅排除真正的当前圆角岛。
             if (!NativeMethods.BitBlt(_dc, 0, 0, pw, ph, screen, visualLeft - pad, visualTop - pad, NativeMethods.SRCCOPY))
-            { NativeMethods.DeleteDC(_screen); _screen = IntPtr.Zero; return null; }
+            {
+                NativeMethods.DeleteDC(_screen); _screen = IntPtr.Zero;
+                if (ddaHold != null)
+                {
+                    var kept=new CapturedPad(ddaHold,visualW,visualH,visualLeft,visualTop,radius,dpi,true,started,true);
+                    ddaHold=null; return kept;
+                }
+                return null;
+            }
             int[] dest = rented ??= ArrayPool<int>.Shared.Rent(pw * ph);
             for (int y = 0; y < ph; y++)
                 Marshal.Copy(_bits + y * _width * 4, dest, y * pw, pw);
@@ -76,8 +101,27 @@ sealed class GlassCapture : IDisposable
             if (allowLiveInterior)
             {
                 StampOpaque(dest, pw, ph);
-                var kind = DynamicIsland.Core.Motion.GlassUnderlay.Classify(dest, pw, ph, visualW, visualH, pad, radius);
-                live = DynamicIsland.Core.Motion.GlassUnderlay.ShouldKeepInterior(kind);
+                var gdi = GlassUnderlay.Inspect(dest, pw, ph, visualW, visualH, pad, radius);
+                if (ddaHold != null)
+                {
+                    if (GlassUnderlay.ShouldKeepInterior(gdi.Kind) && gdi.InteriorColorful > ddaStats.InteriorColorful)
+                    {
+                        ArrayPool<int>.Shared.Return(ddaHold); ddaHold = null;
+                        live = true;
+                    }
+                    else if (GlassUnderlay.ShouldKeepInterior(ddaStats.Kind))
+                    {
+                        var kept=new CapturedPad(ddaHold,visualW,visualH,visualLeft,visualTop,radius,dpi,true,started,true);
+                        ddaHold=null; rented=dest; dest=null!;
+                        return kept;
+                    }
+                    else
+                    {
+                        ArrayPool<int>.Shared.Return(ddaHold); ddaHold = null;
+                        live = GlassUnderlay.ShouldKeepInterior(gdi.Kind);
+                    }
+                }
+                else live = GlassUnderlay.ShouldKeepInterior(gdi.Kind);
             }
             if (!live)
             {
@@ -95,7 +139,11 @@ sealed class GlassCapture : IDisposable
             rented = null;
             return result;
         }
-        finally { if (rented != null) ArrayPool<int>.Shared.Return(rented); }
+        finally
+        {
+            if (rented != null) ArrayPool<int>.Shared.Return(rented);
+            if (ddaHold != null) ArrayPool<int>.Shared.Return(ddaHold);
+        }
     }
 
     static void StampOpaque(int[] dest, int pw, int ph)

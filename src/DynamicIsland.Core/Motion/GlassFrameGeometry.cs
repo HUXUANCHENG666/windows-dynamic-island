@@ -45,11 +45,18 @@ public readonly record struct GlassFrameGeometry(int Width, int Height, int Left
 
     public static bool ShouldPresent(
         GlassFrameGeometry ready, GlassFrameGeometry view, double dpi,
-        GlassFrameGeometry shown, bool hasShown)
+        GlassFrameGeometry shown, bool hasShown,
+        bool readyHasLiveInterior = true, bool shownHasLiveInterior = true)
     {
         if (!ready.MatchesSize(view, SizeTolerancePx * Math.Max(0.5, dpi)))
             return false;
         if (!hasShown)
+            return true;
+        // 不要用没有实况内景的帧替换已有活体内景，否则中间会露出黑岛身。
+        if (shownHasLiveInterior && !readyHasLiveInterior)
+            return false;
+        // 已显示的是空内景时，只要新帧有实况就该换上（从变黑中恢复）。
+        if (readyHasLiveInterior && !shownHasLiveInterior)
             return true;
         // 0.5px 余量避免整数位置来回抖动时互踢。
         return PositionError(ready, view) <= PositionError(shown, view) + 0.5;

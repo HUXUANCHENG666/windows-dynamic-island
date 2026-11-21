@@ -11,6 +11,7 @@ sealed class GlassPixels(int width, int height, bool gpu, long started) : IDispo
     public readonly long Started = started;
     public GlassFrameGeometry Geometry;
     public long ReadyAt = 0;
+    public bool HasLiveInterior;
     public readonly int[] Pixels = ArrayPool<int>.Shared.Rent(checked(width * height));
     public void Dispose() => ArrayPool<int>.Shared.Return(Pixels);
 }

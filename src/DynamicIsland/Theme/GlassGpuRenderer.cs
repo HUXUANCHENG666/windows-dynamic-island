@@ -36,6 +36,7 @@ sealed class GlassGpuRenderer : IDisposable
         public int Width, Height;
         public long Sequence, Started;
         public GlassFrameGeometry Geometry;
+        public bool HasLiveInterior;
     }
     readonly Readback[] _readbacks = { new(), new(), new() };
     long _sequence;
@@ -279,6 +280,7 @@ sealed class GlassGpuRenderer : IDisposable
             _context.CopySubresourceRegion(slot.Texture!, 0, 0, 0, 0, _target, 0, new Box(0, 0, 0, outW, outH, 1));
             slot.Pending = true; slot.Width = outW; slot.Height = outH;
             slot.Sequence = ++_sequence; slot.Started = started; slot.Geometry = geometry;
+            slot.HasLiveInterior = liveInterior;
             _context.Flush(); // 提交命令，不等待 GPU；让后续非阻塞 Map 有进展。
             return true;
         }
@@ -460,6 +462,8 @@ sealed class GlassGpuRenderer : IDisposable
                         Buffer.MemoryCopy((void*)(mapped.DataPointer + y * (int)mapped.RowPitch),
                             dest + y * oldest.Width, oldest.Width * 4, oldest.Width * 4);
             }
+            frame.HasLiveInterior = oldest.HasLiveInterior
+                && DynamicIsland.Core.Motion.GlassUnderlay.OutputHasOpaqueCenter(frame.Pixels, oldest.Width, oldest.Height);
             _frame?.Dispose(); _frame = frame;
         }
         catch { frame.Dispose(); throw; }

@@ -13,6 +13,24 @@ public enum GlassUnderlayKind
     Live
 }
 
+/// <summary>一次分类的计数，供捕获路径在「全黑内景」时对比 DDA 与 GDI。</summary>
+public readonly record struct GlassUnderlayStats(
+    GlassUnderlayKind Kind,
+    int InteriorValid,
+    int InteriorBlack,
+    int InteriorMissing,
+    int InteriorColorful,
+    int PadColorful)
+{
+    /// <summary>不透明内部样本里几乎全是近黑。</summary>
+    public bool InteriorMostlyNearBlack =>
+        InteriorValid > 0 && InteriorBlack * 20 >= InteriorValid * 19;
+
+    /// <summary>岛内部绝大部分样本都有不透明像素，而不是裁切后只剩一角。</summary>
+    public bool InteriorWellCovered =>
+        InteriorValid > 0 && InteriorValid * 10 >= (InteriorValid + InteriorMissing) * 9;
+}
+
 /// <summary>
 /// 公开 API 的版本门槛，以及对已捕获像素是否露出正下方内容的合成判定。
 /// 不调用 Win32；真实窗口捕获在 Theme 层。
@@ -33,17 +51,21 @@ public static class GlassUnderlay
     public static bool ShouldKeepInterior(GlassUnderlayKind kind) => kind == GlassUnderlayKind.Live;
 
     public static GlassUnderlayKind Classify(
+        int[] pixels, int stride, int rows, int islandW, int islandH, int pad, double radius) =>
+        Inspect(pixels, stride, rows, islandW, islandH, pad, radius).Kind;
+
+    public static GlassUnderlayStats Inspect(
         int[] pixels, int stride, int rows, int islandW, int islandH, int pad, double radius)
     {
         if (pixels == null || stride < 1 || rows < 1 || islandW < 2 || islandH < 2 || pad < 0)
-            return GlassUnderlayKind.Missing;
+            return default;
         if (pixels.Length < stride * rows)
-            return GlassUnderlayKind.Missing;
+            return default;
         if (radius < 0)
             radius = Math.Min(islandW, islandH) * 0.5;
         radius = Squircle.SafeRadius(islandW, islandH, radius);
 
-        int interiorValid = 0, interiorBlack = 0, padValid = 0, padColorful = 0;
+        int interiorValid = 0, interiorBlack = 0, interiorMissing = 0, interiorColorful = 0, padColorful = 0;
         const int step = 3;
         for (int y = 0; y < rows; y += step)
         for (int x = 0; x < stride; x += step)
@@ -52,27 +74,41 @@ public static class GlassUnderlay
             double d = IslandOutline.SignedDistance(px, py, islandW, islandH, radius);
             int color = pixels[y * stride + x];
             int a = (int)((uint)color >> 24);
-            if (a < 0xF0)
-                continue;
-            bool black = IsNearBlack(color);
             if (d < -2)
             {
+                if (a < 0xF0) { interiorMissing++; continue; }
                 interiorValid++;
-                if (black) interiorBlack++;
+                if (IsNearBlack(color)) interiorBlack++;
+                else interiorColorful++;
             }
             else if (d >= 0.5)
             {
-                padValid++;
-                if (!black) padColorful++;
+                if (a < 0xF0) continue;
+                if (!IsNearBlack(color)) padColorful++;
             }
         }
 
+        GlassUnderlayKind kind;
         if (interiorValid == 0)
-            return GlassUnderlayKind.Missing;
+            kind = GlassUnderlayKind.Missing;
+        // 裁切或会话异常只留下一小块内部时，不能当成整幅实况，否则中心是空洞/黑岛身。
+        else if (interiorValid * 10 < (interiorValid + interiorMissing) * 9)
+            kind = GlassUnderlayKind.Missing;
         // 只有垫边明显有颜色、内部却几乎全黑时，才判黑块。两边都是黑（纯黑壁纸）仍视为实况。
-        if (padColorful >= 8 && interiorBlack * 20 >= interiorValid * 19)
-            return GlassUnderlayKind.BlackHole;
-        return GlassUnderlayKind.Live;
+        else if (padColorful >= 8 && interiorBlack * 20 >= interiorValid * 19)
+            kind = GlassUnderlayKind.BlackHole;
+        else
+            kind = GlassUnderlayKind.Live;
+
+        return new GlassUnderlayStats(kind, interiorValid, interiorBlack, interiorMissing, interiorColorful, padColorful);
+    }
+
+    /// <summary>光栅中心是否已有不透明样本（包括真黑壁纸）；全透明则中间会露出黑岛身。</summary>
+    public static bool OutputHasOpaqueCenter(int[] pixels, int width, int height)
+    {
+        if (pixels == null || width < 8 || height < 8 || pixels.Length < width * height)
+            return false;
+        return ((uint)pixels[(height / 2) * width + width / 2] >> 24) > 80;
     }
 
     static bool IsNearBlack(int color)
