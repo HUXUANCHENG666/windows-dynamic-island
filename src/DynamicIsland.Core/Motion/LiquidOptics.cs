@@ -133,9 +133,10 @@ public sealed class LiquidOptics
         if (d >= -band)
             return false;
 
-        // 边缘一侧接近 1，往内 2.4 个带宽处降到 0.30，中心仍有很淡的一层。
-        double falloff = IslandOutline.Smootherstep(-band * 2.4, -band, d);
-        double strength = Math.Max(optics.Strength, StaticStrength * (0.30 + 0.70 * falloff));
+        // 过渡带拉长到 4 个带宽，从边缘到中心是绵长的渐变，而不是一段能看出边界的"缓冲带"。
+        // 底值压低，让边缘那圈始终是全场折射最强的地方。
+        double falloff = IslandOutline.Smootherstep(-band * 4, -band, d);
+        double strength = Math.Max(optics.Strength, StaticStrength * (0.22 + 0.78 * falloff));
         if (strength <= 0.01)
             return false;
 

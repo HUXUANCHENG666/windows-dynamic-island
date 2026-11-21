@@ -128,7 +128,7 @@ public class LiquidMotionTests
     {
         Assert.True(LiquidRefraction.TryMap(196, 50, 200, 100, 72, out _, out _, out var inner, out _, out _, out _, out _));
         Assert.True(LiquidRefraction.TryMap(198, 50, 200, 100, 72, out _, out _, out var outer, out _, out _, out _, out _));
-        Assert.True(outer > inner);
+        Assert.True(outer > inner, $"outer={outer:F4} inner={inner:F4}");
     }
 
     [Fact]

@@ -87,9 +87,13 @@ public static class LiquidRefraction
         double d = IslandOutline.SignedDistance(x, y, width, height, radius);
         if (d >= 0.5)
             return false;
-        double along = IslandOutline.Along(x, y, width, height, radius, dpi);
-        if (along <= 0)
+        // 用距离挡掉中心，而不是用 along：along 把负数都压成 0，
+        // 中心和内边界长得一样，之前靠 along<=0 早退，把内边界也一起挡掉了，
+        // 于是边缘带的 alpha 在内边界突然归零，和内部透镜之间就裂出一条带。
+        double band = IslandOutline.RimBand(width, height, dpi);
+        if (d < -band)
             return false;
+        double along = IslandOutline.Along(x, y, width, height, radius, dpi);
 
         var (ux, uy) = IslandOutline.Normal(x, y, width, height, radius);
         // 同一圆角平行曲面：最近外轮廓点 p-d*n，再沿同一法线偏移。
@@ -100,8 +104,11 @@ public static class LiquidRefraction
         (u, v) = GlassSample.SafeRoundedPoint(sx, sy, width, height, radius, pad, dpi);
         redU = blueU = u;
         redV = blueV = v;
-        alpha = IslandOutline.Smootherstep(0, 0.88, along)
-            * (1 - 0.20 * IslandOutline.Smootherstep(0.84, 1, along));
+        // 内边界留一个和内部透镜接近的底值，交界处才不会从 0 跳到 0.15 形成一条带。
+        // 爬升必须慢于尾部衰减的起点，否则内侧会在 midway 就冲到满值、反超最外圈，
+        // 视觉上边缘就"不亮"了。这里让 along=1（贴着轮廓）才是全场峰值。
+        double ramp = 0.16 + 0.84 * IslandOutline.Smootherstep(0.04, 0.86, along);
+        alpha = ramp * (1 - 0.10 * IslandOutline.Smootherstep(0.86, 1, along));
         return alpha > 0.01;
     }
 
