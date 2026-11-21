@@ -190,6 +190,17 @@ sealed class GlassGpuRenderer : IDisposable
         Result result = Compiler.Compile(
             ShaderSource, Array.Empty<ShaderMacro>(), null!, entry, "GlassGpu.hlsl", profile,
             ShaderFlags.OptimizationLevel3, EffectFlags.None, out blob, out Blob? errors);
+        if (!result.Success && errors != null)
+        {
+            // 失败时把编译器原文打出来：AO 报告只有一句"编译失败"，看不出是第几行。
+            int size = (int)errors.BufferSize.Value;
+            if (size > 0)
+            {
+                var bytes = new byte[size];
+                System.Runtime.InteropServices.Marshal.Copy(errors.BufferPointer, bytes, 0, size);
+                Console.Error.WriteLine(System.Text.Encoding.UTF8.GetString(bytes));
+            }
+        }
         errors?.Dispose();
         return result.Success && blob != null;
     }
@@ -254,7 +265,9 @@ sealed class GlassGpuRenderer : IDisposable
                 InteriorLive = liveInterior ? 1 : 0,
                 LensMagnification = (float)WaterLens.Magnification,
                 LensBlendStart = (float)WaterLens.BlendStartBands,
-                LensBlendEnd = (float)WaterLens.BlendEndBands
+                LensBlendEnd = (float)WaterLens.BlendEndBands,
+                InnerAlpha = (float)LiquidRefraction.InnerAlpha,
+                StaticInterior = (float)LiquidOptics.StaticStrength
             };
             WriteConstants(data);
 
@@ -528,6 +541,7 @@ sealed class GlassGpuRenderer : IDisposable
         public float ScaleX, ScaleY, LagX, LagY;
         public float LagScaleX, LagScaleY, InteriorGain, InteriorWarp;
         public float InteriorLive, LensMagnification, LensBlendStart, LensBlendEnd;
+        public float InnerAlpha, StaticInterior;
     }
 
     const string ShaderSource = """
@@ -565,6 +579,8 @@ cbuffer Params : register(b0)
     float LensMagnification;
     float LensBlendStart;
     float LensBlendEnd;
+    float InnerAlpha;
+    float StaticInterior;
 };
 
 Texture2D PadTex : register(t0);
@@ -673,7 +689,7 @@ float2 SafeRoundedPoint(float2 p, float2 size, float radius)
     if (d < guard) p += NormalOf(local, size.x, size.y, radius) * (guard - d);
     return clamp(p, 1, size + 2 * Pad - 2);
 }
-// 捕获已将无效像素清零、有效 RGB 标 alpha=1；硬件双线性同时滤 RGB 和有效性。
+// Capture clears invalid pixels and marks valid RGB with alpha=1; hardware bilinear filters both.
 float4 PadTap(float2 p)
 {
     float2 size = float2(SrcPadW, SrcPadH);
@@ -702,15 +718,20 @@ bool TryMap(float2 p, float2 slope, float surface, out float2 u, out float2 ru, 
     float d = SignedDistance(p, IslandW, IslandH, r);
     if (d >= 0.5)
         return false;
-    float along = Along(p, IslandW, IslandH, r);
-    if (along <= 0)
+    // Gate the center by distance. Along() clamps negatives to 0, so testing along<=0
+    // would also drop the inner rim and leave a gap between rim and interior.
+    float rimBand = RimBand(IslandW, IslandH);
+    if (d < -rimBand)
         return false;
+    float along = Along(p, IslandW, IslandH, r);
     float2 nrm = NormalOf(p, IslandW, IslandH, r);
     float depth = (4 + 3.5 * along + clamp(surface, -1, 1) * HeightWarp) * Dpi;
     float2 warped = Pad + p + nrm * (depth - d) + slope / (1 + abs(slope)) * SlopeWarp * Dpi;
     u = SafeRoundedPoint(warped, float2(IslandW, IslandH), r);
     ru = bu = u; // RGB shares the exact same spatial footprint: no artificial dispersion.
-    alpha = Smootherstep(0, 0.88, along) * (1 - 0.20 * Smootherstep(0.84, 1, along));
+    // The inner edge lands on InnerAlpha so rim, lens blend and interior share one ramp.
+    alpha = (InnerAlpha + (1 - InnerAlpha) * Smootherstep(0.04, 0.86, along))
+        * (1 - 0.10 * Smootherstep(0.86, 1, along));
     return alpha > 0.01;
 }
 
@@ -718,12 +739,17 @@ bool TryMapInterior(float2 p, float2 slope, float surface, out float2 u, out flo
 {
     u = 0;
     alpha = 0;
-    if (InteriorGain < 0.01 || IslandW < 2 || IslandH < 2 || Pad < 4)
+    if (IslandW < 2 || IslandH < 2 || Pad < 4)
         return false;
     float r = SafeRadius(IslandW, IslandH, Radius);
     float d = SignedDistance(p, IslandW, IslandH, r);
     float band = RimBand(IslandW, IslandH);
     if (d >= -band)
+        return false;
+    // Keep a static base strength at rest: strong near the rim, faint at the center.
+    float falloff = Smootherstep(-4.0 * band, -band, d);
+    float strength = max(InteriorGain, StaticInterior * (0.22 + 0.78 * falloff));
+    if (strength <= 0.01)
         return false;
     float2 center = float2(IslandW, IslandH) * 0.5;
     float2 lagScale = clamp(float2(LagScaleX, LagScaleY), 0.25, 4);
@@ -739,7 +765,7 @@ bool TryMapInterior(float2 p, float2 slope, float surface, out float2 u, out flo
         return false;
     float cap = sampleInside ? 0.92 : 0.50;
     float near = Smootherstep(-band - 4 * Dpi, -band + 2 * Dpi, d);
-    alpha = saturate(InteriorGain * (0.42 + 0.28 * saturate(abs(surface))) * (1 - 0.35 * near) * (cap / 0.50));
+    alpha = saturate(strength * (0.42 + 0.28 * saturate(abs(surface))) * (1 - 0.35 * near) * (cap / 0.50));
     alpha = min(alpha, cap);
     return alpha > 0.01;
 }
@@ -760,7 +786,9 @@ float4 WaterColor(float2 p, float distance, float2 slope, float surface)
     float depth=(4+3.5*along+clamp(surface,-1,1)*HeightWarp)*Dpi;
     float2 edge=p+NormalOf(p,IslandW,IslandH,Radius)*(depth-distance)+slope/(1+abs(slope))*SlopeWarp*Dpi;
     float4 c=SamplePad(Pad+lerp(b,edge,blend));
-    float a=0.96*(1-blend)*c.a;
+    // Blend must not reach zero at the inner rim: keep the same landing value as the rim
+    // refraction start, otherwise a gap is left between the lens and the rim band.
+    float a=(0.96*(1-blend)+InnerAlpha*blend)*c.a;
     float4 shade=ShadeColor(p,surface);
     return float4(c.rgb,1)*a+shade*(1-a);
 }
@@ -779,7 +807,8 @@ float4 PSMain(VSOut i) : SV_Target
         return WaterColor(p,distance,float2(slopeX,slopeY),surface);
     if (distance <= -RimBand(IslandW, IslandH))
     {
-        if (HasPad < 0.5 || InteriorGain < 0.01) return 0;
+        // TryMapInterior keeps its own static base strength; do not gate on InteriorGain here.
+        if (HasPad < 0.5) return 0;
         float2 iu; float ialpha;
         if (!TryMapInterior(p, float2(slopeX, slopeY), surface, iu, ialpha)) return 0;
         float4 inside = SamplePad(iu);
