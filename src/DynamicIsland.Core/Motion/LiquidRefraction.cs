@@ -9,6 +9,11 @@ namespace DynamicIsland.Core.Motion;
 public static class LiquidRefraction
 {
     public const int DefaultPad = 144; // 快拖时仍能用上一张实况垫边按当前位移重采样
+    /// <summary>
+    /// 内边界（贴着透镜那一侧）的折射强度。边缘折射的起点、内部透镜 blend 区的落点
+    /// 都用这一个值，三者在 d=-RimBand 处才接得上，不会裂出第三条"缓冲带"。
+    /// </summary>
+    public const double InnerAlpha = 0.16;
     public const double InnerRadius = 0.78;
     public const double SampleGain = 0.88;
     public const double Chromatic = 0; // 同一点采完整 RGB，默认无色散。
@@ -107,7 +112,7 @@ public static class LiquidRefraction
         // 内边界留一个和内部透镜接近的底值，交界处才不会从 0 跳到 0.15 形成一条带。
         // 爬升必须慢于尾部衰减的起点，否则内侧会在 midway 就冲到满值、反超最外圈，
         // 视觉上边缘就"不亮"了。这里让 along=1（贴着轮廓）才是全场峰值。
-        double ramp = 0.16 + 0.84 * IslandOutline.Smootherstep(0.04, 0.86, along);
+        double ramp = InnerAlpha + (1 - InnerAlpha) * IslandOutline.Smootherstep(0.04, 0.86, along);
         alpha = ramp * (1 - 0.10 * IslandOutline.Smootherstep(0.86, 1, along));
         return alpha > 0.01;
     }

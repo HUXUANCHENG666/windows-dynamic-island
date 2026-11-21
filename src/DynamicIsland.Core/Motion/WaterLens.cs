@@ -30,7 +30,9 @@ public static class WaterLens
         double blend = IslandOutline.Smootherstep(-BlendStartBands * band, -BlendEndBands * band, distance);
         double bx = x - nx * contraction + (dx - x) * 0.18 * (1 - blend);
         double by = y - ny * contraction + (dy - y) * 0.18 * (1 - blend);
-        double lensAlpha = 0.96 * (1 - blend);
+        // blend 走到 1（正好是 RimBand 内边界）时不能归零，否则透镜让位给边缘折射的瞬间
+        // 会空出一段什么都不画的距离。落点和边缘折射的起点取同一个值，两边直接接上。
+        double lensAlpha = 0.96 * (1 - blend) + LiquidRefraction.InnerAlpha * blend;
         if (blend <= 0)
         {
             u = pad + bx;
