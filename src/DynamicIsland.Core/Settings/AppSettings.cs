@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DynamicIsland.Core.Island;
 
 namespace DynamicIsland.Core.Settings;
 
@@ -28,6 +29,24 @@ public sealed class AppSettings
     public List<MonitorDock> Docks { get; set; } = new();
     public string TranslateDirection { get; set; } = "auto";
 
+    /// <summary>实时翻译用的接口：default 为 MyMemory，custom 为 OpenAI 兼容的对话接口。会记住。</summary>
+    public string TranslateApi { get; set; } = "default";
+
+    /// <summary>自定义接口的基础地址，例如 https://api.example.com/v1。</summary>
+    public string? TranslateApiUrl { get; set; }
+
+    public string? TranslateApiModel { get; set; }
+
+    public string? TranslateApiKey { get; set; }
+
+    public Dictionary<string, TranslateProviderProfile> TranslateProviders { get; set; } = new();
+
+    /// <summary>整个岛的缩放，1 为设计尺寸。会记住。</summary>
+    public double IslandScale { get; set; } = AppearancePolicy.DefaultScale;
+
+    /// <summary>岛的皮肤：default 为原来的近黑实心，glass 为液态玻璃。会记住。</summary>
+    public string IslandSkin { get; set; } = AppearancePolicy.DefaultSkinSetting;
+
     /// <summary>用户希望在岛上显示通知中心。默认关，允许之后才会去读。</summary>
     public bool NotificationCenter { get; set; }
 
@@ -51,11 +70,20 @@ public static class SettingsJson
     {
         try
         {
-            return JsonSerializer.Deserialize<AppSettings>(json, Options) ?? new AppSettings();
+            var settings = JsonSerializer.Deserialize<AppSettings>(json, Options) ?? new AppSettings();
+            AppearancePolicy.Sanitize(settings);
+            return settings;
         }
         catch (JsonException)
         {
             return new AppSettings();
         }
     }
+}
+
+public sealed class TranslateProviderProfile
+{
+    public string? Url { get; set; }
+    public string? Key { get; set; }
+    public string? Region { get; set; }
 }

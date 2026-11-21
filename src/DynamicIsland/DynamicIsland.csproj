@@ -4,6 +4,7 @@
     <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <UseWPF>true</UseWPF>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
@@ -11,8 +12,8 @@
     <ApplicationIcon>Assets\island.ico</ApplicationIcon>
     <AssemblyName>DynamicIsland</AssemblyName>
     <RootNamespace>DynamicIsland</RootNamespace>
-    <Version>1.0.0</Version>
-    <FileVersion>1.0.0.0</FileVersion>
+    <Version>1.1.0</Version>
+    <FileVersion>1.1.0.0</FileVersion>
     <Product>灵动岛</Product>
     <AssemblyTitle>灵动岛</AssemblyTitle>
     <Company>Dynamic Island</Company>
@@ -26,4 +27,40 @@
   <ItemGroup>
     <ProjectReference Include="..\DynamicIsland.Core\DynamicIsland.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Vortice.D3DCompiler" Version="3.8.3" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+    <PackageReference Include="Vortice.Direct3D9" Version="3.8.3" />
+    <PackageReference Include="Whisper.net" Version="1.9.1" />
+    <PackageReference Include="Whisper.net.Runtime" Version="1.9.1" />
+    <PackageReference Include="Whisper.net.Runtime.Vulkan" Version="1.9.1" />
+  </ItemGroup>
+
+  <!--
+    Whisper.net looks for CPU natives at ./runtimes/win-x64 and Vulkan natives
+    at ./runtimes/vulkan/win-x64 next to the exe. The two runtimes share DLL
+    names (whisper.dll, ggml-*.dll), so they must live in separate folders.
+    A single-file publish does not extract these content files to that path,
+    so copy both trees beside the published exe. The zip step must include them.
+  -->
+  <Target Name="CopyWhisperNativeBesideApp" AfterTargets="Publish">
+    <ItemGroup>
+      <_WhisperCpu Include="$(OutDir)runtimes\win-x64\*.dll" />
+    </ItemGroup>
+    <ItemGroup Condition="'@(_WhisperCpu)' == ''">
+      <_WhisperCpu Include="$(NuGetPackageRoot)whisper.net.runtime\1.9.1\build\win-x64\*.dll" />
+    </ItemGroup>
+    <Error Condition="'@(_WhisperCpu)' == ''" Text="Whisper CPU native libraries were not found to copy beside the published app." />
+    <MakeDir Directories="$(PublishDir)runtimes\win-x64" />
+    <Copy SourceFiles="@(_WhisperCpu)" DestinationFolder="$(PublishDir)runtimes\win-x64" SkipUnchangedFiles="true" />
+
+    <ItemGroup>
+      <_WhisperVulkan Include="$(OutDir)runtimes\vulkan\win-x64\*.dll" />
+    </ItemGroup>
+    <ItemGroup Condition="'@(_WhisperVulkan)' == ''">
+      <_WhisperVulkan Include="$(NuGetPackageRoot)whisper.net.runtime.vulkan\1.9.1\build\win-x64\*.dll" />
+    </ItemGroup>
+    <MakeDir Condition="'@(_WhisperVulkan)' != ''" Directories="$(PublishDir)runtimes\vulkan\win-x64" />
+    <Copy Condition="'@(_WhisperVulkan)' != ''" SourceFiles="@(_WhisperVulkan)" DestinationFolder="$(PublishDir)runtimes\vulkan\win-x64" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

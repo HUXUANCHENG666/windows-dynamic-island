@@ -20,6 +20,63 @@
     <Canvas x:Name="Root" ClipToBounds="False">
         <Grid x:Name="PillHost" ClipToBounds="False">
             <Path x:Name="Pill"/>
+            <Grid x:Name="GlassHost" IsHitTestVisible="False" Visibility="Collapsed" ClipToBounds="True">
+                <Path x:Name="GlassScrim"/>
+                <Image x:Name="GlassShade" Stretch="Fill" IsHitTestVisible="False" SnapsToDevicePixels="False">
+                    <Image.RenderTransform>
+                        <TranslateTransform x:Name="GlassShadeLag"/>
+                    </Image.RenderTransform>
+                </Image>
+                <Image x:Name="GlassRefraction" Stretch="Fill" IsHitTestVisible="False" SnapsToDevicePixels="False">
+                    <Image.RenderTransform>
+                        <TranslateTransform x:Name="GlassRefractionLag"/>
+                    </Image.RenderTransform>
+                </Image>
+                <Image x:Name="GlassGpu" Stretch="Fill" IsHitTestVisible="False" SnapsToDevicePixels="False">
+                    <Image.RenderTransform>
+                        <TranslateTransform x:Name="GlassGpuLag"/>
+                    </Image.RenderTransform>
+                </Image>
+                <Path x:Name="GlassThickness"/>
+                <Path x:Name="GlassSpecular"/>
+                <Path x:Name="GlassLip"/>
+                <Ellipse x:Name="GlassBead" IsHitTestVisible="False" RenderTransformOrigin="0.5,0.5">
+                    <Ellipse.RenderTransform>
+                        <TransformGroup>
+                            <RotateTransform Angle="-18"/>
+                            <TranslateTransform x:Name="GlassBeadShift"/>
+                            <TranslateTransform x:Name="GlassBeadLag"/>
+                        </TransformGroup>
+                    </Ellipse.RenderTransform>
+                </Ellipse>
+                <Ellipse x:Name="GlassBlobA" IsHitTestVisible="False" RenderTransformOrigin="0.5,0.5">
+                    <Ellipse.RenderTransform>
+                        <TransformGroup>
+                            <RotateTransform x:Name="GlassBlobARotate" Angle="-22"/>
+                            <TranslateTransform x:Name="GlassBlobAShift"/>
+                            <TranslateTransform x:Name="GlassBlobALag"/>
+                        </TransformGroup>
+                    </Ellipse.RenderTransform>
+                </Ellipse>
+                <Ellipse x:Name="GlassBlobB" IsHitTestVisible="False" RenderTransformOrigin="0.5,0.5">
+                    <Ellipse.RenderTransform>
+                        <TransformGroup>
+                            <RotateTransform x:Name="GlassBlobBRotate" Angle="28"/>
+                            <TranslateTransform x:Name="GlassBlobBShift"/>
+                            <TranslateTransform x:Name="GlassBlobBLag"/>
+                        </TransformGroup>
+                    </Ellipse.RenderTransform>
+                </Ellipse>
+                <Ellipse x:Name="GlassStreak" IsHitTestVisible="False" RenderTransformOrigin="0.5,0.5">
+                    <Ellipse.RenderTransform>
+                        <TransformGroup>
+                            <RotateTransform x:Name="GlassStreakRotate" Angle="-32"/>
+                            <TranslateTransform x:Name="GlassStreakShift"/>
+                            <TranslateTransform x:Name="GlassStreakLag"/>
+                        </TransformGroup>
+                    </Ellipse.RenderTransform>
+                </Ellipse>
+            </Grid>
             <Path x:Name="PillStroke" IsHitTestVisible="False"/>
             <Grid x:Name="ContentHost">
                 <views:CompactMediaView x:Name="CompactMedia"/>
@@ -32,6 +89,7 @@
                 <views:NoticeView x:Name="ToastNotice"/>
                 <views:TranslateView x:Name="TranslateNotice"/>
                 <views:CameraView x:Name="CameraNotice"/>
+                <views:LiveTranslateView x:Name="LiveTranslateNotice"/>
             </Grid>
         </Grid>
     </Canvas>

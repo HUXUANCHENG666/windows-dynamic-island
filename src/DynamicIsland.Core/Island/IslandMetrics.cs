@@ -11,7 +11,7 @@ public readonly record struct IslandFrame(double Width, double Height, double Ra
 public static class IslandMetrics
 {
     public const double WindowWidth = 760;
-    public const double WindowHeight = 360;
+    public const double WindowHeight = 400;
     public const double TopMargin = 8;
     public const double HitSlop = 14;
 
@@ -48,8 +48,11 @@ public static class IslandMetrics
     public const double CameraW = 392;
     public const double CameraH = 248;
 
+    public const double LiveTranslateW = 424;
+    public const double LiveTranslateH = 236;
+
     public const double VerticalWindowWidth = 420;
-    public const double VerticalWindowHeight = 560;
+    public const double VerticalWindowHeight = 600;
 
     public const double VIdleCompactW = 37;
     public const double VIdleCompactH = 130;
@@ -81,18 +84,44 @@ public static class IslandMetrics
     public const double VCameraW = 248;
     public const double VCameraH = 420;
 
+    public const double VLiveTranslateW = 228;
+    public const double VLiveTranslateH = 400;
+
     public static readonly IslandFrame StealthDot = new(12, 12, 6, 2);
 
     public static (double Width, double Height) HostDip(IslandOrientation orientation) =>
-        orientation == IslandOrientation.Vertical
+        HostDip(orientation, AppearancePolicy.DefaultScale);
+
+    public static (double Width, double Height) HostDip(IslandOrientation orientation, double scale)
+    {
+        scale = AppearancePolicy.ClampScale(scale);
+        var (width, height) = orientation == IslandOrientation.Vertical
             ? (VerticalWindowWidth, VerticalWindowHeight)
             : (WindowWidth, WindowHeight);
+        return (width * scale, height * scale);
+    }
 
     public static IslandFrame FrameFor(IslandMode mode, bool expanded) =>
         FrameFor(mode, expanded, IslandOrientation.Horizontal);
 
     public static IslandFrame FrameFor(IslandMode mode, bool expanded, IslandOrientation orientation) =>
-        orientation == IslandOrientation.Vertical ? Vertical(mode, expanded) : Horizontal(mode, expanded);
+        FrameFor(mode, expanded, orientation, AppearancePolicy.DefaultScale);
+
+    public static IslandFrame FrameFor(IslandMode mode, bool expanded, IslandOrientation orientation, double scale)
+    {
+        var frame = orientation == IslandOrientation.Vertical ? Vertical(mode, expanded) : Horizontal(mode, expanded);
+        return Scale(frame, scale);
+    }
+
+    public static IslandFrame ScaledDot(double scale) => Scale(StealthDot, scale);
+
+    public static IslandFrame Scale(IslandFrame frame, double scale)
+    {
+        scale = AppearancePolicy.ClampScale(scale);
+        if (Math.Abs(scale - 1) < 0.0001)
+            return frame;
+        return new IslandFrame(frame.Width * scale, frame.Height * scale, frame.Radius * scale, frame.CornerN);
+    }
 
     static IslandFrame Horizontal(IslandMode mode, bool expanded) => mode switch
     {
@@ -110,6 +139,7 @@ public static class IslandMetrics
         IslandMode.Toast => Card(ToastW, ToastH, 40, 3.3),
         IslandMode.Translate => Card(TranslateW, TranslateH, 42, 4.1),
         IslandMode.Camera => Card(CameraW, CameraH, 48, 4.4),
+        IslandMode.LiveTranslate => Card(LiveTranslateW, LiveTranslateH, 42, 4.1),
         _ => Pill(IdleCompactW, IdleCompactH)
     };
 
@@ -129,6 +159,7 @@ public static class IslandMetrics
         IslandMode.Toast => Card(VToastW, VToastH, 36, 3.3),
         IslandMode.Translate => Card(VTranslateW, VTranslateH, 40, 4.1),
         IslandMode.Camera => Card(VCameraW, VCameraH, 44, 4.4),
+        IslandMode.LiveTranslate => Card(VLiveTranslateW, VLiveTranslateH, 40, 4.1),
         _ => Pill(VIdleCompactW, VIdleCompactH)
     };
 

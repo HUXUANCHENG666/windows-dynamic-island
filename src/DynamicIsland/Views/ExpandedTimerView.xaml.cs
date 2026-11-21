@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using DynamicIsland.Core.Formatting;
+using DynamicIsland.Core.Island;
 using DynamicIsland.Core.Timer;
 using DynamicIsland.Visuals;
 
@@ -16,6 +17,12 @@ public partial class ExpandedTimerView : UserControl
     public event EventHandler? StopwatchRequested;
     public event EventHandler? CountdownRequested;
 
+    readonly HoverFill _minusLook = new();
+    readonly HoverFill _toggleLook = new();
+    readonly HoverFill _resetLook = new();
+    readonly HoverFill _plusLook = new();
+    IslandSkin _skin = IslandSkin.Default;
+
     public ExpandedTimerView()
     {
         InitializeComponent();
@@ -28,18 +35,16 @@ public partial class ExpandedTimerView : UserControl
         CountdownModeText.FontFamily = ui;
         Time.Foreground = Theme.Title;
         Caption.Foreground = Theme.Artist;
-        ToggleText.Foreground = Theme.Ink;
         ResetText.Foreground = Theme.Title;
         StopwatchModeText.Foreground = Theme.Title;
         CountdownModeText.Foreground = Theme.Title;
-        Toggle.Background = Theme.Title;
-        Toggle.Cursor = System.Windows.Input.Cursors.Hand;
-        Toggle.Focusable = false;
-        Ui.Hover(Reset, Theme.Chip, Theme.ChipHover);
-        Ui.Hover(Minus, Theme.Chip, Theme.ChipHover);
-        Ui.Hover(Plus, Theme.Chip, Theme.ChipHover);
+        Ui.Hover(Minus, _minusLook);
+        Ui.Hover(Toggle, _toggleLook);
+        Ui.Hover(Reset, _resetLook);
+        Ui.Hover(Plus, _plusLook);
         Ui.Hover(StopwatchMode, Brushes.Transparent, Theme.Hover);
         Ui.Hover(CountdownMode, Brushes.Transparent, Theme.Hover);
+        ApplySkin(IslandSkin.Default);
         PaintChip(Minus);
         PaintChip(Plus);
         Toggle.MouseLeftButtonUp += (_, e) => { e.Handled = true; ToggleRequested?.Invoke(this, EventArgs.Empty); };
@@ -60,8 +65,50 @@ public partial class ExpandedTimerView : UserControl
         Ui.Text(ToggleText, timer.IsRunning ? "暂停" : timer.IsCompleted ? "再来一次" : "开始");
         Minus.Visibility = countdown ? Visibility.Visible : Visibility.Collapsed;
         Plus.Visibility = countdown ? Visibility.Visible : Visibility.Collapsed;
-        StopwatchMode.Background = countdown ? Brushes.Transparent : Theme.Chip;
-        CountdownMode.Background = countdown ? Theme.Chip : Brushes.Transparent;
+        var selected = _skin == IslandSkin.Glass ? Theme.GlassKeyHover : Theme.Chip;
+        StopwatchMode.Background = countdown ? Brushes.Transparent : selected;
+        CountdownMode.Background = countdown ? selected : Brushes.Transparent;
+    }
+
+    public void ApplySkin(IslandSkin skin)
+    {
+        _skin = skin;
+        bool glass = skin == IslandSkin.Glass;
+        StyleKey(Minus, _minusLook, glass, primary: false);
+        StyleKey(Toggle, _toggleLook, glass, primary: true);
+        StyleKey(Reset, _resetLook, glass, primary: false);
+        StyleKey(Plus, _plusLook, glass, primary: false);
+        ToggleText.Foreground = glass ? Theme.Title : Theme.Ink;
+    }
+
+    static void StyleKey(Border border, HoverFill fill, bool glass, bool primary)
+    {
+        if (glass)
+        {
+            fill.Normal = Theme.GlassKey;
+            fill.Hover = Theme.GlassKeyHover;
+            fill.Pressed = Theme.GlassKeyPress;
+            border.BorderBrush = Theme.GlassKeyStroke;
+            border.BorderThickness = new Thickness(1);
+        }
+        else if (primary)
+        {
+            fill.Normal = Theme.Title;
+            fill.Hover = Theme.Title;
+            fill.Pressed = Theme.ChipHover;
+            border.BorderBrush = Brushes.Transparent;
+            border.BorderThickness = new Thickness(0);
+        }
+        else
+        {
+            fill.Normal = Theme.Chip;
+            fill.Hover = Theme.ChipHover;
+            fill.Pressed = Theme.Hover;
+            border.BorderBrush = Brushes.Transparent;
+            border.BorderThickness = new Thickness(0);
+        }
+
+        Ui.Paint(border, fill);
     }
 
     public void SetVertical(bool vertical)

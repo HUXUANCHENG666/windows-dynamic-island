@@ -16,6 +16,7 @@ public sealed class IslandDirector
     public bool PointerInside { get; private set; }
     public bool Occluded { get; private set; }
     public bool CameraOpen { get; private set; }
+    public bool LiveTranslateOpen { get; private set; }
     public string? LastTranslation { get; private set; }
     public bool TranslationCopied { get; private set; }
 
@@ -27,6 +28,12 @@ public sealed class IslandDirector
     /// 音量或通知短暂盖住预览时，设备也继续开着，提示结束再回到摄像头。
     /// </summary>
     public bool CameraSession => CameraOpen && (Mode == IslandMode.Camera || _notice is not null);
+
+    /// <summary>
+    /// 用户打开的实时翻译还在。鼠标离开、音量或通知短暂盖住，都不会把它关掉。
+    /// 开着的时候岛保持展开，方便字幕叠在全屏视频上面。
+    /// </summary>
+    public bool LiveTranslateSession => LiveTranslateOpen && (Mode == IslandMode.LiveTranslate || _notice is not null);
 
     /// <summary>还有一条没被关掉的译文。</summary>
     public bool HasTranslation => !string.IsNullOrWhiteSpace(LastTranslation);
@@ -66,7 +73,7 @@ public sealed class IslandDirector
     public void SetAmbient(AmbientKind ambient)
     {
         Ambient = ambient;
-        if (_notice is null && Mode != IslandMode.Camera && !_translationOpen)
+        if (_notice is null && Mode != IslandMode.Camera && !LiveTranslateOpen && !_translationOpen)
             Mode = Map(ambient);
     }
 
@@ -75,7 +82,7 @@ public sealed class IslandDirector
         if (Occluded == occluded)
             return;
         Occluded = occluded;
-        if (!occluded || _notice is not null || Mode == IslandMode.Camera)
+        if (!occluded || _notice is not null || Mode == IslandMode.Camera || LiveTranslateSession)
             return;
         if (_translationOpen && Mode == IslandMode.Translate)
         {
@@ -93,6 +100,7 @@ public sealed class IslandDirector
         if (open)
         {
             ParkTranslation();
+            LiveTranslateOpen = false;
             CameraOpen = true;
             _notice = null;
             Mode = IslandMode.Camera;
@@ -114,9 +122,37 @@ public sealed class IslandDirector
         }
     }
 
+    public void SetLiveTranslate(bool open)
+    {
+        if (open)
+        {
+            ParkTranslation();
+            CameraOpen = false;
+            LiveTranslateOpen = true;
+            _notice = null;
+            Mode = IslandMode.LiveTranslate;
+            Expanded = true;
+            _expandAt = null;
+            _collapseAt = null;
+            return;
+        }
+
+        LiveTranslateOpen = false;
+        if (Mode != IslandMode.LiveTranslate)
+            return;
+        Mode = Map(Ambient);
+        _expandAt = null;
+        if (Occluded || !PointerInside)
+        {
+            Expanded = false;
+            _collapseAt = null;
+        }
+    }
+
     public void ShowCameraMessage(DateTime now)
     {
         ParkTranslation();
+        LiveTranslateOpen = false;
         CameraOpen = false;
         _notice = null;
         Mode = IslandMode.Camera;
@@ -131,6 +167,8 @@ public sealed class IslandDirector
             return;
         LastTranslation = text.Trim();
         TranslationCopied = false;
+        if (LiveTranslateOpen)
+            return;
         OpenStoredTranslation();
     }
 
@@ -182,7 +220,7 @@ public sealed class IslandDirector
 
     public bool RevealTranslation(DateTime now)
     {
-        if (!HasTranslation || Occluded)
+        if (!HasTranslation || Occluded || LiveTranslateOpen)
             return false;
         OpenStoredTranslation();
         return true;
@@ -229,7 +267,7 @@ public sealed class IslandDirector
             return;
         }
 
-        if (!Expanded || CameraSession)
+        if (!Expanded || CameraSession || LiveTranslateSession)
         {
             _collapseAt = null;
             return;
@@ -263,7 +301,7 @@ public sealed class IslandDirector
     /// </summary>
     public void TrayClick(DateTime now)
     {
-        if (CameraSession)
+        if (CameraSession || LiveTranslateSession)
             return;
 
         if (Expanded && !PointerInside)
@@ -334,7 +372,7 @@ public sealed class IslandDirector
         if (_notice is not null && now >= _noticeUntil)
             EndNotice(now);
 
-        if (CameraSession || TranslationGesture.ShouldHoldAgainstPointerLeave(
+        if (CameraSession || LiveTranslateSession || TranslationGesture.ShouldHoldAgainstPointerLeave(
                 IsShowingTranslation, TranslationCopied, _selectionHold))
             _collapseAt = null;
 
@@ -400,6 +438,16 @@ public sealed class IslandDirector
         {
             _resumeTranslation = false;
             Mode = IslandMode.Camera;
+            Expanded = true;
+            _expandAt = null;
+            _collapseAt = null;
+            return;
+        }
+
+        if (LiveTranslateOpen)
+        {
+            _resumeTranslation = false;
+            Mode = IslandMode.LiveTranslate;
             Expanded = true;
             _expandAt = null;
             _collapseAt = null;

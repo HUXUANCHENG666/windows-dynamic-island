@@ -21,6 +21,8 @@ sealed class IslandAnimator
     readonly Spring _opacity = new(SpringConfig.Appear);
     readonly Dictionary<IslandMode, Spring> _presence = new();
 
+    public double Scale { get; set; } = AppearancePolicy.DefaultScale;
+
     public IslandAnimator()
     {
         foreach (IslandMode mode in Enum.GetValues<IslandMode>())
@@ -38,7 +40,7 @@ sealed class IslandAnimator
 
     public void PlayIntro()
     {
-        var frame = IslandMetrics.FrameFor(IslandMode.Idle, expanded: false);
+        var frame = IslandMetrics.FrameFor(IslandMode.Idle, expanded: false, IslandOrientation.Horizontal, Scale);
         _width.Value = frame.Width * 0.82;
         _width.Target = frame.Width;
         _height.Value = frame.Height * 0.82;
@@ -57,7 +59,9 @@ sealed class IslandAnimator
 
     public void SetTarget(IslandMode mode, bool expanded, bool dot, IslandOrientation orientation)
     {
-        var frame = dot ? IslandMetrics.StealthDot : IslandMetrics.FrameFor(mode, expanded, orientation);
+        var frame = dot
+            ? IslandMetrics.ScaledDot(Scale)
+            : IslandMetrics.FrameFor(mode, expanded, orientation, Scale);
         _width.Target = frame.Width;
         _height.Target = frame.Height;
         _radius.Target = frame.Radius;
@@ -88,7 +92,7 @@ sealed class IslandAnimator
         double snapW = WindowPlacement.SnapDip(width, dpi);
         double snapH = WindowPlacement.SnapDip(height, dpi);
         var orientation = Dock.OrientationOf(anchor);
-        var (rawLeft, rawTop) = PillLayout.Offset(anchor, window.Width, window.Height, snapW, snapH, IslandMetrics.TopMargin);
+        var (rawLeft, rawTop) = PillLayout.Offset(anchor, window.Width, window.Height, snapW, snapH, IslandMetrics.TopMargin * AppearancePolicy.ClampScale(Scale));
         double left = WindowPlacement.SnapDip(rawLeft, dpi);
         double top = WindowPlacement.SnapDip(rawTop, dpi);
 
@@ -98,11 +102,20 @@ sealed class IslandAnimator
         System.Windows.Controls.Canvas.SetTop(window.PillHost, top);
 
         double safeRadius = Squircle.SafeRadius(snapW, snapH, radius);
-        var geometry = ToGeometry(Squircle.Build(snapW, snapH, safeRadius, corner, 18));
+        bool glass = AppearancePolicy.ParseSkin(window.Settings.IslandSkin) == IslandSkin.Glass;
+        var shape = new GlassGeometry(snapW, snapH, safeRadius, dpi);
+        Geometry geometry = glass
+            ? new RectangleGeometry(new Rect(0, 0, shape.Width, shape.Height), shape.SafeRadius, shape.SafeRadius)
+            : ToGeometry(Squircle.Build(snapW, snapH, safeRadius, corner, 18));
         window.Pill.Data = geometry;
-        window.PillStroke.Data = geometry;
+        double halfStroke = window.PillStroke.StrokeThickness * 0.5;
+        var stroke = shape.Inset(halfStroke);
+        window.PillStroke.Data = glass
+            ? new RectangleGeometry(new Rect(halfStroke, halfStroke, stroke.Width, stroke.Height), stroke.SafeRadius, stroke.SafeRadius)
+            : geometry;
         window.PillStroke.Clip = geometry;
         window.ContentHost.Clip = geometry;
+        window.DecorateGlass(geometry, snapW, snapH, safeRadius);
         window.HitGeometry = geometry;
 
         double slop = IslandMetrics.HitSlop;
@@ -127,16 +140,20 @@ sealed class IslandAnimator
         var timer = IslandMetrics.FrameFor(IslandMode.Timer, true, orientation);
         var translate = IslandMetrics.FrameFor(IslandMode.Translate, true, orientation);
         var camera = IslandMetrics.FrameFor(IslandMode.Camera, true, orientation);
+        var live = IslandMetrics.FrameFor(IslandMode.LiveTranslate, true, orientation);
+        double fitMax = Math.Max(1.06, AppearancePolicy.ClampScale(Scale) + 0.08);
         PlaceFixed(window.ExpandedIdle, Presence(IslandMode.Idle) * expandFade, openShift, allowBlur,
-            idle.Width, idle.Height, snapW, snapH);
+            idle.Width, idle.Height, snapW, snapH, fitMax);
         PlaceFixed(window.ExpandedMedia, Presence(IslandMode.Media) * expandFade, openShift, allowBlur,
-            media.Width, media.Height, snapW, snapH);
+            media.Width, media.Height, snapW, snapH, fitMax);
         PlaceFixed(window.ExpandedTimer, Presence(IslandMode.Timer) * expandFade, openShift, allowBlur,
-            timer.Width, timer.Height, snapW, snapH);
+            timer.Width, timer.Height, snapW, snapH, fitMax);
         PlaceFixed(window.TranslateNotice, Presence(IslandMode.Translate) * expandFade, openShift, allowBlur,
-            translate.Width, translate.Height, snapW, snapH);
+            translate.Width, translate.Height, snapW, snapH, fitMax);
         PlaceFixed(window.CameraNotice, Presence(IslandMode.Camera) * expandFade, openShift, allowBlur,
-            camera.Width, camera.Height, snapW, snapH);
+            camera.Width, camera.Height, snapW, snapH, fitMax);
+        PlaceFixed(window.LiveTranslateNotice, Presence(IslandMode.LiveTranslate) * expandFade, openShift, allowBlur,
+            live.Width, live.Height, snapW, snapH, fitMax);
         PlaceStretch(window.CompactMedia, Presence(IslandMode.Media) * collapseFade, shutShift, allowBlur, snapW, snapH);
         PlaceStretch(window.CompactTimer, Presence(IslandMode.Timer) * collapseFade, shutShift, allowBlur, snapW, snapH);
         PlaceFill(window.VolumeNotice, Presence(IslandMode.Volume) * expandFade, openShift, allowBlur, snapW, snapH);
@@ -146,7 +163,7 @@ sealed class IslandAnimator
 
     double Presence(IslandMode mode) => Math.Clamp(_presence[mode].Value, 0, 1.15);
 
-    static void PlaceFixed(FrameworkElement view, double opacity, Shift shift, bool allowBlur, double designW, double designH, double pillW, double pillH)
+    static void PlaceFixed(FrameworkElement view, double opacity, Shift shift, bool allowBlur, double designW, double designH, double pillW, double pillH, double fitMax)
     {
         double shown = Math.Clamp(opacity, 0, 1);
         if (shown < 0.012)
@@ -156,7 +173,7 @@ sealed class IslandAnimator
         }
 
         double fit = Math.Min(pillW / designW, pillH / designH);
-        Show(view, shown, Math.Clamp(fit, 0.45, 1.06), shift, allowBlur, opacity);
+        Show(view, shown, Math.Clamp(fit, 0.45, fitMax), shift, allowBlur, opacity);
         view.Width = designW;
         view.Height = designH;
         view.HorizontalAlignment = HorizontalAlignment.Center;

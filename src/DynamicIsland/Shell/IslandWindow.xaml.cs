@@ -1,3 +1,5 @@
+using DynamicIsland.Core.Geometry;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Input;
@@ -8,6 +10,8 @@ using System.Windows.Threading;
 using DynamicIsland.Core.Camera;
 using DynamicIsland.Core.Formatting;
 using DynamicIsland.Core.Ipc;
+using DynamicIsland.Core.LiveTranslate;
+using DynamicIsland.Core.Motion;
 using DynamicIsland.Core.Island;
 using DynamicIsland.Core.Notifications;
 using DynamicIsland.Core.SystemState;
@@ -33,9 +37,14 @@ public partial class IslandWindow : Window
     readonly Translator _translator = new();
     readonly TranslateSession _translate = new();
     readonly CameraSession _camera;
+    readonly LiveTranslateService _liveTranslate;
+    readonly LiveTranslateCaptionChain _liveCaptions = new();
     readonly FullscreenWatcher _watcher = new();
     readonly DynamicIsland.Core.Media.TimelineEstimator _timeline = new();
     CancellationTokenSource? _translateCts;
+    readonly LiveTranslationPump _livePump;
+    readonly HashSet<Task> _clipboardTasks = new();
+    bool _shutdown;
     TrayController? _tray;
     DispatcherTimer? _slow;
     DispatcherTimer? _topmost;
@@ -57,6 +66,16 @@ public partial class IslandWindow : Window
     bool _dragging;
     readonly List<ThrowMath.DragSample> _dragSamples = new();
     readonly Stopwatch _dragClock = Stopwatch.StartNew();
+    readonly LiquidBounce _bounce = new();
+    readonly LiquidSurface _liquid = new();
+    readonly LiquidOptics _optics = new();
+    GlassGeometry _glassGeometry;
+    readonly GlassRefractionBuffer _refraction = new();
+    DateTime _lastCaptureUtc;
+    bool _liquidWasMoving;
+    double _glassPillW;
+    double _glassPillH;
+    readonly ScaleTransform _pillScale = new(1, 1);
     DropShadowEffect? _pillShadow;
     BitmapCache? _pillCache;
     bool _motionEffectsOff;
@@ -93,7 +112,8 @@ public partial class IslandWindow : Window
     public DynamicIsland.Core.Settings.AppSettings Settings => _settings.Settings;
     public string? ForeignProcess { get; private set; }
     public bool CameraIsOpen => _deviceOpen || _director.CameraOpen || _director.Mode == IslandMode.Camera;
-    public StreamGeometry? HitGeometry { get; set; }
+    public bool LiveTranslateIsOpen => _liveTranslate.IsRunning || _director.LiveTranslateOpen || _director.Mode == IslandMode.LiveTranslate;
+    public Geometry? HitGeometry { get; set; }
     public StreamGeometry? SlopGeometry { get; set; }
 
     public IslandWindow(DynamicIsland.Core.Settings.AppSettings settings)
@@ -103,8 +123,21 @@ public partial class IslandWindow : Window
         settings.Docks ??= new();
         _settings = new AppSettingsHost(settings);
         InitializeComponent();
-        Width = IslandMetrics.WindowWidth;
-        Height = IslandMetrics.WindowHeight;
+        _refraction.FrameReady = () =>
+        {
+            if (_shutdown || Dispatcher.HasShutdownStarted) return;
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (!_shutdown && _refraction.PresentReady())
+                    GlassSkin.UpdateRefraction(this, _refraction.Image, _refraction.Shade, _refraction.GpuImage);
+            }, DispatcherPriority.Render);
+        };
+        PillHost.RenderTransform = _pillScale;
+        AppearancePolicy.Sanitize(settings);
+        _animator.Scale = settings.IslandScale;
+        var startupHost = IslandMetrics.HostDip(IslandOrientation.Horizontal, settings.IslandScale);
+        Width = startupHost.Width;
+        Height = startupHost.Height;
         FontFamily = new FontFamily(IslandFonts.Ui);
         Pill.Fill = Theme.IslandFill;
         _pillShadow = new DropShadowEffect
@@ -121,6 +154,7 @@ public partial class IslandWindow : Window
         PillStroke.Stroke = Theme.Hairline;
         PillStroke.StrokeThickness = 1.6;
         ContentHost.Background = Brushes.Transparent;
+        ApplySkin(AppearancePolicy.ParseSkin(settings.IslandSkin));
 
         _announceFinish = _timer.Import(settings.Timer, DateTime.UtcNow);
         _timerPinned = settings.Timer.Pinned || _timer.IsRunning || _timer.IsCompleted;
@@ -134,6 +168,29 @@ public partial class IslandWindow : Window
         _media = new MediaService(Dispatcher);
         _camera = new CameraSession(Dispatcher);
         _camera.Frame += (pixels, width, height) => CameraNotice.SetFrame(pixels, width, height);
+        _livePump = new LiveTranslationPump((request, api, token) => _translator.TranslateAsync(request, api, token), action =>
+        {
+            if (_shutdown || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+            try { Dispatcher.BeginInvoke(() => { if (!_shutdown && !Dispatcher.HasShutdownStarted) action(); }); }
+            catch (InvalidOperationException) when (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) { }
+        });
+        _livePump.Completed += (work, result) =>
+        {
+            if (!_director.LiveTranslateOpen || !_liveCaptions.Complete(work.CaptionId, result, work.Recognized)) return;
+            LiveTranslateNotice.ShowCaptions(_liveCaptions.Items);
+            LiveTranslateNotice.ShowStatus(_liveCaptions.HasPending ? LiveTranslateCopy.Translating : LiveTranslateCopy.Listening, true, null, false);
+            Nudge();
+        };
+        _livePump.Failed += work =>
+        {
+            if (!_director.LiveTranslateOpen || !_liveCaptions.FailRevision(work.CaptionId, work.Recognized)) return;
+            LiveTranslateNotice.ShowCaptions(_liveCaptions.Items);
+            LiveTranslateNotice.ShowStatus("翻译暂不可用；原文与已有译文已保留。", true, null, false);
+        };
+        _livePump.Diagnostic += type => Log.Info($"live-translate request type={type}");
+        _liveTranslate = new LiveTranslateService(Dispatcher);
+        _liveTranslate.Status += OnLiveTranslateStatus;
+        _liveTranslate.Transcript += OnLiveTranslateTranscript;
         _volume = new VolumeService(Dispatcher);
         _power = new PowerService(Dispatcher);
         _notifications = new NotificationCenterService(Dispatcher);
@@ -327,6 +384,20 @@ public partial class IslandWindow : Window
         PinTimer(expand: true);
     }
 
+    internal DockAnchor CurrentAnchor => _anchor;
+    internal void SetDockAnchor(DockAnchor anchor)
+    {
+        var monitor = ResolveMonitor(MonitorEnumerator.Enumerate());
+        if (monitor == null) return;
+        Settings.Docks ??= new();
+        DockStore.Remember(Settings.Docks, monitor.DeviceName, anchor);
+        SettingsStore.Save(Settings);
+        _placed = default;
+        Position();
+        _animator.SetTarget(_director.Mode, _director.Expanded, _director.ShowAsDot, _orientation);
+        Nudge();
+    }
+
     public void SelectMonitor(string? deviceName)
     {
         Settings.MonitorDeviceName = deviceName;
@@ -338,6 +409,7 @@ public partial class IslandWindow : Window
     {
         SaveTimer();
         ReleaseCamera(collapseUi: false);
+        StopLiveTranslate(collapseUi: false);
         _tray?.Dispose();
         _tray = null;
         _media.Dispose();
@@ -366,6 +438,73 @@ public partial class IslandWindow : Window
         Settings.TranslateDirection = DynamicIsland.Core.Translation.TranslatePolicy.ToSetting(direction);
         SettingsStore.Save(Settings);
         TranslateNotice.SetDirection(direction);
+    }
+
+    internal void SetTranslateProviders(TranslateApiOptions active, IReadOnlyList<TranslateApiOptions> profiles)
+    {
+        foreach (var profile in profiles) TranslateProviderSettings.Save(Settings, profile);
+        TranslateProviderSettings.Save(Settings, active);
+        SettingsStore.Save(Settings);
+        _livePump.ChangeProvider(active);
+    }
+
+    public void SetTranslateApi(TranslateApiKind kind, string? url, string? model, string? key)
+    {
+        Settings.TranslateApi = TranslateApiPolicy.ToSetting(kind);
+        Settings.TranslateApiUrl = string.IsNullOrWhiteSpace(url) ? null : url.Trim();
+        Settings.TranslateApiModel = string.IsNullOrWhiteSpace(model) ? null : model.Trim();
+        Settings.TranslateApiKey = string.IsNullOrWhiteSpace(key) ? null : key.Trim();
+        SettingsStore.Save(Settings);
+    }
+
+    public void SetIslandScale(double scale)
+    {
+        scale = AppearancePolicy.ClampScale(scale);
+        Settings.IslandScale = scale;
+        SettingsStore.Save(Settings);
+        _animator.Scale = scale;
+        _animator.SetTarget(_director.Mode, _director.Expanded, _director.ShowAsDot, _orientation);
+        Position();
+        Nudge();
+    }
+
+    public void SetIslandSkin(IslandSkin skin)
+    {
+        Settings.IslandSkin = AppearancePolicy.ToSetting(skin);
+        SettingsStore.Save(Settings);
+        ApplySkin(skin);
+        Nudge();
+    }
+
+    void ApplySkin(IslandSkin skin)
+    {
+        GlassSkin.Apply(this, skin);
+        ExpandedMedia.ApplySkin(skin);
+        ExpandedTimer.ApplySkin(skin);
+        TranslateNotice.ApplySkin(skin);
+        if (skin != IslandSkin.Glass)
+        {
+            Pill.Effect = _pillShadow;
+            _liquid.Reset();
+            _optics.Reset();
+            _liquidWasMoving = false;
+            _refraction.Clear();
+            GlassSkin.UpdateRefraction(this, null, null);
+        }
+        SyncCaptureAffinity();
+    }
+
+    internal void DecorateGlass(Geometry geometry, double width, double height, double radius)
+    {
+        _glassGeometry = new GlassGeometry(width, height, radius > 0 ? radius : Math.Min(width, height) * 0.5);
+        bool motion = AppearancePolicy.ParseSkin(Settings.IslandSkin) == IslandSkin.Glass
+            && _director.Expanded
+            && !_director.ShowAsDot
+            && _animator.IsSettled
+            && !_dragging
+            && !_throwActive
+            && !_gliding;
+        GlassSkin.Decorate(this, geometry, width, height, motion);
     }
 
     public void OpenLog()
@@ -483,13 +622,31 @@ public partial class IslandWindow : Window
 
     public bool HitPill(Point windowPoint)
     {
-        double x = windowPoint.X - System.Windows.Controls.Canvas.GetLeft(PillHost);
-        double y = windowPoint.Y - System.Windows.Controls.Canvas.GetTop(PillHost);
+        double left = System.Windows.Controls.Canvas.GetLeft(PillHost);
+        double top = System.Windows.Controls.Canvas.GetTop(PillHost);
+        if (double.IsNaN(left))
+            left = 0;
+        if (double.IsNaN(top))
+            top = 0;
+        double visX = windowPoint.X - left;
+        double visY = windowPoint.Y - top;
+        var (x, y) = UnscalePillPoint(visX, visY);
         if (HitGeometry != null && HitGeometry.FillContains(new Point(x, y)))
             return true;
         if (SlopGeometry != null && SlopGeometry.FillContains(new Point(x + IslandMetrics.HitSlop, y + IslandMetrics.HitSlop)))
             return true;
         return false;
+    }
+
+    (double X, double Y) UnscalePillPoint(double visualX, double visualY)
+    {
+        double width = Math.Max(1, PillHost.ActualWidth);
+        double height = Math.Max(1, PillHost.ActualHeight);
+        double ox = PillHost.RenderTransformOrigin.X * width;
+        double oy = PillHost.RenderTransformOrigin.Y * height;
+        double sx = Math.Max(0.05, _pillScale.ScaleX);
+        double sy = Math.Max(0.05, _pillScale.ScaleY);
+        return (ox + (visualX - ox) / sx, oy + (visualY - oy) / sy);
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -498,6 +655,7 @@ public partial class IslandWindow : Window
         var source = (HwndSource)PresentationSource.FromVisual(this)!;
         source.AddHook(WndProc);
         ApplyChrome(source.Handle);
+        SyncCaptureAffinity();
         Position();
         _watcher.Start(source.Handle);
         _clipboardHooked = NativeMethods.AddClipboardFormatListener(source.Handle);
@@ -532,8 +690,10 @@ public partial class IslandWindow : Window
         _animator.Apply(this, newDpi.DpiScaleX, _anchor, EffectsPolicy.AllowBlur(_director.Expanded && !_director.ShowAsDot, transitioning));
     }
 
-    protected override void OnClosed(EventArgs e)
+    protected override async void OnClosed(EventArgs e)
     {
+        _shutdown = true;
+        SyncCaptureAffinity();
         SaveTimer();
         _renderLive = false;
         CompositionTarget.Rendering -= OnRendering;
@@ -541,11 +701,20 @@ public partial class IslandWindow : Window
         _topmost?.Stop();
         _hideSweep?.Stop();
         _coverConfirm?.Stop();
-        _settingsWindow?.Close();
+        if (_settingsWindow != null) { _settingsWindow.IsEnabled = false; _settingsWindow.Close(); }
+        _tray?.Dispose(); _tray = null;
         SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
         _translateCts?.Cancel();
+        CancelLiveTranslations();
         _notifications.Dispose();
         ReleaseCamera(collapseUi: false);
+        StopLiveTranslate(collapseUi: false);
+        try
+        {
+            await Task.WhenAll(_liveTranslate.DisposeAsync().AsTask(), _livePump.StopAsync(close: true),
+                _refraction.DisposeAsync().AsTask(), Task.WhenAll(_clipboardTasks.ToArray()));
+        }
+        catch (Exception ex) { Log.Info($"shutdown drain fault type={ex.GetType().Name}"); }
         _watcher.Dispose();
         _translator.Dispose();
         if (_clipboardHooked)
@@ -595,7 +764,10 @@ public partial class IslandWindow : Window
         ExpandedIdle.StopwatchRequested += (_, _) => OpenStopwatch();
         ExpandedIdle.FocusRequested += (_, _) => OpenCountdown(25);
         ExpandedIdle.CameraRequested += (_, _) => ToggleCamera();
+        ExpandedIdle.LiveTranslateRequested += (_, _) => ToggleLiveTranslate();
         CameraNotice.CloseRequested += (_, _) => ToggleCamera();
+        LiveTranslateNotice.CloseRequested += (_, _) => ToggleLiveTranslate();
+        LiveTranslateNotice.CancelRequested += (_, _) => _liveTranslate.CancelDownload();
         ExpandedTimer.ToggleRequested += (_, _) =>
         {
             if (_timer.IsCompleted)
@@ -666,6 +838,7 @@ public partial class IslandWindow : Window
 
     void Nudge()
     {
+        if (_shutdown) return;
         if (_renderLive || _inPulse)
             return;
         Pulse(1.0 / 60.0);
@@ -704,6 +877,7 @@ public partial class IslandWindow : Window
 
     void Pulse(double dt)
     {
+        if (_shutdown) return;
         if (_inPulse)
             return;
         _inPulse = true;
@@ -755,12 +929,146 @@ public partial class IslandWindow : Window
         _animator.SetTarget(_director.Mode, _director.Expanded, _director.ShowAsDot, _orientation);
         _animator.Step(dt);
         _animator.Apply(this, CurrentDpi(), _anchor, allowBlur);
+        ApplyLiquidMotion(dt, moving);
         UpdateLive(dt);
         if (!_director.Expanded)
             _media.ReleaseSessionPin();
         MaybeSaveTimer(now);
         SyncLoops();
     }
+
+    void ApplyLiquidMotion(double dt, bool moving)
+    {
+        var (vx, vy) = LiquidVelocity();
+        var (originX, originY) = LiquidDrag.TransformOrigin(
+            DockedTop(_anchor), DockedBottom(_anchor), DockedLeft(_anchor), DockedRight(_anchor));
+        PillHost.RenderTransformOrigin = new Point(originX, originY);
+
+        double left = System.Windows.Controls.Canvas.GetLeft(PillHost);
+        double top = System.Windows.Controls.Canvas.GetTop(PillHost);
+        if (double.IsNaN(left))
+            left = 0;
+        if (double.IsNaN(top))
+            top = 0;
+        double pillW = Math.Max(1, PillHost.ActualWidth);
+        double pillH = Math.Max(1, PillHost.ActualHeight);
+        double roomLeft = left;
+        double roomRight = Math.Max(0, ActualWidth - left - pillW);
+        double roomTop = top;
+        double roomBottom = Math.Max(0, ActualHeight - top - pillH);
+        double roomX = originX <= 0.01 ? roomRight : originX >= 0.99 ? Math.Max(0, roomLeft) : 2 * Math.Min(Math.Max(0, roomLeft), roomRight);
+        double roomY = originY <= 0.01 ? roomBottom : originY >= 0.99 ? Math.Max(0, roomTop) : 2 * Math.Min(Math.Max(0, roomTop), roomBottom);
+        var (maxX, maxY) = LiquidDrag.MaxFit(pillW, pillH, roomX, roomY);
+        _bounce.Step(dt, moving, vx, vy, maxX, maxY);
+        _pillScale.ScaleX = _bounce.ScaleX;
+        _pillScale.ScaleY = _bounce.ScaleY;
+
+        bool glass = AppearancePolicy.ParseSkin(Settings.IslandSkin) == IslandSkin.Glass
+            && GlassHost.Visibility == Visibility.Visible;
+        bool released = !moving && _liquidWasMoving;
+        _liquidWasMoving = moving;
+        if (glass)
+        {
+            _liquid.EnsureSize(pillW, pillH);
+            double stretch = Math.Abs(_bounce.ScaleX - 1) + Math.Abs(_bounce.ScaleY - 1);
+            double sizePulse = Math.Abs(pillW - _glassPillW) + Math.Abs(pillH - _glassPillH);
+            if (_glassPillW > 0 && sizePulse > 1)
+                _liquid.InjectForce(0.5, 0.5, (float)Math.Min(0.28, sizePulse * 0.004), 0.42f);
+            _glassPillW = pillW;
+            _glassPillH = pillH;
+            _liquid.Step(dt, vx, vy, moving, released, stretch);
+            GlassSkin.ApplySurface(this, _liquid, pillW, pillH, vx, vy, moving);
+            // 位置、展开弹簧先走完；捕获放后台。展开过程也按当前形状每帧重算玻璃。
+            bool resizing = !_animator.IsSettled;
+            PresentGlass(dt, left, top, pillW, pillH, originX, originY, moving, resizing);
+        }
+        else
+        {
+            if (!moving)
+            {
+                _liquid.Reset();
+                _optics.Reset();
+            }
+            if (GlassRefraction.Source != null || GlassShade.Source != null || GlassGpu.Source != null)
+            {
+                _refraction.Clear();
+                GlassSkin.UpdateRefraction(this, null, null);
+            }
+        }
+    }
+
+    (double Vx, double Vy) LiquidVelocity()
+    {
+        double dpi = Math.Max(0.5, CurrentDpi());
+        if (_dragging && _dragSamples.Count >= 2)
+        {
+            var (vx, vy) = ThrowMath.Velocity(_dragSamples);
+            return (vx / dpi, vy / dpi);
+        }
+
+        if (_throwActive)
+            return (_throwBody.Vx / dpi, _throwBody.Vy / dpi);
+
+        if (_gliding)
+        {
+            const double duration = 0.26;
+            if (_glideElapsed >= duration)
+                return (0, 0);
+            return ((_glideToX - _glideFromX) / (duration * dpi), (_glideToY - _glideFromY) / (duration * dpi));
+        }
+
+        return (0, 0);
+    }
+
+    void PresentGlass(double dt, double left, double top, double pillW, double pillH, double originX, double originY, bool moving, bool resizing)
+    {
+        if (!GlassWork.ShouldRefreshVisuals(moving, resizing))
+            return;
+
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero || !NativeMethods.GetWindowRect(hwnd, out var rect) || pillW < 8 || pillH < 8)
+        {
+            GlassSkin.UpdateRefraction(this, null, null);
+            return;
+        }
+
+        double radius = _glassGeometry.SafeRadius > 0 ? _glassGeometry.SafeRadius : Math.Min(pillW, pillH) * 0.5;
+        double dpi = Math.Max(0.5, CurrentDpi());
+        int pillLeft = rect.Left + (int)Math.Round(left * dpi);
+        int pillTop = rect.Top + (int)Math.Round(top * dpi);
+        int pillWidth = Math.Max(1, (int)Math.Round(pillW * dpi));
+        int pillHeight = Math.Max(1, (int)Math.Round(pillH * dpi));
+        double scaleX = _pillScale.ScaleX;
+        double scaleY = _pillScale.ScaleY;
+        int visualW = Math.Max(1, (int)Math.Round(pillW * scaleX * dpi));
+        int visualH = Math.Max(1, (int)Math.Round(pillH * scaleY * dpi));
+        int visualLeft = pillLeft + (int)Math.Round(originX * pillW * (1 - scaleX) * dpi);
+        int visualTop = pillTop + (int)Math.Round(originY * pillH * (1 - scaleY) * dpi);
+
+        _optics.Step(dt, visualLeft, visualTop, visualW, visualH, dpi);
+        var optics = _optics.Frame(visualW / (double)pillWidth, visualH / (double)pillHeight);
+        double age = _lastCaptureUtc == default ? double.MaxValue : (DateTime.UtcNow - _lastCaptureUtc).TotalSeconds;
+        // Start capture first. Worker consumes its completion directly, not last tick's UI-dispatched pad.
+        if (GlassWork.ShouldCapture(moving, resizing, age, _refraction.CaptureInFlight) &&
+            _refraction.TryBeginCapture(pillLeft, pillTop, pillWidth, pillHeight, visualLeft, visualTop, visualW, visualH, radius * dpi, dpi))
+            _lastCaptureUtc = DateTime.UtcNow;
+        if (_refraction.TryPresent(pillWidth, pillHeight, radius * dpi, _liquid, moving || resizing, dpi, visualLeft, visualTop, visualW / (double)pillWidth, visualH / (double)pillHeight, optics))
+            GlassSkin.UpdateRefraction(this, _refraction.Image, _refraction.Shade, _refraction.GpuImage);
+
+    }
+
+    static bool DockedTop(DockAnchor anchor) =>
+        anchor is DockAnchor.TopLeft or DockAnchor.TopCenter or DockAnchor.TopRight;
+
+    static bool DockedBottom(DockAnchor anchor) =>
+        anchor is DockAnchor.BottomLeft or DockAnchor.BottomCenter or DockAnchor.BottomRight;
+
+    static bool DockedLeft(DockAnchor anchor) =>
+        anchor is DockAnchor.TopLeft or DockAnchor.LeftCenter or DockAnchor.BottomLeft;
+
+    static bool DockedRight(DockAnchor anchor) =>
+        anchor is DockAnchor.TopRight or DockAnchor.RightCenter or DockAnchor.BottomRight;
+
 
     void UpdateLive(double dt)
     {
@@ -801,13 +1109,19 @@ public partial class IslandWindow : Window
 
     void SyncLoops()
     {
+        if (_shutdown) return;
         bool waveform = _director.Mode == IslandMode.Media && _media.Current.IsPlaying;
         bool clock = _director.Mode == IslandMode.Idle && _director.Expanded;
         bool transitioning = !_animator.IsSettled;
         bool expanded = _director.Expanded && !_director.ShowAsDot;
         // 拖拽、甩出、归位都要每帧挪窗口，必须走渲染循环，不能靠定时器（会漂帧）。
-        bool motion = _dragging || _throwActive || _gliding;
-        bool animate = motion || EffectsPolicy.UseHighFrameRate(expanded, transitioning, waveform);
+        bool glassRipple = AppearancePolicy.ParseSkin(Settings.IslandSkin) == IslandSkin.Glass
+            && GlassHost.Visibility == Visibility.Visible
+            && !(_liquid.IsSettled && _optics.IsSettled);
+        bool motion = _dragging || _throwActive || _gliding || !_bounce.IsSettled || glassRipple;
+        bool glass = AppearancePolicy.ParseSkin(Settings.IslandSkin) == IslandSkin.Glass
+            && GlassHost.Visibility == Visibility.Visible;
+        bool animate = glass || motion || EffectsPolicy.UseHighFrameRate(expanded, transitioning, waveform);
         if (animate && !_renderLive)
         {
             _renderLive = true;
@@ -824,7 +1138,7 @@ public partial class IslandWindow : Window
             });
         }
 
-        bool slow = _director.HasScheduledWork || _timer.IsRunning || waveform || clock || _director.Mode == IslandMode.Timer;
+        bool slow = _director.HasScheduledWork || _timer.IsRunning || waveform || clock || _director.Mode == IslandMode.Timer || glass;
         if ((slow || animate) && !_slowLive)
         {
             _slowLive = true;
@@ -872,10 +1186,17 @@ public partial class IslandWindow : Window
                 break;
             case NativeMethods.WM_LBUTTONDOWN:
                 var press = HitTranslation();
-                if (press == DynamicIsland.Core.Translation.TranslationHit.ResultText)
+                if (press == DynamicIsland.Core.Translation.TranslationHit.ResultText || HitCaptionScroll())
                     _director.SetTranslationSelection(true);
                 if (DynamicIsland.Core.Translation.TranslationGesture.ShouldArmDrag(press, _director.SelectionHold))
                     ArmDrag();
+                break;
+            case NativeMethods.WM_MOUSEWHEEL:
+                if (HitCaptionScroll())
+                {
+                    LiveTranslateNotice.TryWheel(NativeMethods.SignedHigh(wParam));
+                    handled = true;
+                }
                 break;
             case NativeMethods.WM_LBUTTONUP:
                 bool selecting = _director.SelectionHold;
@@ -973,7 +1294,7 @@ public partial class IslandWindow : Window
         Settings.Docks ??= new();
         _anchor = DockStore.Recall(Settings.Docks, monitor.DeviceName);
         var orientation = Dock.OrientationOf(_anchor);
-        var host = IslandMetrics.HostDip(orientation);
+        var host = IslandMetrics.HostDip(orientation, _animator.Scale);
         Width = host.Width;
         Height = host.Height;
         if (orientation != _orientation)
@@ -1030,6 +1351,7 @@ public partial class IslandWindow : Window
         ToastNotice.SetVertical(vertical);
         TranslateNotice.SetVertical(vertical);
         CameraNotice.SetVertical(vertical);
+        LiveTranslateNotice.SetVertical(vertical);
     }
 
     void EvaluateHide()
@@ -1100,22 +1422,31 @@ public partial class IslandWindow : Window
             return;
         }
 
-        _ = RunTranslationAsync(request.Value);
+        var task = RunTranslationAsync(request.Value);
+        _clipboardTasks.Add(task);
+        _ = ObserveClipboardAsync(task);
+    }
+
+    async Task ObserveClipboardAsync(Task task)
+    {
+        try { await task; }
+        finally { _clipboardTasks.Remove(task); }
     }
 
     async Task RunTranslationAsync(TranslateRequest request)
     {
         _translateCts?.Cancel();
-        _translateCts = new CancellationTokenSource();
-        var token = _translateCts.Token;
+        using var cts = new CancellationTokenSource();
+        _translateCts = cts;
+        var token = cts.Token;
         TranslateNotice.ShowBusy(request.Clipped);
         _director.PushNotice(IslandMode.Translate, DateTime.UtcNow);
         Nudge();
         try
         {
             Log.Info($"translate send {request.Text.Length} {request.Source}->{request.Target}");
-            var result = await _translator.TranslateAsync(request, token);
-            if (token.IsCancellationRequested)
+            var result = await _translator.TranslateAsync(request, TranslateProviderSettings.Read(Settings), token);
+            if (token.IsCancellationRequested || _shutdown)
                 return;
             _translate.RememberResult(result);
             _director.ShowTranslationResult(result, DateTime.UtcNow);
@@ -1128,13 +1459,14 @@ public partial class IslandWindow : Window
         catch (Exception ex)
         {
             Log.Info("translate failed " + ex.GetType().Name);
-            if (!token.IsCancellationRequested)
+            if (!token.IsCancellationRequested && !_shutdown)
             {
                 TranslateNotice.ShowError(ex is InvalidOperationException ? ex.Message : "翻译没有完成。");
                 _director.PushNotice(IslandMode.Translate, DateTime.UtcNow);
                 Nudge();
             }
         }
+        finally { if (ReferenceEquals(_translateCts, cts)) _translateCts = null; }
     }
 
     void PaintTranslationRecall()
@@ -1198,6 +1530,19 @@ public partial class IslandWindow : Window
         RestoreForeignForeground();
         if (!_renderLive)
             SyncLoops();
+    }
+
+    bool HitCaptionScroll()
+    {
+        if (!_director.LiveTranslateOpen || !LiveTranslateNotice.IsVisible)
+            return false;
+        if (!NativeMethods.GetCursorPos(out var point))
+            return false;
+        if (HitElement(LiveTranslateNotice.CloseTranslate, point))
+            return false;
+        if (LiveTranslateNotice.CancelDownload.IsVisible && HitElement(LiveTranslateNotice.CancelDownload, point))
+            return false;
+        return HitElement(LiveTranslateNotice.CaptionScroll, point);
     }
 
     DynamicIsland.Core.Translation.TranslationHit HitTranslation()
@@ -1269,9 +1614,105 @@ public partial class IslandWindow : Window
         NativeMethods.SetForegroundWindow(target);
     }
 
+    public void ToggleLiveTranslate()
+    {
+        if (_shutdown) return;
+        if (LiveTranslateIsOpen)
+        {
+            StopLiveTranslate(collapseUi: true);
+            _settingsWindow?.RefreshFromIsland();
+            Nudge();
+            return;
+        }
+
+        if (CameraIsOpen)
+            ReleaseCamera(collapseUi: false);
+        _ = StartLiveTranslateAsync();
+    }
+
+    async Task StartLiveTranslateAsync()
+    {
+        StopLiveTranslate(collapseUi: false);
+        _director.SetLiveTranslate(true);
+        _liveCaptions.Reset();
+        LiveTranslateNotice.ClearSubtitle();
+        LiveTranslateNotice.ShowStatus(LiveTranslateCopy.LoadingModel, working: true, progress: null, canCancel: false);
+        Log.Info("live-translate start");
+        _livePump.Start();
+        _liveTranslate.Start();
+        Nudge();
+        await Task.CompletedTask;
+    }
+
+    void StopLiveTranslate(bool collapseUi)
+    {
+        CancelLiveTranslations();
+        _liveTranslate.Stop();
+        if (_shutdown) return;
+        _liveCaptions.Reset();
+        LiveTranslateNotice.ClearSubtitle();
+        if (collapseUi && (_director.LiveTranslateOpen || _director.Mode == IslandMode.LiveTranslate))
+            _director.SetLiveTranslate(false);
+        _settingsWindow?.RefreshFromIsland();
+        Nudge();
+    }
+
+    void OnLiveTranslateStatus(LiveTranslateSnapshot snapshot)
+    {
+        if (_shutdown) return;
+        if (snapshot.Phase == LiveTranslatePhase.Off && !_director.LiveTranslateOpen)
+            return;
+        if (snapshot.Phase == LiveTranslatePhase.Listening)
+            _liveCaptions.MarkListening(DateTime.UtcNow);
+        bool working = snapshot.Phase is LiveTranslatePhase.Downloading or LiveTranslatePhase.Loading
+            or LiveTranslatePhase.Listening or LiveTranslatePhase.Recognizing;
+        var message = snapshot.Message;
+        if (snapshot.Phase == LiveTranslatePhase.Listening && _liveCaptions.HasPending)
+            message = LiveTranslateCopy.Translating;
+        LiveTranslateNotice.ShowStatus(message, working, snapshot.Progress, snapshot.CanCancel);
+        if (!_director.LiveTranslateOpen && snapshot.Phase is not LiveTranslatePhase.Off)
+            _director.SetLiveTranslate(true);
+        Nudge();
+    }
+
+    void OnLiveTranslateTranscript(int utteranceId, string text, string? language, bool final)
+    {
+        if (_shutdown || !_director.LiveTranslateOpen) return;
+        var edit = _liveCaptions.AcceptUtterance(utteranceId, text, DateTime.UtcNow, final,
+            alreadyChinese: TranslatePolicy.LooksChinese(text));
+        if (edit.Id == 0) return;
+        LiveTranslateNotice.ShowCaptions(_liveCaptions.Items);
+        if (!LiveTranslatePolicy.IsUsableTranscript(text)) { Nudge(); return; }
+        string recognized = edit.Recognized;
+        var plan = LiveTranslatePolicy.Plan(recognized,
+            LiveTranslatePolicy.IsChineseLanguage(language) && !TranslatePolicy.LooksChinese(recognized) ? null : language);
+        if (plan.Decision == LiveTranslateDecision.AlreadyChinese)
+        {
+            _livePump.Remove(edit.Id);
+            LiveTranslateNotice.ShowStatus(LiveTranslateCopy.AlreadyChinese, true, null, false); Nudge(); return;
+        }
+        if (plan.Request is not { } request) return;
+        if (!_liveCaptions.NeedsTranslation(edit.Id)) { Nudge(); return; }
+        var api = TranslateProviderSettings.Read(Settings);
+        if (!TranslateApiPolicy.IsReady(api))
+        {
+            _liveCaptions.Fail(edit.Id);
+            LiveTranslateNotice.ShowStatus(LiveTranslateCopy.ApiNotConfigured, true, null, false);
+        }
+        else
+        {
+            _livePump.Enqueue(new(edit.Id, recognized, request with { Text = recognized, Clipped = false }, api));
+            LiveTranslateNotice.ShowStatus(LiveTranslateCopy.Translating, true, null, false);
+        }
+        Nudge();
+    }
+
+    void CancelLiveTranslations() => _ = _livePump.StopAsync();
+
     async Task StartCameraAsync()
     {
         ReleaseCamera(collapseUi: false);
+        StopLiveTranslate(collapseUi: false);
         _director.SetCamera(true);
         CameraNotice.ShowWaiting();
         Nudge();
@@ -1575,11 +2016,12 @@ public partial class IslandWindow : Window
         if (moving)
         {
             Pill.Effect = null;
-            Pill.CacheMode = _pillCache;
+            bool glass = AppearancePolicy.ParseSkin(Settings.IslandSkin) == IslandSkin.Glass;
+            Pill.CacheMode = glass ? null : _pillCache;
         }
         else
         {
-            Pill.Effect = _pillShadow;
+            ApplySkin(AppearancePolicy.ParseSkin(Settings.IslandSkin));
             Pill.CacheMode = null;
         }
     }
@@ -1617,6 +2059,19 @@ public partial class IslandWindow : Window
 
         _gliding = false;
         SyncLoops();
+    }
+
+    void SyncCaptureAffinity()
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero)
+        {
+            _refraction.AllowLiveInterior = false;
+            return;
+        }
+        bool glass = !_shutdown && AppearancePolicy.ParseSkin(Settings.IslandSkin) == IslandSkin.Glass;
+        bool enabled = GlassCaptureAffinity.TrySet(hwnd, glass);
+        _refraction.AllowLiveInterior = enabled;
     }
 
     static void ApplyChrome(IntPtr hwnd)
