@@ -1052,7 +1052,7 @@ public partial class IslandWindow : Window
         if (GlassWork.ShouldCapture(moving, resizing, age, _refraction.CaptureInFlight) &&
             _refraction.TryBeginCapture(pillLeft, pillTop, pillWidth, pillHeight, visualLeft, visualTop, visualW, visualH, radius * dpi, dpi))
             _lastCaptureUtc = DateTime.UtcNow;
-        if (_refraction.TryPresent(pillWidth, pillHeight, radius * dpi, _liquid, moving, dpi, visualLeft, visualTop, visualW / (double)pillWidth, visualH / (double)pillHeight, optics))
+        if (_refraction.TryPresent(pillWidth, pillHeight, radius * dpi, _liquid, moving || resizing, dpi, visualLeft, visualTop, visualW / (double)pillWidth, visualH / (double)pillHeight, optics))
             GlassSkin.UpdateRefraction(this, _refraction.Image, _refraction.Shade, _refraction.GpuImage);
 
     }

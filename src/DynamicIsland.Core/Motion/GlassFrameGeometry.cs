@@ -11,8 +11,8 @@ public readonly record struct GlassFrameGeometry(int Width, int Height, int Left
     public const double MaxResampleAgeMs = 350;
     public const double RimGuardPx = 12;
 
-    /// <summary>拖动时水滴形变会让缩放每帧变动，尺寸判定跟着放宽，不然位图会被反复撤下。</summary>
-    public const double MovingSizeTolerancePx = 16;
+    /// <summary>拖动和展开时尺寸每帧都在变，判定跟着放宽，不然位图会被反复撤下。</summary>
+    public const double MovingSizeTolerancePx = 32;
 
     public bool Matches(GlassFrameGeometry other, double tolerance = SizeTolerancePx) =>
         MatchesSize(other, tolerance)
@@ -34,9 +34,9 @@ public readonly record struct GlassFrameGeometry(int Width, int Height, int Left
     /// 拖动时水滴缩放的细微变化交给 Image 的 Stretch 吸收——把渲染分辨率差当作"该换帧"，
     /// 会让玻璃在拖动中反复消失再出现，那正是抽动和闪烁的来源。
     /// </summary>
-    public static bool ShouldKeepDisplayedBitmap(GlassFrameGeometry shown, GlassFrameGeometry view, double dpi)
+    public static bool ShouldKeepDisplayedBitmap(GlassFrameGeometry shown, GlassFrameGeometry view, double dpi, bool moving = false)
     {
-        double tolerance = SizeTolerancePx * Math.Max(0.5, dpi);
+        double tolerance = (moving ? MovingSizeTolerancePx : SizeTolerancePx) * Math.Max(0.5, dpi);
         return Math.Abs(shown.Width - view.Width) <= tolerance
             && Math.Abs(shown.Height - view.Height) <= tolerance;
     }

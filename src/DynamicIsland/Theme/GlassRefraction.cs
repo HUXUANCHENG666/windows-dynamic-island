@@ -61,7 +61,7 @@ sealed class GlassRefractionBuffer : IDisposable, IAsyncDisposable
         }
         bool updated = false;
         // 只在输出尺寸会对旧位图明显拉伸时撤下；快拖造成的位移/帧龄绝不能把玻璃关成全透明。
-        if (_visible && _bitmap != null && !GlassFrameGeometry.ShouldKeepDisplayedBitmap(_shown, _view, dpi))
+        if (_visible && _bitmap != null && !GlassFrameGeometry.ShouldKeepDisplayedBitmap(_shown, _view, dpi, _moving))
         { _visible = false; updated = true; }
         updated |= PresentReady();
         lock (_gate)

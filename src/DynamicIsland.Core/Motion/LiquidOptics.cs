@@ -111,13 +111,19 @@ public sealed class LiquidOptics
         sy = y - optics.LagY + strainY + slopeY / (1 + Math.Abs(slopeY)) * InteriorSlopeWarp * dpi;
     }
 
+    /// <summary>
+    /// 静止时的基础内部折射。原来是 0，导致边缘那圈折射衰减完就没内容了，
+    /// 边缘和中间之间留出一道完全平的缝。留一点底，越靠边缘越强，中心最淡。
+    /// </summary>
+    public const double StaticStrength = 0.30;
+
     public static bool TryMapInterior(
         double x, double y, double width, double height, int pad, double radius, double dpi,
         LiquidOpticsFrame optics, double slopeX, double slopeY, double surface,
         out double u, out double v, out double alpha, bool liveInterior = false)
     {
         u = v = alpha = 0;
-        if (!optics.IsActive || width < 2 || height < 2 || pad < 4)
+        if (width < 2 || height < 2 || pad < 4)
             return false;
         if (radius < 0)
             radius = Math.Min(width, height) * 0.5;
@@ -125,6 +131,12 @@ public sealed class LiquidOptics
         double d = IslandOutline.SignedDistance(x, y, width, height, radius);
         double band = IslandOutline.RimBand(width, height, dpi);
         if (d >= -band)
+            return false;
+
+        // 边缘一侧接近 1，往内 2.4 个带宽处降到 0.30，中心仍有很淡的一层。
+        double falloff = IslandOutline.Smootherstep(-band * 2.4, -band, d);
+        double strength = Math.Max(optics.Strength, StaticStrength * (0.30 + 0.70 * falloff));
+        if (strength <= 0.01)
             return false;
 
         DisplacedUv(x, y, width, height, dpi, optics, slopeX, slopeY, out double sx, out double sy);
@@ -137,7 +149,7 @@ public sealed class LiquidOptics
             return false; // 挖洞回退时不取岛内像素（包括误留下的颜色）。
         double cap = sampleInside ? InteriorLiveAlpha : InteriorAlpha;
         double near = IslandOutline.Smootherstep(-band - 4 * dpi, -band + 2 * dpi, d);
-        alpha = optics.Strength * (0.42 + 0.28 * Math.Clamp(Math.Abs(surface), 0, 1))
+        alpha = strength * (0.42 + 0.28 * Math.Clamp(Math.Abs(surface), 0, 1))
             * (1 - 0.35 * near) * (cap / 0.50);
         alpha = Math.Clamp(alpha, 0, cap);
         return alpha > 0.01;
