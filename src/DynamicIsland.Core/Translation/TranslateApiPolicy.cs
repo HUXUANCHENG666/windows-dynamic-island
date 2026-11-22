@@ -28,8 +28,12 @@ public static class TranslateApiPolicy
 {
     public const string DefaultSetting = "default";
     public const string CustomSetting = "custom";
-    public const int CustomTimeoutSeconds = 15;
-    public const string SystemPrompt = "把用户给出的文本译成简体中文。只返回译文，不要解释，不要加引号。";
+    public const int CustomTimeoutSeconds = 30;
+    /// <summary>
+    /// 用英文写：实测 deepseek-flash 会忽略中文 system prompt，把句子当问题去解释，
+    /// 于是岛上出现的是一段说明而不是译文。英文指令能被遵守。
+    /// </summary>
+    public const string SystemPrompt = "You are a translation engine. Translate the user text into Simplified Chinese. Return only the translation: no explanation, no original text, no quotes, no notes.";
 
     static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -100,16 +104,20 @@ public static class TranslateApiPolicy
         return true;
     }
 
-    public static string ChatCompletionsBody(string model, string text, string? target = null)
+    public static string ChatCompletionsBody(string model, string text, string? target = null, bool disableThinking = false)
     {
         var payload = new ChatRequest(
             model.Trim(),
             0,
+            // 译文长度大约是原文的两倍，封顶避免模型啰嗦导致响应慢。
+            Math.Clamp(text.Length * 2 + 64, 128, 2048),
             new[]
             {
                 new ChatMessage("system", target?.StartsWith("en", StringComparison.OrdinalIgnoreCase) == true ? "Translate the user text into English. Return only the translation, without explanation or quotation marks." : SystemPrompt),
                 new ChatMessage("user", text)
-            });
+            },
+            // DeepSeek 默认带思考模式，字幕翻译不需要，关掉能快一个数量级。
+            disableThinking ? new ThinkingOption("disabled") : null);
         return JsonSerializer.Serialize(payload, JsonOptions);
     }
 
@@ -148,7 +156,11 @@ public static class TranslateApiPolicy
     sealed record ChatRequest(
         [property: JsonPropertyName("model")] string Model,
         [property: JsonPropertyName("temperature")] int Temperature,
-        [property: JsonPropertyName("messages")] ChatMessage[] Messages);
+        [property: JsonPropertyName("max_tokens")] int MaxTokens,
+        [property: JsonPropertyName("messages")] ChatMessage[] Messages,
+        [property: JsonPropertyName("thinking")] ThinkingOption? Thinking = null);
+
+    sealed record ThinkingOption([property: JsonPropertyName("type")] string Type);
 
     sealed record ChatMessage(
         [property: JsonPropertyName("role")] string Role,

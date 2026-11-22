@@ -779,7 +779,8 @@ public class LiveTranslateTests
         var body = TranslateApiPolicy.ChatCompletionsBody("demo-model", "Hello world");
         Assert.Contains("demo-model", body, StringComparison.Ordinal);
         Assert.Contains("Hello world", body, StringComparison.Ordinal);
-        Assert.Contains("简体中文", body, StringComparison.Ordinal);
+        // 提示词用英文：deepseek-flash 会忽略中文 system prompt，把句子当问题去解释。
+        Assert.Contains("Simplified Chinese", body, StringComparison.Ordinal);
         Assert.DoesNotContain("secret", body, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Authorization", body, StringComparison.OrdinalIgnoreCase);
         Assert.Equal("早上好", TranslateApiPolicy.ReadChatCompletion("""{"choices":[{"message":{"content":"早上好"}}]}"""));

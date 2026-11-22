@@ -13,7 +13,7 @@ public sealed class TranslationClient : IDisposable
     public TranslationClient(HttpMessageHandler? handler = null)
     {
         _http = handler == null ? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) : new HttpClient(handler);
-        _http.Timeout = TimeSpan.FromSeconds(20);
+        _http.Timeout = TimeSpan.FromSeconds(35);
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("DynamicIsland/1.0");
     }
     public async Task<string> TranslateAsync(TranslateRequest request, TranslateApiOptions api, CancellationToken cancellation)
@@ -39,7 +39,9 @@ public sealed class TranslationClient : IDisposable
         lock (_gate) if (_cooldowns.TryGetValue(api.Kind, out var until) && until > DateTimeOffset.UtcNow)
             throw new InvalidOperationException("翻译源限流或额度不足，请稍后再试；原文已保留。");
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
-        timeout.CancelAfter(TimeSpan.FromSeconds(12));
+        // 自定义接口背后多半是大模型，首包比 MyMemory 慢得多，用统一的 12 秒会误判成超时。
+        int limitSeconds = api.Kind == TranslateApiKind.Custom ? TranslateApiPolicy.CustomTimeoutSeconds : 12;
+        timeout.CancelAfter(TimeSpan.FromSeconds(limitSeconds));
         try
         {
             using var message = Build(request, api);
@@ -109,7 +111,8 @@ public sealed class TranslationClient : IDisposable
                 return deepl;
             case TranslateApiKind.Custom:
                 TranslateApiPolicy.TryNormalizeEndpoint(api.BaseUrl, out var url, out _);
-                var custom = new HttpRequestMessage(HttpMethod.Post, url) { Content = new StringContent(TranslateApiPolicy.ChatCompletionsBody(api.Model!, request.Text, request.Target), Encoding.UTF8, "application/json") };
+                bool deepseek = url.Contains("deepseek", StringComparison.OrdinalIgnoreCase);
+                var custom = new HttpRequestMessage(HttpMethod.Post, url) { Content = new StringContent(TranslateApiPolicy.ChatCompletionsBody(api.Model!, request.Text, request.Target, deepseek), Encoding.UTF8, "application/json") };
                 custom.Headers.Authorization = new AuthenticationHeaderValue("Bearer", api.ApiKey!.Trim()); return custom;
             default:
                 return new(HttpMethod.Get, "https://api.mymemory.translated.net/get?q=" + Uri.EscapeDataString(request.Text) + "&langpair=" + Uri.EscapeDataString(request.Source + "|" + request.Target));
