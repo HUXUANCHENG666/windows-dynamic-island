@@ -78,7 +78,7 @@ public sealed class LiveTranslationPump
                 catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
                 catch (Exception ex)
                 {
-                    Diagnostic?.Invoke(ex.GetType().Name); // no request, endpoint, transcript or key
+                    Diagnostic?.Invoke(ex is InvalidOperationException ? "translate: " + ex.Message : ex.GetType().Name); // 只带我们自己写的提示，不含请求、端点、转写或密钥
                     _post(() => { if (_owner.IsCurrent(epoch)) Failed?.Invoke(work); });
                 }
                 finally { lock (_gate) _activeWork = null; }

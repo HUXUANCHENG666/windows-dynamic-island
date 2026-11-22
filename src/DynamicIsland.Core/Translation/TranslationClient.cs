@@ -50,7 +50,20 @@ public sealed class TranslationClient : IDisposable
                     ?? (response.Headers.RetryAfter?.Date - DateTimeOffset.UtcNow)?.TotalSeconds ?? ((int)response.StatusCode == 456 ? 300 : 10);
                 lock (_gate) _cooldowns[api.Kind] = DateTimeOffset.UtcNow.AddSeconds(Math.Clamp(seconds, 1, 300));
             }
-            if (!response.IsSuccessStatusCode) throw new InvalidOperationException("翻译源请求失败或额度不足；原文与已有译文已保留。");
+            if (!response.IsSuccessStatusCode)
+            {
+                // 把所有非 2xx 都归成"请求失败"会让用户没法判断是密钥、模型名还是额度问题。
+                int code = (int)response.StatusCode;
+                string hint = code switch
+                {
+                    400 => "请求被拒绝：多半是模型名不对，或该接口不接受当前参数。",
+                    401 or 403 => "API 密钥无效或没有权限。",
+                    404 => "接口地址或模型不存在，检查地址和模型名。",
+                    429 => "额度不足或请求过于频繁。",
+                    _ => "翻译源请求失败；原文与已有译文已保留。"
+                };
+                throw new InvalidOperationException(hint + $"（HTTP {code}）");
+            }
             string body = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
             if (api.Kind == TranslateApiKind.Default)
             {

@@ -187,7 +187,12 @@ public partial class IslandWindow : Window
             LiveTranslateNotice.ShowCaptions(_liveCaptions.Items);
             LiveTranslateNotice.ShowStatus("翻译暂不可用；原文与已有译文已保留。", true, null, false);
         };
-        _livePump.Diagnostic += type => Log.Info($"live-translate request type={type}");
+        _livePump.Diagnostic += message =>
+        {
+            Log.Info($"live-translate request {message}");
+            if (message.StartsWith("translate: ", StringComparison.Ordinal))
+                ShowTranslateFault(message["translate: ".Length..]);
+        };
         _liveTranslate = new LiveTranslateService(Dispatcher);
         _liveTranslate.Status += OnLiveTranslateStatus;
         _liveTranslate.Transcript += OnLiveTranslateTranscript;
@@ -263,6 +268,19 @@ public partial class IslandWindow : Window
     {
         _director.TrayClick(DateTime.UtcNow);
         Nudge();
+    }
+
+    DateTime _lastTranslateFault;
+
+    /// <summary>翻译失败时在岛上说一句，省得用户去翻日志；十秒内只提示一次。</summary>
+    void ShowTranslateFault(string message)
+    {
+        var now = DateTime.UtcNow;
+        if (now - _lastTranslateFault < TimeSpan.FromSeconds(10))
+            return;
+        _lastTranslateFault = now;
+        string shortText = message.Length > 30 ? message[..30] + "…" : message;
+        ShowToast("翻译没成", shortText);
     }
 
     public void ShowToast(string title, string body, TimeSpan? hold = null)
