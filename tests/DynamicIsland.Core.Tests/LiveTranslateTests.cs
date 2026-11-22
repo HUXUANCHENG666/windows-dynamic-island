@@ -448,9 +448,9 @@ public class LiveTranslateTests
         Assert.True(horizontal.Radius > 0);
         Assert.True(vertical.Radius > 0);
         Assert.Equal(424, IslandMetrics.LiveTranslateW);
-        Assert.Equal(236, IslandMetrics.LiveTranslateH);
+        Assert.Equal(300, IslandMetrics.LiveTranslateH);
         Assert.Equal(228, IslandMetrics.VLiveTranslateW);
-        Assert.Equal(400, IslandMetrics.VLiveTranslateH);
+        Assert.Equal(460, IslandMetrics.VLiveTranslateH);
         Assert.True(horizontal.Width * LiquidDrag.MaxStretch + 8 <= IslandMetrics.WindowWidth);
         Assert.True(horizontal.Height * LiquidDrag.MaxStretch + IslandMetrics.TopMargin + 8 <= IslandMetrics.WindowHeight);
         Assert.True(vertical.Width * LiquidDrag.MaxStretch + 8 <= IslandMetrics.VerticalWindowWidth);
